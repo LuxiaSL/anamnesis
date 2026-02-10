@@ -63,11 +63,16 @@ def format_prompt(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    input_ids = loaded.tokenizer.apply_chat_template(
+    result = loaded.tokenizer.apply_chat_template(
         messages,
         add_generation_prompt=True,
         return_tensors="pt",
     )
+    # apply_chat_template may return a tensor directly or a BatchEncoding
+    if isinstance(result, torch.Tensor):
+        input_ids = result
+    else:
+        input_ids = result["input_ids"]
     prompt_length = input_ids.shape[1]
     device = next(loaded.model.parameters()).device
     input_ids = input_ids.to(device)
