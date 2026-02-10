@@ -212,9 +212,9 @@ def _convert_outputs_to_raw(
             layers.append(l_tensor[0, -1].cpu().float().numpy())
         hidden_states_list.append(np.stack(layers))  # [num_layers+1, hidden_dim]
 
-    # Attentions: for each generation step
+    # Attentions: for each generation step (skip prefill at index 0)
     attentions_list: list[F32] = []
-    for t in range(len(outputs.attentions)):
+    for t in range(1, len(outputs.attentions)):
         # outputs.attentions[t] is a tuple of num_layers tensors
         # Each: [1, num_heads, 1, current_seq_len] → [num_heads, current_seq_len]
         layers = []
@@ -222,13 +222,15 @@ def _convert_outputs_to_raw(
             layers.append(l_tensor[0, :, -1, :].cpu().float().numpy())
         attentions_list.append(np.stack(layers))  # [num_layers, num_heads, seq_len]
 
-    # Logits: outputs.logits is a tuple of T tensors, each [1, vocab_size]
+    # Logits: skip prefill at index 0 (same convention as hidden_states/attentions)
     logits_list: list[F32] = []
-    for t in range(len(outputs.logits)):
+    for t in range(1, len(outputs.logits)):
         logits_list.append(outputs.logits[t][0].cpu().float().numpy())
 
-    # Chosen token IDs (the generated sequence, excluding prompt)
-    chosen_ids = outputs.sequences[0, prompt_length:].cpu().numpy().astype(np.float32)
+    # Chosen token IDs — skip first gen token to align with post-prefill lists.
+    # logits_list[t] predicted chosen_ids[t], hidden_states_list[t] is the state
+    # when generating chosen_ids[t].
+    chosen_ids = outputs.sequences[0, prompt_length + 1:].cpu().numpy().astype(np.float32)
 
     # Pre-RoPE keys from hooks
     pre_rope_keys: dict[int, list[F32]] = {}
