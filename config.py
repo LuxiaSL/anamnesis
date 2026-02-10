@@ -41,10 +41,16 @@ class ModelConfig(BaseModel):
 class GenerationConfig(BaseModel):
     """Parameters for model.generate()."""
 
-    max_new_tokens: int = 300
+    max_new_tokens: int = 512
     temperature: float = 0.7
     top_p: float = 0.9
     do_sample: bool = True
+
+    # Llama 3.2 Instruct stop tokens: <|eot_id|> (end-of-turn) + <|end_of_text|>
+    eos_token_ids: list[int] = Field(
+        default=[128001, 128009],
+        description="Token IDs that signal end of generation",
+    )
 
     # These MUST be True for extraction
     output_hidden_states: bool = True
@@ -103,7 +109,7 @@ class CalibrationConfig(BaseModel):
     """Settings for positional decomposition calibration."""
 
     num_calibration_prompts: int = 50
-    calibration_max_tokens: int = 300
+    calibration_max_tokens: int = 512
     positional_means_path: Path = Field(
         default=OUTPUTS_DIR / "positional_means.npz",
     )

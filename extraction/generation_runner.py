@@ -42,9 +42,13 @@ logger = logging.getLogger(__name__)
 F32 = NDArray[np.float32]
 
 
-def make_seed(topic_idx: int, mode_idx: int, rep_idx: int = 0) -> int:
-    """Deterministic seed from generation coordinates."""
-    raw = f"{topic_idx}_{mode_idx}_{rep_idx}"
+def make_seed(topic_idx: int, mode_idx: int, rep_idx: int = 0, prompt_set: str = "A") -> int:
+    """Deterministic seed from generation coordinates.
+
+    Includes prompt_set to prevent Set A and Set C from sharing seeds
+    when topic/mode/rep match (Set A defaults to rep=0, Set C starts at rep=0).
+    """
+    raw = f"{prompt_set}_{topic_idx}_{mode_idx}_{rep_idx}"
     return int(hashlib.sha256(raw.encode()).hexdigest()[:8], 16)
 
 
@@ -117,6 +121,7 @@ def run_single_generation(
             temperature=gen_config.temperature,
             top_p=gen_config.top_p,
             do_sample=gen_config.do_sample,
+            eos_token_id=gen_config.eos_token_ids,
             output_hidden_states=gen_config.output_hidden_states,
             output_attentions=gen_config.output_attentions,
             output_logits=gen_config.output_logits,
@@ -326,7 +331,7 @@ def build_generation_specs(config: ExperimentConfig) -> list[GenerationSpec]:
                 mode_idx=mode_idx,
                 system_prompt=PROCESSING_MODES[mode],
                 user_prompt=template.format(topic=topic),
-                seed=make_seed(topic_idx, mode_idx),
+                seed=make_seed(topic_idx, mode_idx, prompt_set="A"),
             ))
             gen_id += 1
 
@@ -343,7 +348,7 @@ def build_generation_specs(config: ExperimentConfig) -> list[GenerationSpec]:
                 mode_idx=mode_idx,
                 system_prompt=PROCESSING_MODES[mode],
                 user_prompt=template.format(topic=topic),
-                seed=make_seed(topic_idx, mode_idx),
+                seed=make_seed(topic_idx, mode_idx, prompt_set="B"),
             ))
             gen_id += 1
 
@@ -363,7 +368,7 @@ def build_generation_specs(config: ExperimentConfig) -> list[GenerationSpec]:
                 mode_idx=mode_idx,
                 system_prompt=PROCESSING_MODES[mode],
                 user_prompt=template.format(topic=topic),
-                seed=make_seed(topic_idx, mode_idx, rep),
+                seed=make_seed(topic_idx, mode_idx, rep, prompt_set="C"),
                 repetition=rep,
             ))
             gen_id += 1
@@ -381,7 +386,7 @@ def build_generation_specs(config: ExperimentConfig) -> list[GenerationSpec]:
             mode_idx=d_mode_idx,
             system_prompt=PROCESSING_MODES[d_mode],
             user_prompt=question,
-            seed=make_seed(100 + q_idx, d_mode_idx),
+            seed=make_seed(100 + q_idx, d_mode_idx, prompt_set="D"),
         ))
         gen_id += 1
 
@@ -395,7 +400,7 @@ def build_generation_specs(config: ExperimentConfig) -> list[GenerationSpec]:
             mode_idx=d_mode_idx,
             system_prompt=PROCESSING_MODES[d_mode],
             user_prompt=question,
-            seed=make_seed(200 + q_idx, d_mode_idx),
+            seed=make_seed(200 + q_idx, d_mode_idx, prompt_set="D"),
         ))
         gen_id += 1
 

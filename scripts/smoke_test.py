@@ -65,6 +65,7 @@ def main() -> None:
             temperature=0.7,
             top_p=0.9,
             do_sample=True,
+            eos_token_id=config.generation.eos_token_ids,
             output_hidden_states=True,
             output_attentions=True,
             output_logits=True,

@@ -87,6 +87,7 @@ def main() -> None:
     from analysis.clustering import analyze_clustering
     from analysis.retrieval_test import analyze_retrieval
     from analysis.feature_importance import analyze_feature_importance
+    from analysis.deep_dive import run_deep_dive
 
     results: dict = {"experiment": {"total_generations": len(signatures)}}
 
@@ -175,6 +176,19 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Feature importance analysis failed: {e}", exc_info=True)
         results["feature_importance"] = {"error": str(e)}
+
+    # ── Step 7: Deep Dive Analyses ──
+    logger.info("=== Deep Dive Analyses ===")
+    try:
+        deep_dive_results = run_deep_dive(
+            signatures, metadata_list, config,
+            noise_floor_results=results.get("noise_floor"),
+            feature_importance_results=results.get("feature_importance"),
+        )
+        results["deep_dive"] = deep_dive_results
+    except Exception as e:
+        logger.error(f"Deep dive analysis failed: {e}", exc_info=True)
+        results["deep_dive"] = {"error": str(e)}
 
     # ── GO/NO-GO Decision ──
     results["decision"] = make_decision(results)
