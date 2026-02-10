@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+
+# Outputs (large — signatures are ~MB each, figures regenerable)
+outputs/signatures/
+outputs/figures/
+outputs/positional_means.npz
+outputs/pca_model.pkl
+outputs/metadata.json
+outputs/results.json
+
+# Notebooks
+notebooks/.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# HuggingFace cache
+.cache/

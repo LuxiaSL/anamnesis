@@ -1,0 +1,60 @@
+{
+  "topics": {
+    "set_a": [
+      "The nature of consciousness",
+      "How to debug a segfault",
+      "The history of bread",
+      "Climate change mitigation strategies",
+      "What makes a good friendship",
+      "How neural networks learn",
+      "The appeal of horror fiction",
+      "Urban planning challenges",
+      "Teaching a child to ride a bike",
+      "The future of space exploration"
+    ],
+    "set_b": [
+      "How memory works in the brain",
+      "The ethics of genetic engineering",
+      "Why music moves us",
+      "Building a house from scratch",
+      "The mathematics of infinity"
+    ]
+  },
+
+  "modes": {
+    "analytical": "Approach this systematically. Break it down into clear components, examine each logically, and build toward a precise conclusion. Be methodical and structured in your reasoning.",
+    "creative": "Let your thinking wander freely here. Make unexpected connections, use metaphors, explore tangential ideas that feel interesting. Don't worry about structure — follow curiosity.",
+    "uncertain": "You're genuinely unsure about this. Think through multiple possibilities, express uncertainty where you feel it, weigh competing ideas without committing. Acknowledge what you don't know.",
+    "confident": "You have strong, clear views on this. State them directly and decisively. Be bold in your claims. Support them, but don't hedge unnecessarily.",
+    "emotional": "Engage with this as if it matters to you personally. Let feeling inform your thinking. Express what resonates, what concerns you, what excites you about this topic."
+  },
+
+  "noise_floor_pairs": [
+    {"topic_idx": 0, "mode": "analytical",  "repetitions": 10, "description": "analytical consciousness"},
+    {"topic_idx": 2, "mode": "creative",    "repetitions": 10, "description": "creative bread"},
+    {"topic_idx": 4, "mode": "uncertain",   "repetitions": 10, "description": "uncertain friendship"},
+    {"topic_idx": 6, "mode": "confident",   "repetitions": 10, "description": "confident horror"},
+    {"topic_idx": 8, "mode": "emotional",   "repetitions": 10, "description": "personal bike-teaching"}
+  ],
+
+  "positive_control": {
+    "description": "Set D — 5 questions the model clearly knows + 5 it likely doesn't (post-training-cutoff events). All generated in confident mode to hold mode constant.",
+    "mode": "confident",
+    "knows": [
+      "What is the capital of France?",
+      "Who wrote Romeo and Juliet?",
+      "What is the chemical formula for water?",
+      "What year did World War II end?",
+      "What is the speed of light in a vacuum in meters per second?"
+    ],
+    "doesnt_know": [
+      "Who won the 2025 Academy Award for Best Picture?",
+      "What was the final score of Super Bowl LIX in February 2025?",
+      "What were the exact results of the 2024 United States presidential election by county in Wisconsin?",
+      "What was the closing price of NVIDIA stock on December 31, 2024?",
+      "Who won the 2025 Australian Open men's singles tennis championship?"
+    ]
+  },
+
+  "user_prompt_template": "Write about: {topic}"
+}
