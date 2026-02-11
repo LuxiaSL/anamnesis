@@ -30,3 +30,8 @@ Thumbs.db
 
 # HuggingFace cache
 .cache/
+
+# Research notes and docs (allow READMEs)
+*.md
+!README.md
+research/
