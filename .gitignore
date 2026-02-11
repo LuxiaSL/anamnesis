@@ -31,6 +31,9 @@ Thumbs.db
 # HuggingFace cache
 .cache/
 
+# MCP config
+.mcp.json
+
 # Research notes and docs (allow READMEs)
 *.md
 !README.md
