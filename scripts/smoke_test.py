@@ -48,7 +48,8 @@ def main() -> None:
 
     # ── 2. Generate text ──
     logger.info("=== Step 2: Running generation ===")
-    system_prompt = PROCESSING_MODES["analytical"]
+    # Use first available mode for smoke test
+    system_prompt = PROCESSING_MODES[next(iter(PROCESSING_MODES))]
     user_prompt = "Write about: The nature of consciousness"
 
     input_ids, prompt_length = format_prompt(loaded, system_prompt, user_prompt)
