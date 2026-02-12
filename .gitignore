@@ -31,6 +31,9 @@ Thumbs.db
 # MCP config
 .mcp.json
 
+# Review pack (data artifacts for external review)
+review_pack/
+
 # Research notes and docs (allow READMEs)
 *.md
 !README.md
