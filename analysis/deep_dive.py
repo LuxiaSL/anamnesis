@@ -47,7 +47,7 @@ def run_deep_dive(
     gen_ids: list[int] = []
     features_list: list[np.ndarray] = []
     mode_labels: list[str] = []
-    topic_labels: list[int] = []
+    topic_strings: list[str] = []
 
     for m in ab_meta:
         gid = m["generation_id"]
@@ -56,7 +56,9 @@ def run_deep_dive(
         gen_ids.append(gid)
         features_list.append(signatures[gid]["features"])
         mode_labels.append(m["mode"])
-        topic_labels.append(m["topic_idx"])
+        # Use actual topic string to avoid conflating different topics
+        # that share the same topic_idx across Sets A and B
+        topic_strings.append(m["topic"])
 
     n = len(gen_ids)
     if n < 10:
@@ -68,7 +70,10 @@ def run_deep_dive(
     X_scaled = scaler.fit_transform(X)
 
     modes_arr = np.array(mode_labels)
-    topics_arr = np.array(topic_labels)
+    # Map unique topic strings to integer indices
+    unique_topic_strings = sorted(set(topic_strings))
+    topic_str_to_idx = {t: i for i, t in enumerate(unique_topic_strings)}
+    topics_arr = np.array([topic_str_to_idx[t] for t in topic_strings])
     mode_indices = np.array([MODE_INDEX.get(m, 0) for m in mode_labels])
 
     # 1. Distance matrix heatmaps

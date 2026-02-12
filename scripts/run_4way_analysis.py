@@ -79,7 +79,7 @@ def run_4way_analysis() -> dict:
     gen_ids = []
     features_list = []
     mode_labels = []
-    topic_labels = []
+    topic_strings = []
     feature_names = None
 
     for m in ab_meta:
@@ -89,7 +89,9 @@ def run_4way_analysis() -> dict:
         gen_ids.append(gid)
         features_list.append(signatures[gid]["features"])
         mode_labels.append(m["mode"])
-        topic_labels.append(m["topic_idx"])
+        # Use actual topic string to avoid conflating different topics
+        # that share the same topic_idx across Sets A and B
+        topic_strings.append(m["topic"])
         if feature_names is None:
             feature_names = signatures[gid].get("feature_names", [])
 
@@ -136,8 +138,10 @@ def run_4way_analysis() -> dict:
     results["mode_silhouette"] = mode_sil
     logger.info(f"Mode silhouette (4-way): {mode_sil:.4f}")
 
-    # Topic silhouette (need enough topics)
-    topics_arr = np.array(topic_labels)
+    # Topic silhouette — use unique topic strings mapped to integers
+    unique_topic_strings = sorted(set(topic_strings))
+    topic_str_to_idx = {t: i for i, t in enumerate(unique_topic_strings)}
+    topics_arr = np.array([topic_str_to_idx[t] for t in topic_strings])
     try:
         topic_sil = float(silhouette_score(X_scaled, topics_arr, metric="cosine"))
         results["topic_silhouette"] = topic_sil

@@ -53,7 +53,7 @@ def analyze_retrieval(
         comp_features.append(signatures[gid]["features"])
         texts.append(m["generated_text"])
         modes.append(m["mode"])
-        topics.append(m["topic_idx"])
+        topics.append(m["topic"])
         knnlm = signatures[gid].get("knnlm_baseline")
         if knnlm is not None:
             knnlm_features.append(knnlm)
@@ -158,12 +158,12 @@ def analyze_retrieval(
                 comp_unique_cases.append({
                     "query_id": int(gen_ids[i]),
                     "query_mode": modes[i],
-                    "query_topic": int(topics[i]),
+                    "query_topic": topics[i],
                     "comp_unique_neighbors": [
                         {
                             "id": int(gen_ids[j]),
                             "mode": modes[j],
-                            "topic": int(topics[j]),
+                            "topic": topics[j],
                             "same_mode": modes[j] == modes[i],
                         }
                         for j in comp_only

@@ -40,7 +40,7 @@ def analyze_clustering(
     gen_ids = []
     features_list = []
     mode_labels = []
-    topic_labels = []
+    topic_strings = []
 
     for m in ab_meta:
         gid = m["generation_id"]
@@ -49,7 +49,9 @@ def analyze_clustering(
         gen_ids.append(gid)
         features_list.append(signatures[gid]["features"])
         mode_labels.append(m["mode"])
-        topic_labels.append(m["topic_idx"])
+        # Use actual topic string to avoid conflating different topics
+        # that share the same topic_idx across Sets A and B
+        topic_strings.append(m["topic"])
 
     n = len(gen_ids)
     if n < 10:
@@ -63,7 +65,10 @@ def analyze_clustering(
     X_scaled = scaler.fit_transform(X)
 
     mode_indices = np.array([MODE_INDEX.get(m, 0) for m in mode_labels])
-    topic_indices = np.array(topic_labels)
+    # Map unique topic strings to integer indices for silhouette computation
+    unique_topic_strings = sorted(set(topic_strings))
+    topic_str_to_idx = {t: i for i, t in enumerate(unique_topic_strings)}
+    topic_indices = np.array([topic_str_to_idx[t] for t in topic_strings])
 
     results: dict[str, Any] = {"n_generations": n}
 
