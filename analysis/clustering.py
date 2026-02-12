@@ -22,13 +22,7 @@ from config import ExperimentConfig, MODE_INDEX
 logger = logging.getLogger(__name__)
 
 # Mode markers for visualization
-MODE_MARKERS = {
-    "analytical": "o",
-    "creative": "s",
-    "uncertain": "^",
-    "confident": "D",
-    "emotional": "P",
-}
+MODE_MARKERS = {m: marker for m, marker in zip(MODE_INDEX.keys(), ["o", "s", "^", "D", "P"])}
 
 
 def analyze_clustering(

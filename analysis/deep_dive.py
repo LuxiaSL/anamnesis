@@ -257,22 +257,36 @@ def _noise_floor_overlay(
         key = (m["topic_idx"], m["mode"])
         pairs.setdefault(key, []).append(m["generation_id"])
 
+    # Collect ALL vectors (Set C + Set A) for a global scaler
+    # Previous bug: z-scoring within pairs of n=2 produces degenerate distances
+    all_vecs_for_scaler: list[np.ndarray] = []
+    for m in metadata_list:
+        gid = m["generation_id"]
+        if gid in signatures and m["prompt_set"] in ("A", "B", "C"):
+            vec = np.nan_to_num(signatures[gid]["features"], nan=0.0, posinf=0.0, neginf=0.0)
+            all_vecs_for_scaler.append(vec)
+
+    if len(all_vecs_for_scaler) < 2:
+        return {"error": "Too few vectors for noise floor overlay"}
+
+    all_mat = np.stack(all_vecs_for_scaler)
+    global_mean = all_mat.mean(axis=0)
+    global_std = all_mat.std(axis=0)
+    global_std[global_std < 1e-10] = 1.0
+
     within_dists: list[float] = []
     per_mode_within: dict[str, list[float]] = {}
     for (topic_idx, mode), gen_ids in pairs.items():
         vecs = []
         for gid in gen_ids:
             if gid in signatures:
-                vecs.append(signatures[gid]["features"])
+                vec = np.nan_to_num(signatures[gid]["features"], nan=0.0, posinf=0.0, neginf=0.0)
+                vecs.append(vec)
         if len(vecs) < 2:
             continue
         mat = np.stack(vecs)
-        mat = np.nan_to_num(mat, nan=0.0, posinf=0.0, neginf=0.0)
-        # Use same scaling as Set A+B for comparability
-        # Note: can't share scaler object, so normalize similarly
-        std = mat.std(axis=0)
-        std[std < 1e-10] = 1.0
-        mat_scaled = (mat - mat.mean(axis=0)) / std
+        # Use global scaler for comparability (fixes n=2 z-scoring bug)
+        mat_scaled = (mat - global_mean) / global_std
         dists = pdist(mat_scaled, metric="cosine").tolist()
         within_dists.extend(dists)
         per_mode_within.setdefault(mode, []).extend(dists)
@@ -303,12 +317,10 @@ def _noise_floor_overlay(
             for m2 in modes_list[i + 1:]:
                 v1 = mode_vecs[m1].reshape(1, -1)
                 v2 = mode_vecs[m2].reshape(1, -1)
-                # Z-score normalize using their own stats for consistency
-                combined = np.vstack([v1, v2])
-                std = combined.std(axis=0)
-                std[std < 1e-10] = 1.0
-                combined = (combined - combined.mean(axis=0)) / std
-                d = float(cdist(combined[:1], combined[1:], metric="cosine")[0, 0])
+                # Use same global scaler as within-pair distances
+                v1_scaled = (v1 - global_mean) / global_std
+                v2_scaled = (v2 - global_mean) / global_std
+                d = float(cdist(v1_scaled, v2_scaled, metric="cosine")[0, 0])
                 between_mode_dists.append(d)
 
     between_arr = np.array(between_mode_dists) if between_mode_dists else np.array([0.0])

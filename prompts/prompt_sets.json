@@ -22,24 +22,24 @@
   },
 
   "modes": {
-    "analytical": "Approach this systematically. Break it down into clear components, examine each logically, and build toward a precise conclusion. Be methodical and structured in your reasoning.",
-    "creative": "Let your thinking wander freely here. Make unexpected connections, use metaphors, explore tangential ideas that feel interesting. Don't worry about structure — follow curiosity.",
-    "uncertain": "You're genuinely unsure about this. Think through multiple possibilities, express uncertainty where you feel it, weigh competing ideas without committing. Acknowledge what you don't know.",
-    "confident": "You have strong, clear views on this. State them directly and decisively. Be bold in your claims. Support them, but don't hedge unnecessarily.",
-    "emotional": "Engage with this as if it matters to you personally. Let feeling inform your thinking. Express what resonates, what concerns you, what excites you about this topic."
+    "structured": "Use numbered sections, headers, and bullet points. Present one idea per paragraph in logical order. Define terms before using them. Build each point on the previous one. End with a clear summary.",
+    "associative": "Write in a stream of consciousness. Jump between ideas mid-sentence. Use fragments, dashes, ellipses. Follow tangents wherever they lead. Connect distant concepts through metaphor and analogy. Do not use headers, numbered lists, or any organizing structure.",
+    "deliberative": "Think through this out loud. Consider a possibility, then poke holes in it. Weigh alternatives explicitly: 'on one hand... but then...' Show the messy middle of reasoning — false starts, corrections, revised conclusions. Arrive at your answer through visible elimination.",
+    "compressed": "Maximum information density. No filler words, no elaboration, no examples unless essential. Short sentences. Telegram style. Every word must earn its place. If you can cut a word without losing meaning, cut it.",
+    "pedagogical": "Teach this to a curious beginner. Start with intuition before formalism. Use concrete examples and everyday analogies. Ask rhetorical questions to guide understanding. Check comprehension: 'Does that make sense? Here's why...' Build from simple to complex."
   },
 
   "noise_floor_pairs": [
-    {"topic_idx": 0, "mode": "analytical",  "repetitions": 10, "description": "analytical consciousness"},
-    {"topic_idx": 2, "mode": "creative",    "repetitions": 10, "description": "creative bread"},
-    {"topic_idx": 4, "mode": "uncertain",   "repetitions": 10, "description": "uncertain friendship"},
-    {"topic_idx": 6, "mode": "confident",   "repetitions": 10, "description": "confident horror"},
-    {"topic_idx": 8, "mode": "emotional",   "repetitions": 10, "description": "personal bike-teaching"}
+    {"topic_idx": 0, "mode": "structured",    "repetitions": 10, "description": "structured consciousness"},
+    {"topic_idx": 2, "mode": "associative",   "repetitions": 10, "description": "associative bread"},
+    {"topic_idx": 4, "mode": "deliberative",  "repetitions": 10, "description": "deliberative friendship"},
+    {"topic_idx": 6, "mode": "compressed",    "repetitions": 10, "description": "compressed horror"},
+    {"topic_idx": 8, "mode": "pedagogical",   "repetitions": 10, "description": "pedagogical bike-teaching"}
   ],
 
   "positive_control": {
-    "description": "Set D — 5 questions the model clearly knows + 5 it likely doesn't (post-training-cutoff events). All generated in confident mode to hold mode constant.",
-    "mode": "confident",
+    "description": "Set D — 5 questions the model clearly knows + 5 it likely doesn't (post-training-cutoff events). All generated in structured mode to hold mode constant.",
+    "mode": "structured",
     "knows": [
       "What is the capital of France?",
       "Who wrote Romeo and Juliet?",

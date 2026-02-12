@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -11,7 +12,15 @@ from pydantic import BaseModel, Field
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+
+# Run versioning: each experiment run gets its own directory under outputs/runs/.
+# Calibration data (model-specific, not run-specific) lives in outputs/calibration/.
+# Set via ANAMNESIS_RUN_NAME env var, or defaults to the current run.
+RUN_NAME: str = os.environ.get("ANAMNESIS_RUN_NAME", "run3_process_modes")
+
+OUTPUTS_BASE = PROJECT_ROOT / "outputs"
+CALIBRATION_DIR = OUTPUTS_BASE / "calibration"
+OUTPUTS_DIR = OUTPUTS_BASE / "runs" / RUN_NAME
 SIGNATURES_DIR = OUTPUTS_DIR / "signatures"
 FIGURES_DIR = OUTPUTS_DIR / "figures"
 PROMPTS_PATH = PROJECT_ROOT / "prompts" / "prompt_sets.json"
@@ -106,62 +115,69 @@ class ExtractionConfig(BaseModel):
 # ── Calibration ────────────────────────────────────────────────────────────────
 
 class CalibrationConfig(BaseModel):
-    """Settings for positional decomposition calibration."""
+    """Settings for positional decomposition calibration.
+
+    Calibration data is model-specific (not run-specific) and shared across runs.
+    """
 
     num_calibration_prompts: int = 50
     calibration_max_tokens: int = 512
     positional_means_path: Path = Field(
-        default=OUTPUTS_DIR / "positional_means.npz",
+        default=CALIBRATION_DIR / "positional_means.npz",
     )
     pca_model_path: Path = Field(
-        default=OUTPUTS_DIR / "pca_model.pkl",
+        default=CALIBRATION_DIR / "pca_model.pkl",
     )
 
 
 # ── Experiment ─────────────────────────────────────────────────────────────────
 
 ProcessingMode = Literal[
-    "analytical",
-    "creative",
-    "uncertain",
-    "confident",
-    "emotional",
+    "structured",
+    "associative",
+    "deliberative",
+    "compressed",
+    "pedagogical",
 ]
 
 PROCESSING_MODES: dict[ProcessingMode, str] = {
-    "analytical": (
-        "Approach this systematically. Break it down into clear components, "
-        "examine each logically, and build toward a precise conclusion. "
-        "Be methodical and structured in your reasoning."
+    "structured": (
+        "Use numbered sections, headers, and bullet points. Present one idea "
+        "per paragraph in logical order. Define terms before using them. "
+        "Build each point on the previous one. End with a clear summary."
     ),
-    "creative": (
-        "Let your thinking wander freely here. Make unexpected connections, "
-        "use metaphors, explore tangential ideas that feel interesting. "
-        "Don't worry about structure — follow curiosity."
+    "associative": (
+        "Write in a stream of consciousness. Jump between ideas mid-sentence. "
+        "Use fragments, dashes, ellipses. Follow tangents wherever they lead. "
+        "Connect distant concepts through metaphor and analogy. Do not use "
+        "headers, numbered lists, or any organizing structure."
     ),
-    "uncertain": (
-        "You're genuinely unsure about this. Think through multiple "
-        "possibilities, express uncertainty where you feel it, weigh "
-        "competing ideas without committing. Acknowledge what you don't know."
+    "deliberative": (
+        "Think through this out loud. Consider a possibility, then poke holes "
+        "in it. Weigh alternatives explicitly: 'on one hand... but then...' "
+        "Show the messy middle of reasoning — false starts, corrections, "
+        "revised conclusions. Arrive at your answer through visible elimination."
     ),
-    "confident": (
-        "You have strong, clear views on this. State them directly and "
-        "decisively. Be bold in your claims. Support them, but don't "
-        "hedge unnecessarily."
+    "compressed": (
+        "Maximum information density. No filler words, no elaboration, no "
+        "examples unless essential. Short sentences. Telegram style. Every "
+        "word must earn its place. If you can cut a word without losing "
+        "meaning, cut it."
     ),
-    "emotional": (
-        "Engage with this as if it matters to you personally. Let feeling "
-        "inform your thinking. Express what resonates, what concerns you, "
-        "what excites you about this topic."
+    "pedagogical": (
+        "Teach this to a curious beginner. Start with intuition before "
+        "formalism. Use concrete examples and everyday analogies. Ask "
+        "rhetorical questions to guide understanding. Check comprehension: "
+        "'Does that make sense? Here's why...' Build from simple to complex."
     ),
 }
 
 MODE_INDEX: dict[ProcessingMode, int] = {
-    "analytical": 0,
-    "creative": 1,
-    "uncertain": 2,
-    "confident": 3,
-    "emotional": 4,
+    "structured": 0,
+    "associative": 1,
+    "deliberative": 2,
+    "compressed": 3,
+    "pedagogical": 4,
 }
 
 
@@ -206,3 +222,4 @@ class ExperimentConfig(BaseModel):
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
         self.signatures_dir.mkdir(parents=True, exist_ok=True)
         self.figures_dir.mkdir(parents=True, exist_ok=True)
+        CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)

@@ -8,12 +8,9 @@ build/
 *.egg
 
 # Outputs (large — signatures are ~MB each, figures regenerable)
-outputs/signatures/
-outputs/figures/
-outputs/positional_means.npz
-outputs/pca_model.pkl
-outputs/metadata.json
-outputs/results.json
+# Versioned structure: outputs/runs/<run_name>/ and outputs/calibration/
+outputs/runs/
+outputs/calibration/
 
 # Notebooks
 notebooks/.ipynb_checkpoints/
