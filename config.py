@@ -133,51 +133,63 @@ class CalibrationConfig(BaseModel):
 # ── Experiment ─────────────────────────────────────────────────────────────────
 
 ProcessingMode = Literal[
-    "structured",
-    "associative",
-    "deliberative",
-    "compressed",
-    "pedagogical",
+    "linear",
+    "analogical",
+    "socratic",
+    "contrastive",
+    "dialectical",
 ]
 
+# Shared format constraint appended to every mode prompt.
+# Controls for the format confound identified in Run 3: modes that differ in
+# reasoning strategy should NOT also differ in visual formatting.
+_FORMAT_CONSTRAINT = (
+    " Write in flowing paragraphs. Do not use bullet points, numbered lists, "
+    "headers, or any visual formatting structure."
+)
+
 PROCESSING_MODES: dict[ProcessingMode, str] = {
-    "structured": (
-        "Use numbered sections, headers, and bullet points. Present one idea "
-        "per paragraph in logical order. Define terms before using them. "
-        "Build each point on the previous one. End with a clear summary."
+    "linear": (
+        "Present your ideas in a clear sequence, each building on the last. "
+        "Move forward without backtracking or reconsidering previous points. "
+        "Lay out the topic step by step from beginning to end."
+        + _FORMAT_CONSTRAINT
     ),
-    "associative": (
-        "Write in a stream of consciousness. Jump between ideas mid-sentence. "
-        "Use fragments, dashes, ellipses. Follow tangents wherever they lead. "
-        "Connect distant concepts through metaphor and analogy. Do not use "
-        "headers, numbered lists, or any organizing structure."
+    "analogical": (
+        "Explain this primarily through extended analogies and parallels to "
+        "other domains. For each key concept, find a comparison from everyday "
+        "life or another field that illuminates it. Build understanding "
+        "through these connections."
+        + _FORMAT_CONSTRAINT
     ),
-    "deliberative": (
-        "Think through this out loud. Consider a possibility, then poke holes "
-        "in it. Weigh alternatives explicitly: 'on one hand... but then...' "
-        "Show the messy middle of reasoning — false starts, corrections, "
-        "revised conclusions. Arrive at your answer through visible elimination."
+    "socratic": (
+        "Develop your exploration through a sequence of questions and "
+        "provisional answers. Pose a question, offer a tentative answer, "
+        "then use that answer to generate the next question. Let the chain "
+        "of inquiry drive the explanation forward."
+        + _FORMAT_CONSTRAINT
     ),
-    "compressed": (
-        "Maximum information density. No filler words, no elaboration, no "
-        "examples unless essential. Short sentences. Telegram style. Every "
-        "word must earn its place. If you can cut a word without losing "
-        "meaning, cut it."
+    "contrastive": (
+        "Explore this by comparing and contrasting multiple perspectives or "
+        "approaches. For each major point, present at least two different "
+        "viewpoints and evaluate their relative strengths and weaknesses."
+        + _FORMAT_CONSTRAINT
     ),
-    "pedagogical": (
-        "Teach this to a curious beginner. Start with intuition before "
-        "formalism. Use concrete examples and everyday analogies. Ask "
-        "rhetorical questions to guide understanding. Check comprehension: "
-        "'Does that make sense? Here's why...' Build from simple to complex."
+    "dialectical": (
+        "Begin by proposing a clear position on the topic. Then challenge "
+        "that position with the strongest counterarguments you can find. "
+        "Work toward a revised understanding that accounts for both the "
+        "original position and its critiques."
+        + _FORMAT_CONSTRAINT
     ),
 }
 
 MODE_INDEX: dict[ProcessingMode, int] = {
-    "structured": 0,
-    "associative": 1,
-    "deliberative": 2,
-    "compressed": 3,
-    "pedagogical": 4,
+    "linear": 0,
+    "analogical": 1,
+    "socratic": 2,
+    "contrastive": 3,
+    "dialectical": 4,
 }
 
 

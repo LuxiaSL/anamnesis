@@ -373,36 +373,77 @@ def build_generation_specs(config: ExperimentConfig) -> list[GenerationSpec]:
             ))
             gen_id += 1
 
-    # Set D: 5 knows + 5 doesn't know = 10
-    d_mode = prompts["positive_control"]["mode"]
+    # Set D: context-prefix positive control
+    # Same mode, same topics. Two conditions: bare prompt vs prompt with
+    # ~500 tokens of irrelevant context prefix. Tests Tier 2.5 KV cache features.
+    pc = prompts["positive_control"]
+    d_mode = pc["mode"]
     d_mode_idx = modes.index(d_mode)
-    for q_idx, question in enumerate(prompts["positive_control"]["knows"]):
-        specs.append(GenerationSpec(
-            generation_id=gen_id,
-            prompt_set="D",
-            topic=f"knows_{q_idx}",
-            topic_idx=100 + q_idx,  # distinct namespace
-            mode=d_mode,
-            mode_idx=d_mode_idx,
-            system_prompt=PROCESSING_MODES[d_mode],
-            user_prompt=question,
-            seed=make_seed(100 + q_idx, d_mode_idx, prompt_set="D"),
-        ))
-        gen_id += 1
+    context_prefix = pc.get("context_prefix", "")
+    pc_topics = pc.get("topics", [])
 
-    for q_idx, question in enumerate(prompts["positive_control"]["doesnt_know"]):
-        specs.append(GenerationSpec(
-            generation_id=gen_id,
-            prompt_set="D",
-            topic=f"doesnt_know_{q_idx}",
-            topic_idx=200 + q_idx,
-            mode=d_mode,
-            mode_idx=d_mode_idx,
-            system_prompt=PROCESSING_MODES[d_mode],
-            user_prompt=question,
-            seed=make_seed(200 + q_idx, d_mode_idx, prompt_set="D"),
-        ))
-        gen_id += 1
+    # Support legacy format (knows/doesnt_know) for backward compatibility
+    if not pc_topics and "knows" in pc:
+        # Legacy positive control — knows vs doesn't know
+        for q_idx, question in enumerate(pc["knows"]):
+            specs.append(GenerationSpec(
+                generation_id=gen_id,
+                prompt_set="D",
+                topic=f"knows_{q_idx}",
+                topic_idx=100 + q_idx,
+                mode=d_mode,
+                mode_idx=d_mode_idx,
+                system_prompt=PROCESSING_MODES[d_mode],
+                user_prompt=question,
+                seed=make_seed(100 + q_idx, d_mode_idx, prompt_set="D"),
+            ))
+            gen_id += 1
+        for q_idx, question in enumerate(pc["doesnt_know"]):
+            specs.append(GenerationSpec(
+                generation_id=gen_id,
+                prompt_set="D",
+                topic=f"doesnt_know_{q_idx}",
+                topic_idx=200 + q_idx,
+                mode=d_mode,
+                mode_idx=d_mode_idx,
+                system_prompt=PROCESSING_MODES[d_mode],
+                user_prompt=question,
+                seed=make_seed(200 + q_idx, d_mode_idx, prompt_set="D"),
+            ))
+            gen_id += 1
+    else:
+        # Context-prefix positive control: bare vs with-context
+        for q_idx, topic in enumerate(pc_topics):
+            user_prompt = template.format(topic=topic)
+
+            # Bare condition
+            specs.append(GenerationSpec(
+                generation_id=gen_id,
+                prompt_set="D",
+                topic=f"bare_{q_idx}",
+                topic_idx=100 + q_idx,
+                mode=d_mode,
+                mode_idx=d_mode_idx,
+                system_prompt=PROCESSING_MODES[d_mode],
+                user_prompt=user_prompt,
+                seed=make_seed(100 + q_idx, d_mode_idx, prompt_set="D"),
+            ))
+            gen_id += 1
+
+            # Context-prefix condition
+            context_user_prompt = f"{context_prefix}\n\n{user_prompt}"
+            specs.append(GenerationSpec(
+                generation_id=gen_id,
+                prompt_set="D",
+                topic=f"context_{q_idx}",
+                topic_idx=200 + q_idx,
+                mode=d_mode,
+                mode_idx=d_mode_idx,
+                system_prompt=PROCESSING_MODES[d_mode],
+                user_prompt=context_user_prompt,
+                seed=make_seed(200 + q_idx, d_mode_idx, prompt_set="D"),
+            ))
+            gen_id += 1
 
     return specs
 

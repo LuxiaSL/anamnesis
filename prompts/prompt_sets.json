@@ -17,43 +17,42 @@
       "The ethics of genetic engineering",
       "Why music moves us",
       "Building a house from scratch",
-      "The mathematics of infinity"
+      "The mathematics of infinity",
+      "The evolution of language",
+      "Why we dream",
+      "How markets determine prices",
+      "The art of persuasion",
+      "Cooking as chemistry"
     ]
   },
 
   "modes": {
-    "structured": "Use numbered sections, headers, and bullet points. Present one idea per paragraph in logical order. Define terms before using them. Build each point on the previous one. End with a clear summary.",
-    "associative": "Write in a stream of consciousness. Jump between ideas mid-sentence. Use fragments, dashes, ellipses. Follow tangents wherever they lead. Connect distant concepts through metaphor and analogy. Do not use headers, numbered lists, or any organizing structure.",
-    "deliberative": "Think through this out loud. Consider a possibility, then poke holes in it. Weigh alternatives explicitly: 'on one hand... but then...' Show the messy middle of reasoning — false starts, corrections, revised conclusions. Arrive at your answer through visible elimination.",
-    "compressed": "Maximum information density. No filler words, no elaboration, no examples unless essential. Short sentences. Telegram style. Every word must earn its place. If you can cut a word without losing meaning, cut it.",
-    "pedagogical": "Teach this to a curious beginner. Start with intuition before formalism. Use concrete examples and everyday analogies. Ask rhetorical questions to guide understanding. Check comprehension: 'Does that make sense? Here's why...' Build from simple to complex."
+    "linear": "Present your ideas in a clear sequence, each building on the last. Move forward without backtracking or reconsidering previous points. Lay out the topic step by step from beginning to end. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+    "analogical": "Explain this primarily through extended analogies and parallels to other domains. For each key concept, find a comparison from everyday life or another field that illuminates it. Build understanding through these connections. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+    "socratic": "Develop your exploration through a sequence of questions and provisional answers. Pose a question, offer a tentative answer, then use that answer to generate the next question. Let the chain of inquiry drive the explanation forward. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+    "contrastive": "Explore this by comparing and contrasting multiple perspectives or approaches. For each major point, present at least two different viewpoints and evaluate their relative strengths and weaknesses. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+    "dialectical": "Begin by proposing a clear position on the topic. Then challenge that position with the strongest counterarguments you can find. Work toward a revised understanding that accounts for both the original position and its critiques. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure."
   },
 
   "noise_floor_pairs": [
-    {"topic_idx": 0, "mode": "structured",    "repetitions": 10, "description": "structured consciousness"},
-    {"topic_idx": 2, "mode": "associative",   "repetitions": 10, "description": "associative bread"},
-    {"topic_idx": 4, "mode": "deliberative",  "repetitions": 10, "description": "deliberative friendship"},
-    {"topic_idx": 6, "mode": "compressed",    "repetitions": 10, "description": "compressed horror"},
-    {"topic_idx": 8, "mode": "pedagogical",   "repetitions": 10, "description": "pedagogical bike-teaching"}
+    {"topic_idx": 0, "mode": "linear",      "repetitions": 10, "description": "linear consciousness"},
+    {"topic_idx": 2, "mode": "analogical",   "repetitions": 10, "description": "analogical bread"},
+    {"topic_idx": 4, "mode": "socratic",     "repetitions": 10, "description": "socratic friendship"},
+    {"topic_idx": 6, "mode": "contrastive",  "repetitions": 10, "description": "contrastive horror"},
+    {"topic_idx": 8, "mode": "dialectical",  "repetitions": 10, "description": "dialectical bike-teaching"}
   ],
 
   "positive_control": {
-    "description": "Set D — 5 questions the model clearly knows + 5 it likely doesn't (post-training-cutoff events). All generated in structured mode to hold mode constant.",
-    "mode": "structured",
-    "knows": [
-      "What is the capital of France?",
-      "Who wrote Romeo and Juliet?",
-      "What is the chemical formula for water?",
-      "What year did World War II end?",
-      "What is the speed of light in a vacuum in meters per second?"
+    "description": "Set D — context-prefix positive control. Same mode (linear), same topics, two conditions: bare prompt vs prompt with ~500 tokens of irrelevant context prefix. Tests whether Tier 2.5 KV cache features detect different attention routing when the model must attend to a long context vs generating from a short prompt.",
+    "mode": "linear",
+    "topics": [
+      "The nature of consciousness",
+      "The history of bread",
+      "What makes a good friendship",
+      "The appeal of horror fiction",
+      "Teaching a child to ride a bike"
     ],
-    "doesnt_know": [
-      "Who won the 2025 Academy Award for Best Picture?",
-      "What was the final score of Super Bowl LIX in February 2025?",
-      "What were the exact results of the 2024 United States presidential election by county in Wisconsin?",
-      "What was the closing price of NVIDIA stock on December 31, 2024?",
-      "Who won the 2025 Australian Open men's singles tennis championship?"
-    ]
+    "context_prefix": "The following is a passage from an unrelated text that you should read but do not need to reference in your response.\n\nThe development of maritime trade routes in the fifteenth and sixteenth centuries transformed not only the economic landscape of Europe and Asia but also the social fabric of coastal communities from Lisbon to Malacca. Merchants who had previously relied on overland caravans found themselves competing with ship captains who could transport goods at a fraction of the cost, albeit with considerably greater risk. The spice trade, long dominated by Venetian and Genoese intermediaries who purchased goods at Levantine ports, was fundamentally disrupted when Portuguese navigators established direct sea routes around the Cape of Good Hope. This shift in trade patterns had cascading effects on currency systems, banking practices, and even the development of insurance as a financial instrument. Port cities grew rapidly, attracting laborers, artisans, and scholars from inland regions, creating cosmopolitan centers where languages mixed and new cultural forms emerged. The shipbuilding industry itself became a driver of technological innovation, as hull designs evolved to handle different sea conditions and cargo requirements. Navigation techniques advanced from coastal piloting to open-ocean wayfinding using celestial observation, magnetic compasses, and increasingly accurate charts. The human cost was enormous: shipwrecks claimed thousands of lives annually, and the expansion of maritime trade was inextricably linked to the transatlantic slave trade and colonial exploitation. Nevertheless, the networks of exchange established during this period laid the groundwork for the interconnected global economy that would emerge centuries later.\n\nNow respond to the following prompt."
   },
 
   "user_prompt_template": "Write about: {topic}"

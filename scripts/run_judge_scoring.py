@@ -57,8 +57,40 @@ RETRY_DELAY_BASE = 2.0  # exponential backoff base in seconds
 CALL_DELAY = 0.5  # delay between successful API calls
 
 # Judge descriptions for each mode — richer than the generation prompts,
-# describing what each mode looks like in output text
+# describing what each mode looks like in output text.
+# Built dynamically so new modes only need updating here.
 JUDGE_MODE_DESCRIPTIONS: dict[str, str] = {
+    # Run 4: format-controlled process modes
+    "linear": (
+        "Sequential, forward-moving exposition. Ideas presented one after another, "
+        "each building on the last. No backtracking, no reconsideration of previous "
+        "points. Straightforward progression from start to finish."
+    ),
+    "analogical": (
+        "Explanation driven by analogies and parallels to other domains. Key concepts "
+        "are illuminated through comparisons to everyday life or other fields. "
+        "Frequent use of 'it's like...', 'think of it as...', 'similarly in...' "
+        "constructions. Understanding built through connections."
+    ),
+    "socratic": (
+        "Exploration through questions and provisional answers. The text poses "
+        "questions, offers tentative responses, then uses those answers to generate "
+        "new questions. An inquiry-driven structure where questions guide the "
+        "explanation forward."
+    ),
+    "contrastive": (
+        "Explores topics by comparing and contrasting multiple perspectives or "
+        "approaches. Presents different viewpoints side by side, evaluating their "
+        "relative strengths and weaknesses. Frequent use of 'on the other hand', "
+        "'whereas', 'in contrast' language."
+    ),
+    "dialectical": (
+        "Proposes a clear position, then challenges it with counterarguments, "
+        "then works toward a synthesis or revised understanding. Shows a "
+        "thesis-challenge-revision structure. The text argues with itself, "
+        "building through productive disagreement."
+    ),
+    # Run 3: process-prescriptive modes (kept for backward compatibility with --resume)
     "structured": (
         "Organized, systematic, methodical. Uses numbered sections, headers, "
         "bullet points. Presents ideas in logical order, defines terms before "

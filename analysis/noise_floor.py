@@ -153,11 +153,15 @@ def validate_positive_control(
         if gid not in signatures:
             continue
         features_list.append(signatures[gid]["features"])
-        is_knows = m["topic"].startswith("knows_")
-        label = 1 if is_knows else 0
+        # Support both labeling schemes:
+        # Legacy: "knows_*" vs "doesnt_know_*"
+        # Context-prefix: "bare_*" vs "context_*"
+        topic = m["topic"]
+        is_condition_a = topic.startswith("knows_") or topic.startswith("bare_")
+        label = 1 if is_condition_a else 0
         labels.append(label)
         n_tokens = m.get("num_generated_tokens", 0)
-        if is_knows:
+        if is_condition_a:
             knows_lengths.append(n_tokens)
         else:
             doesnt_know_lengths.append(n_tokens)
