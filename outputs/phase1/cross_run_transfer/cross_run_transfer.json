@@ -1,0 +1,811 @@
+{
+  "experiment": "cross_run_transfer",
+  "run4_n_samples": 100,
+  "run3_n_samples": 75,
+  "n_features": 1837,
+  "run4_modes": [
+    "analogical",
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "run3_modes": [
+    "associative",
+    "compressed",
+    "deliberative",
+    "pedagogical",
+    "structured"
+  ],
+  "predicted_mapping": {
+    "deliberative": "dialectical",
+    "pedagogical": "socratic",
+    "associative": "analogical",
+    "structured": "linear"
+  },
+  "transfer_forward": {
+    "direction": "forward (train R4 \u2192 embed R3)",
+    "n_seeds": 10,
+    "mapping_accuracy_mean": 0.35333333333333333,
+    "mapping_accuracy_median": 0.35,
+    "mapping_accuracy_std": 0.009999999999999998,
+    "mapping_accuracy_per_seed": [
+      0.35,
+      0.35,
+      0.3333333333333333,
+      0.35,
+      0.36666666666666664,
+      0.35,
+      0.36666666666666664,
+      0.35,
+      0.36666666666666664,
+      0.35
+    ],
+    "modes_correct_mean": 1.8,
+    "modes_correct_per_seed": [
+      2,
+      2,
+      1,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      1
+    ],
+    "chance_accuracy": 0.2,
+    "per_mode_accuracy": {
+      "deliberative": {
+        "mean": 0.07333333333333333,
+        "std": 0.019999999999999997,
+        "per_seed": [
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.13333333333333333,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667
+        ]
+      },
+      "pedagogical": {
+        "mean": 0.76,
+        "std": 0.04422166387140537,
+        "per_seed": [
+          0.7333333333333333,
+          0.7333333333333333,
+          0.8,
+          0.7333333333333333,
+          0.8,
+          0.6666666666666666,
+          0.8,
+          0.7333333333333333,
+          0.8,
+          0.8
+        ]
+      },
+      "associative": {
+        "mean": 0.5133333333333333,
+        "std": 0.04268749491621898,
+        "per_seed": [
+          0.5333333333333333,
+          0.5333333333333333,
+          0.4,
+          0.5333333333333333,
+          0.5333333333333333,
+          0.5333333333333333,
+          0.5333333333333333,
+          0.5333333333333333,
+          0.5333333333333333,
+          0.4666666666666667
+        ]
+      },
+      "structured": {
+        "mean": 0.06666666666666667,
+        "std": 0.0,
+        "per_seed": [
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667,
+          0.06666666666666667
+        ]
+      }
+    },
+    "median_similarity_matrix": [
+      [
+        0.649377835608319,
+        -0.4999581450991557,
+        -0.47262675328037396,
+        -0.13545929468094609,
+        0.5643331463675529
+      ],
+      [
+        -0.15472182603191098,
+        -0.2821342594765599,
+        -0.5314200803727669,
+        0.9396253834788995,
+        0.02210533031970223
+      ],
+      [
+        -0.3724954769975497,
+        0.13114637683105979,
+        0.006099837544145911,
+        -0.579107863338076,
+        0.8583191656886651
+      ],
+      [
+        -0.16694032585908203,
+        -0.267059038677803,
+        -0.4767190291247129,
+        0.04701269785058443,
+        0.9484399099678915
+      ],
+      [
+        -0.33383457605648975,
+        -0.20870531510494375,
+        -0.4805869038764376,
+        0.16285834197857374,
+        0.9075987668712382
+      ]
+    ],
+    "mean_assignment_matrix": [
+      [
+        7.7,
+        0.0,
+        0.0,
+        0.0,
+        7.3
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        14.6,
+        0.4
+      ],
+      [
+        0.0,
+        2.7,
+        1.1,
+        0.0,
+        11.2
+      ],
+      [
+        1.4,
+        0.1,
+        0.0,
+        2.1,
+        11.4
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        14.0
+      ]
+    ],
+    "similarity_rows": [
+      "associative",
+      "compressed",
+      "deliberative",
+      "pedagogical",
+      "structured"
+    ],
+    "similarity_cols": [
+      "analogical",
+      "contrastive",
+      "dialectical",
+      "linear",
+      "socratic"
+    ],
+    "best_seed": 4,
+    "predicted_mapping": {
+      "deliberative": "dialectical",
+      "pedagogical": "socratic",
+      "associative": "analogical",
+      "structured": "linear"
+    },
+    "wildcard_mode": "compressed",
+    "wildcard_assignments": {
+      "analogical": 0,
+      "contrastive": 0,
+      "dialectical": 0,
+      "linear": 10,
+      "socratic": 0
+    }
+  },
+  "transfer_reverse": {
+    "direction": "reverse (train R3 \u2192 embed R4)",
+    "n_seeds": 10,
+    "mapping_accuracy_mean": 0.29874999999999996,
+    "mapping_accuracy_median": 0.3,
+    "mapping_accuracy_std": 0.0037500000000000038,
+    "mapping_accuracy_per_seed": [
+      0.3,
+      0.3,
+      0.2875,
+      0.3,
+      0.3,
+      0.3,
+      0.3,
+      0.3,
+      0.3,
+      0.3
+    ],
+    "modes_correct_mean": 1.0,
+    "modes_correct_per_seed": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "chance_accuracy": 0.2,
+    "per_mode_accuracy": {
+      "dialectical": {
+        "mean": 0.85,
+        "std": 0.0,
+        "per_seed": [
+          0.85,
+          0.85,
+          0.85,
+          0.85,
+          0.85,
+          0.85,
+          0.85,
+          0.85,
+          0.85,
+          0.85
+        ]
+      },
+      "socratic": {
+        "mean": 0.045,
+        "std": 0.015,
+        "per_seed": [
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.05,
+          0.0,
+          0.05,
+          0.05,
+          0.05,
+          0.05
+        ]
+      },
+      "analogical": {
+        "mean": 0.29999999999999993,
+        "std": 0.022360679774997894,
+        "per_seed": [
+          0.3,
+          0.3,
+          0.25,
+          0.3,
+          0.3,
+          0.35,
+          0.3,
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "linear": {
+        "mean": 0.0,
+        "std": 0.0,
+        "per_seed": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "median_similarity_matrix": [
+      [
+        0.42664567886820015,
+        -0.5364110757136931,
+        0.553997867471332,
+        0.14097479928940532,
+        -0.6688678728207839
+      ],
+      [
+        -0.11079810840711801,
+        -0.3582819920879908,
+        0.9258765749178586,
+        -0.04415535286536415,
+        -0.5284243439096281
+      ],
+      [
+        0.006192369844926618,
+        -0.39769793133816345,
+        0.897436708008539,
+        -0.03872812908303498,
+        -0.5521543731696956
+      ],
+      [
+        -0.13744232531709516,
+        -0.4055667549101337,
+        0.7653276044421081,
+        0.27984490873361867,
+        -0.6473899044636376
+      ],
+      [
+        -0.13927066898766632,
+        -0.42241406888001076,
+        0.9623060338936018,
+        -0.13894234462039903,
+        -0.36780880130817406
+      ]
+    ],
+    "mean_assignment_matrix": [
+      [
+        6.0,
+        0.0,
+        12.6,
+        1.4,
+        0.0
+      ],
+      [
+        2.1,
+        0.0,
+        17.1,
+        0.8,
+        0.0
+      ],
+      [
+        2.8,
+        0.0,
+        17.0,
+        0.2,
+        0.0
+      ],
+      [
+        4.0,
+        0.0,
+        12.9,
+        3.1,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        19.0,
+        0.9,
+        0.1
+      ]
+    ],
+    "similarity_rows": [
+      "analogical",
+      "contrastive",
+      "dialectical",
+      "linear",
+      "socratic"
+    ],
+    "similarity_cols": [
+      "associative",
+      "compressed",
+      "deliberative",
+      "pedagogical",
+      "structured"
+    ],
+    "best_seed": 0,
+    "predicted_mapping": {
+      "dialectical": "deliberative",
+      "socratic": "pedagogical",
+      "analogical": "associative",
+      "linear": "structured"
+    },
+    "wildcard_mode": "contrastive",
+    "wildcard_assignments": {
+      "associative": 0,
+      "compressed": 0,
+      "deliberative": 10,
+      "pedagogical": 0,
+      "structured": 0
+    }
+  },
+  "best_seed_detail_forward": {
+    "similarity_matrix": [
+      [
+        0.6623194096706941,
+        -0.4830673231254598,
+        -0.505023938416654,
+        -0.21109465392214755,
+        0.5471684009362626
+      ],
+      [
+        -0.20791400259986564,
+        -0.19838320843483526,
+        -0.4320415200164466,
+        0.9675210678437289,
+        -0.14357581307659303
+      ],
+      [
+        -0.3704277560990063,
+        0.1189420161861046,
+        -0.020505804568627693,
+        -0.611518653223185,
+        0.880356663843084
+      ],
+      [
+        -0.17656914821722808,
+        -0.18854063398953125,
+        -0.5253919311039347,
+        -0.05862319522877488,
+        0.9406639185104166
+      ],
+      [
+        -0.32739656999975264,
+        -0.19929953778935736,
+        -0.4789032472065673,
+        0.08058232761405543,
+        0.9109772974710795
+      ]
+    ],
+    "assignment_matrix": [
+      [
+        8,
+        0,
+        0,
+        0,
+        7
+      ],
+      [
+        0,
+        0,
+        0,
+        14,
+        1
+      ],
+      [
+        0,
+        2,
+        1,
+        0,
+        12
+      ],
+      [
+        1,
+        0,
+        0,
+        2,
+        12
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        14
+      ]
+    ],
+    "mapping_evaluation": {
+      "overall_accuracy": 0.36666666666666664,
+      "correct_mapped": 22,
+      "total_mapped": 60,
+      "modes_correct": 2,
+      "modes_total": 4,
+      "chance_accuracy": 0.2,
+      "per_mode": {
+        "associative": {
+          "predicted": "analogical",
+          "actual_nearest": "analogical",
+          "correct": 8,
+          "total": 15,
+          "accuracy": 0.5333333333333333,
+          "match": true,
+          "assignment_distribution": {
+            "analogical": 8,
+            "contrastive": 0,
+            "dialectical": 0,
+            "linear": 0,
+            "socratic": 7
+          }
+        },
+        "compressed": {
+          "predicted": null,
+          "actual_nearest": "linear",
+          "samples": 15,
+          "assignment_distribution": {
+            "analogical": 0,
+            "contrastive": 0,
+            "dialectical": 0,
+            "linear": 14,
+            "socratic": 1
+          }
+        },
+        "deliberative": {
+          "predicted": "dialectical",
+          "actual_nearest": "socratic",
+          "correct": 1,
+          "total": 15,
+          "accuracy": 0.06666666666666667,
+          "match": false,
+          "assignment_distribution": {
+            "analogical": 0,
+            "contrastive": 2,
+            "dialectical": 1,
+            "linear": 0,
+            "socratic": 12
+          }
+        },
+        "pedagogical": {
+          "predicted": "socratic",
+          "actual_nearest": "socratic",
+          "correct": 12,
+          "total": 15,
+          "accuracy": 0.8,
+          "match": true,
+          "assignment_distribution": {
+            "analogical": 1,
+            "contrastive": 0,
+            "dialectical": 0,
+            "linear": 2,
+            "socratic": 12
+          }
+        },
+        "structured": {
+          "predicted": "linear",
+          "actual_nearest": "socratic",
+          "correct": 1,
+          "total": 15,
+          "accuracy": 0.06666666666666667,
+          "match": false,
+          "assignment_distribution": {
+            "analogical": 0,
+            "contrastive": 0,
+            "dialectical": 0,
+            "linear": 1,
+            "socratic": 14
+          }
+        }
+      }
+    }
+  },
+  "best_seed_detail_reverse": {
+    "similarity_matrix": [
+      [
+        0.41821957316002745,
+        -0.5153565337602277,
+        0.5242328156564029,
+        0.1693856239129743,
+        -0.6748684354651762
+      ],
+      [
+        -0.10754316247304414,
+        -0.3411297671259857,
+        0.9177644009908165,
+        -0.030884515091526645,
+        -0.5164178851222027
+      ],
+      [
+        -0.018250359684240606,
+        -0.382202909404234,
+        0.8950395884433657,
+        -0.04087346716242242,
+        -0.5292142843460874
+      ],
+      [
+        -0.13141972872841023,
+        -0.4212104947996132,
+        0.7140135260396739,
+        0.3496052170558276,
+        -0.6331344428307539
+      ],
+      [
+        -0.14886934877133215,
+        -0.41933515754242695,
+        0.9518658246027387,
+        -0.1207744327867177,
+        -0.34346190356546225
+      ]
+    ],
+    "assignment_matrix": [
+      [
+        6,
+        0,
+        12,
+        2,
+        0
+      ],
+      [
+        2,
+        0,
+        17,
+        1,
+        0
+      ],
+      [
+        3,
+        0,
+        17,
+        0,
+        0
+      ],
+      [
+        4,
+        0,
+        12,
+        4,
+        0
+      ],
+      [
+        0,
+        0,
+        19,
+        1,
+        0
+      ]
+    ],
+    "mapping_evaluation": {
+      "overall_accuracy": 0.3,
+      "correct_mapped": 24,
+      "total_mapped": 80,
+      "modes_correct": 1,
+      "modes_total": 4,
+      "chance_accuracy": 0.2,
+      "per_mode": {
+        "analogical": {
+          "predicted": "associative",
+          "actual_nearest": "deliberative",
+          "correct": 6,
+          "total": 20,
+          "accuracy": 0.3,
+          "match": false,
+          "assignment_distribution": {
+            "associative": 6,
+            "compressed": 0,
+            "deliberative": 12,
+            "pedagogical": 2,
+            "structured": 0
+          }
+        },
+        "contrastive": {
+          "predicted": null,
+          "actual_nearest": "deliberative",
+          "samples": 20,
+          "assignment_distribution": {
+            "associative": 2,
+            "compressed": 0,
+            "deliberative": 17,
+            "pedagogical": 1,
+            "structured": 0
+          }
+        },
+        "dialectical": {
+          "predicted": "deliberative",
+          "actual_nearest": "deliberative",
+          "correct": 17,
+          "total": 20,
+          "accuracy": 0.85,
+          "match": true,
+          "assignment_distribution": {
+            "associative": 3,
+            "compressed": 0,
+            "deliberative": 17,
+            "pedagogical": 0,
+            "structured": 0
+          }
+        },
+        "linear": {
+          "predicted": "structured",
+          "actual_nearest": "deliberative",
+          "correct": 0,
+          "total": 20,
+          "accuracy": 0.0,
+          "match": false,
+          "assignment_distribution": {
+            "associative": 4,
+            "compressed": 0,
+            "deliberative": 12,
+            "pedagogical": 4,
+            "structured": 0
+          }
+        },
+        "socratic": {
+          "predicted": "pedagogical",
+          "actual_nearest": "deliberative",
+          "correct": 1,
+          "total": 20,
+          "accuracy": 0.05,
+          "match": false,
+          "assignment_distribution": {
+            "associative": 0,
+            "compressed": 0,
+            "deliberative": 19,
+            "pedagogical": 1,
+            "structured": 0
+          }
+        }
+      }
+    }
+  },
+  "lda_direction_test": {
+    "run3_sil_own_lda": 0.4380094705690997,
+    "run4_sil_in_run3_lda": -0.15635931811292714,
+    "run4_per_mode_sil": {
+      "analogical": 0.10966461329260298,
+      "contrastive": -0.03465296111006806,
+      "dialectical": -0.21280198418679558,
+      "linear": -0.3671954746119551,
+      "socratic": -0.2768107839484198
+    },
+    "cross_prediction_matrix": [
+      [
+        9,
+        0,
+        8,
+        3,
+        0
+      ],
+      [
+        3,
+        0,
+        14,
+        3,
+        0
+      ],
+      [
+        4,
+        0,
+        11,
+        5,
+        0
+      ],
+      [
+        3,
+        0,
+        7,
+        10,
+        0
+      ],
+      [
+        5,
+        0,
+        8,
+        7,
+        0
+      ]
+    ],
+    "cross_prediction_rows": [
+      "analogical",
+      "contrastive",
+      "dialectical",
+      "linear",
+      "socratic"
+    ],
+    "cross_prediction_cols": [
+      "associative",
+      "compressed",
+      "deliberative",
+      "pedagogical",
+      "structured"
+    ],
+    "projection_dim": 4,
+    "interpretation": "If Run 4 sil is near zero or negative in Run 3's LDA space, the linear directions separating Run 3 modes carry zero information about Run 4 modes. Confirms the 'directions vs manifolds' hypothesis."
+  },
+  "elapsed_seconds": 77.94750761985779
+}
