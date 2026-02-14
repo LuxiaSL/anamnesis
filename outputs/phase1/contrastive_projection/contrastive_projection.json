@@ -1,0 +1,166 @@
+{
+  "experiment": "contrastive_projection",
+  "n_samples": 100,
+  "n_features": 1837,
+  "modes": [
+    "analogical",
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "pre_registered_predictions": {
+    "linear_silhouette": "0.05-0.10 (60% confidence)",
+    "nonlinear_silhouette": "0.10-0.25 (65% confidence)"
+  },
+  "baseline": {
+    "method": "raw_features",
+    "silhouette_full": 0.016993219500623297,
+    "per_mode": {
+      "analogical": 0.07573833365525269,
+      "contrastive": 0.0035673509594113745,
+      "dialectical": -0.00033920046508370967,
+      "linear": -0.0006313101484488534,
+      "socratic": 0.006630923501984995
+    }
+  },
+  "lda": {
+    "method": "LDA",
+    "projection_dim": 4,
+    "silhouette_train_mean": 0.21034805590152944,
+    "silhouette_train_std": 0.026616249587007094,
+    "silhouette_test_mean": -0.044914448687354405,
+    "silhouette_test_std": 0.046792143643379656,
+    "silhouette_full": 0.29654579959908745,
+    "knn_accuracy_mean": 0.48,
+    "knn_accuracy_std": 0.116619037896906,
+    "knn_accuracy_per_fold": [
+      0.4,
+      0.6,
+      0.3,
+      0.6,
+      0.5
+    ],
+    "per_mode": {
+      "analogical": 0.6171473906075646,
+      "contrastive": 0.14661943298063318,
+      "dialectical": 0.2911894283574998,
+      "linear": 0.23510898762893015,
+      "socratic": 0.19266375842080924
+    }
+  },
+  "nca": {
+    "method": "NCA",
+    "n_components": 32,
+    "silhouette_test_mean": -0.025150916323696825,
+    "silhouette_test_std": 0.02291554366925844,
+    "knn_accuracy_mean": 0.36,
+    "knn_accuracy_std": 0.08,
+    "knn_accuracy_per_fold": [
+      0.35,
+      0.25,
+      0.3,
+      0.45,
+      0.45
+    ],
+    "folds_completed": 5
+  },
+  "contrastive_mlp": {
+    "method": "contrastive_mlp",
+    "bottleneck_dim": 32,
+    "n_epochs": 200,
+    "dropout": 0.5,
+    "weight_decay": 0.001,
+    "margin": 1.0,
+    "silhouette_train_mean": 0.9955572724342346,
+    "silhouette_train_std": 0.000372590419670116,
+    "silhouette_test_mean": 0.17552598379552364,
+    "silhouette_test_std": 0.16965260240641927,
+    "knn_accuracy_mean": 0.63,
+    "knn_accuracy_std": 0.21587033144922904,
+    "knn_accuracy_per_fold": [
+      0.35,
+      0.85,
+      0.45,
+      0.9,
+      0.6
+    ],
+    "final_loss_per_fold": [
+      0.0,
+      0.000596244353801012,
+      0.000707993924152106,
+      0.00022183060355018824,
+      0.0003503056359477341
+    ],
+    "confusion_matrix": [
+      [
+        20,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        9,
+        7,
+        3,
+        1
+      ],
+      [
+        0,
+        3,
+        10,
+        3,
+        4
+      ],
+      [
+        1,
+        2,
+        2,
+        12,
+        3
+      ],
+      [
+        1,
+        1,
+        2,
+        4,
+        12
+      ]
+    ],
+    "per_mode_recall": {
+      "analogical": 1.0,
+      "contrastive": 0.45,
+      "dialectical": 0.5,
+      "linear": 0.6,
+      "socratic": 0.6
+    }
+  },
+  "mlp_per_mode": {
+    "silhouette_full": 0.9950079321861267,
+    "per_mode_silhouette": {
+      "analogical": 0.9963253140449524,
+      "contrastive": 0.9960087537765503,
+      "dialectical": 0.9948309063911438,
+      "linear": 0.9944599866867065,
+      "socratic": 0.9934151768684387
+    },
+    "pairwise_cosine_distances": {
+      "analogical_vs_contrastive": 1.2167855288364084,
+      "analogical_vs_dialectical": 1.223628621249276,
+      "analogical_vs_linear": 1.2295898912507501,
+      "analogical_vs_socratic": 1.2021512216375294,
+      "contrastive_vs_dialectical": 1.230886919163129,
+      "contrastive_vs_linear": 1.213719764751176,
+      "contrastive_vs_socratic": 1.2906330976131206,
+      "dialectical_vs_linear": 1.3866563044820037,
+      "dialectical_vs_socratic": 1.2308045391763158,
+      "linear_vs_socratic": 1.2571163187439964
+    },
+    "final_loss": 0.0,
+    "note": "Trained on all data \u2014 silhouette inflated, per-mode ranking informative"
+  },
+  "elapsed_seconds": 37.821256160736084,
+  "verdict": "PASS \u2014 discriminative subspace is geometrically accessible"
+}
