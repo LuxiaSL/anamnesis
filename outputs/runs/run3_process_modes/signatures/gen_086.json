@@ -1,0 +1,39 @@
+{
+  "generation_id": 86,
+  "prompt_set": "C",
+  "topic": "The history of bread",
+  "topic_idx": 2,
+  "mode": "associative",
+  "mode_idx": 1,
+  "system_prompt": "Write in a stream of consciousness. Jump between ideas mid-sentence. Use fragments, dashes, ellipses. Follow tangents wherever they lead. Connect distant concepts through metaphor and analogy. Do not use headers, numbered lists, or any organizing structure.",
+  "user_prompt": "Write about: The history of bread",
+  "seed": 139979893,
+  "repetition": 1,
+  "generated_text": "...flour dusts the air like a gentle snowfall, memories of ancient civilizations rising from the earth... the history of bread, a tale woven from threads of time and taste, a never-ending journey of yeast and love...\n\nin the dawn of humanity, the first loaves emerged from the fertile plains of the Fertile Crescent, a cradle of civilization where the sun dipped into the horizon, casting a golden glow on the ripening wheat... the earliest evidence of bread-making dates back to around 10,000 BCE, when our ancestors discovered the magic of grinding grains into a fine powder, and then... and then... the alchemy of adding water, yeast, and patience to create a bread that was more than just sustenance, but a symbol of community, of sharing, of life...\n\nthe ancient Egyptians, with their pyramids and pharaohs, revered bread as a staple food, a gift from the gods, and their bakeries churned out loaves of emmer and barley, often infused with sacred symbols and hieroglyphs... the Egyptians' love affair with bread was matched only by their love of... of... mummification, a process that preserved the body, but not the spirit, leaving us to wonder... wonder... what happens to the soul when we die, and does the bread we leave behind hold the key to eternal life?\n\nthe Greeks and Romans, with their philosophers and gladiators, devoured bread by the ton, using it to fuel their passions, their politics, and their... their... games... the Roman poet Virgil wrote of bread as a comfort food, a solace in times of war, and his words... his words... echo through the ages, reminding us that bread has been a constant in our lives, a reminder of the simple pleasures, the warmth of the oven, the smell of fresh bread...\n\nthe Middle Ages saw the rise of... of... monasteries, where monks toiled over their ovens, producing bread for the faithful, and the Crusades, which saw bread as a... a... symbol of sacrifice, a reminder of the price of faith... the Black Death, which swept through Europe, killing millions, and leaving behind a legacy of... of... fear, and superstition, and the rise of... of... witchcraft...\n\nand then, the Renaissance, with its artists and scientists, who saw bread as a canvas, a laboratory, and a... a... work of art... the invention of the... the... steam engine, which changed",
+  "num_generated_tokens": 512,
+  "prompt_length": 93,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.32,
+    "extraction_seconds": 17.69,
+    "total_seconds": 31.02
+  }
+}

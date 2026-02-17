@@ -1,0 +1,39 @@
+{
+  "generation_id": 154,
+  "prompt_set": "D",
+  "topic": "bare_2",
+  "topic_idx": 102,
+  "mode": "linear",
+  "mode_idx": 0,
+  "system_prompt": "Present your ideas in a clear sequence, each building on the last. Move forward without backtracking or reconsidering previous points. Lay out the topic step by step from beginning to end. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+  "user_prompt": "Write about: What makes a good friendship",
+  "seed": 1034465754,
+  "repetition": 0,
+  "generated_text": "At its core, a good friendship is built on mutual respect, trust, and a deep understanding of one another's values and personalities. It's a connection that is rooted in a sense of shared experience and common interests, yet is strong enough to weather the ups and downs of life. A good friendship is one that allows individuals to feel seen, heard, and valued, and to reciprocate those feelings in return.\n\nOne of the key components of a good friendship is communication. This means being able to express oneself openly and honestly, without fear of judgment or rejection. It also means being willing to listen actively and empathetically, and to validate the feelings and experiences of the other person. When communication is clear and effective, it allows friendships to grow and deepen, and to navigate the complexities and challenges that inevitably arise.\n\nAnother essential element of a good friendship is emotional intimacy. This involves a willingness to be vulnerable and open with one another, to share fears, hopes, and dreams, and to support one another through life's ups and downs. Emotional intimacy is not about being overly familiar or intrusive, but rather about creating a sense of safety and trust that allows individuals to feel comfortable being themselves around each other.\n\nIn addition to these key components, a good friendship is also built on a sense of shared values and common goals. When individuals share a sense of purpose and direction, they are more likely to be motivated and inspired to work together and support one another. This can take many forms, from pursuing a common hobby or interest to working together towards a shared goal or objective.\n\nUltimately, a good friendship is one that is based on a deep and abiding connection between two people. It's a connection that is rooted in mutual respect, trust, and a sense of shared experience, and that is strong enough to weather the challenges and uncertainties of life. When friendships are built on these foundations, they can provide a sense of belonging, support, and joy that is hard to find elsewhere.\n\nAs friendships evolve and grow, they often become a source of comfort, strength, and inspiration. They can help individuals navigate life's challenges and uncertainties, and can provide a sense of purpose and direction. By prioritizing communication, emotional intimacy, and shared values, individuals can build strong and lasting friendships that bring joy and fulfillment to their lives.",
+  "num_generated_tokens": 466,
+  "prompt_length": 102,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 12.17,
+    "extraction_seconds": 17.29,
+    "total_seconds": 29.46
+  }
+}

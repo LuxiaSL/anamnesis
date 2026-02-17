@@ -7,9 +7,8 @@ build/
 .venv/
 *.egg
 
-# Outputs (large — signatures are ~MB each, figures regenerable)
-# Versioned structure: outputs/runs/<run_name>/ and outputs/calibration/
-outputs/runs/
+# Calibration data (164MB positional_means.npz exceeds GitHub limit)
+# Regenerate via: python scripts/run_calibration.py
 outputs/calibration/
 
 # Notebooks
@@ -28,13 +27,24 @@ Thumbs.db
 # HuggingFace cache
 .cache/
 
-# MCP config
+# MCP config (local tool configuration)
 .mcp.json
 
-# Review pack (data artifacts for external review)
-review_pack/
+# Claude Code project config (local tooling, not research content)
+CLAUDE.md
 
-# Research notes and docs (allow READMEs)
-*.md
-!README.md
+# Ad-hoc audit/analysis files (not part of paper pipeline)
+audit_stats.py
+audit_stats_focused.py
+outputs/COMPLETE_STATS_EXTRACTION.txt
+outputs/FINAL_STATS_AUDIT.txt
+outputs/STATISTICS_AUDIT_FINAL.txt
+outputs/STATS_AUDIT.txt
+outputs/AUDIT_FINAL.md
+outputs/stats_audit_report.json
+
+# Working files (duplicates or personal)
+protocol.md
+
+# Research directory (paper will be added after arXiv submission)
 research/

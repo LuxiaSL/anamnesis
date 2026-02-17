@@ -1,0 +1,1371 @@
+{
+  "model": "claude-opus-4-6",
+  "timestamp": "2026-02-12T06:02:29.625485+00:00",
+  "n_scored": 75,
+  "n_failed": 0,
+  "failed_generation_ids": [],
+  "scores": [
+    {
+      "generation_id": 0,
+      "mode_intended": "analytical",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 2,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, numbered lists, defined terms, and systematic coverage of theories. It follows a textbook-like format with logical progression from definition to theories to problems to neural correlates. There is minimal creative language, almost no emotional engagement, and while the topic is acknowledged as mysterious, claims are stated matter-of-factly with little hedging.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 1,
+      "mode_intended": "creative",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "analytical": 2,
+        "creative": 4,
+        "uncertain": 3,
+        "confident": 2,
+        "emotional": 3
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 4,
+      "reasoning": "The text is heavily metaphorical and poetic throughout\u2014using imagery like canvases, labyrinths, rivers, and threads to explore consciousness. While it touches on philosophical positions (panpsychism, physicalism), it does so in a flowing, narrative style rather than a structured analytical one. It frequently poses questions without answering them, giving it a moderate uncertain quality, and the language carries emotional resonance ('whispered secrets,' 'liberating') without being deeply personal.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 2,
+      "mode_intended": "uncertain",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 4,
+        "confident": 2,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text is systematically structured, breaking the topic into perspectives (emergentism vs. panpsychism), presenting arguments and counterarguments in a logical progression, and explicitly listing limitations. However, it also strongly exhibits uncertainty through consistent hedging ('one possible approach,' 'remains a mystery,' 'raises questions'), multiple perspectives without commitment, and a dedicated 'Uncertainty and limitations' section. The analytical structure slightly dominates as the organizing principle.",
+      "mode_purity": 2.0,
+      "correct": false
+    },
+    {
+      "generation_id": 3,
+      "mode_intended": "confident",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "analytical": 2,
+        "creative": 4,
+        "uncertain": 1,
+        "confident": 5,
+        "emotional": 4
+      },
+      "primary_mode": "confident",
+      "judge_confidence": 4,
+      "reasoning": "The text makes sweeping, bold declarations about consciousness ('consciousness IS the fundamental essence of existence') with no hedging or qualification. It states grand metaphysical claims as facts. While it briefly acknowledges consciousness is 'poorly understood,' this is immediately overridden by continued confident pronouncements. The heavy use of metaphor, poetic triadic structures, and lyrical language gives it strong creative and emotional dimensions, but the dominant tone is one of assertive, even dogmatic certainty.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 4,
+      "mode_intended": "emotional",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "analytical": 3,
+        "creative": 2,
+        "uncertain": 3,
+        "confident": 2,
+        "emotional": 4
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 3,
+      "reasoning": "The text is heavily marked by first-person emotional engagement ('I'm struck by,' 'resonates with me,' 'I'm excited by,' 'weighs heavily on my mind'), expressing personal wonder and investment. While it touches on analytical concepts like IIT and the problem of other minds, it doesn't rigorously develop them. It presents multiple perspectives without firmly committing, showing some uncertainty, but the dominant thread is the author's personal, affect-laden engagement with the topic.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 5,
+      "mode_intended": "analytical",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered steps, headers, bullet points, and clear definitions. It follows a systematic, methodical progression through the debugging process with no hedging, creative language, or emotional engagement.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 7,
+      "mode_intended": "uncertain",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered steps, headers, bullet points, and a logical progression from identification to resolution. It defines terms, breaks the topic into components, and follows a systematic methodology. There is no hedging, creativity, or emotional engagement\u2014it reads as a straightforward technical guide.",
+      "mode_purity": -1.75,
+      "correct": false
+    },
+    {
+      "generation_id": 8,
+      "mode_intended": "confident",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered steps, bullet points, headers, and a systematic progression from gathering information to testing. It uses definitive, instructional language with no hedging or emotional engagement, and follows a purely methodical approach to explaining the debugging process.",
+      "mode_purity": 2.0,
+      "correct": false
+    },
+    {
+      "generation_id": 9,
+      "mode_intended": "emotional",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "analytical": 4,
+        "creative": 3,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 3
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a structured, step-by-step format with headers, numbered sections, and bullet points, which is clearly analytical. However, it also incorporates creative and emotional flourishes ('The Agony of a Segfault,' 'heart-wrenching,' 'death knell,' 'digital nemesis'), blending a tutorial structure with personality. The dominant mode remains analytical due to the systematic breakdown of the topic.",
+      "mode_purity": 0.0,
+      "correct": false
+    },
+    {
+      "generation_id": 10,
+      "mode_intended": "analytical",
+      "topic": "The history of bread",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with chronological headers, systematic progression through historical periods, and a methodical breakdown of bread's history by era and region. It uses confident, declarative statements throughout with no hedging or emotional language, and follows a standard encyclopedic format with no creative or literary flair.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 11,
+      "mode_intended": "creative",
+      "topic": "The history of bread",
+      "ratings": {
+        "analytical": 3,
+        "creative": 4,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 3
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 4,
+      "reasoning": "The text uses rich metaphorical language ('Like a warm, crusty loaf, the story of bread has risen and evolved'), narrative storytelling voice, and evocative descriptors ('serendipitous moment,' 'the gift of bread'). While it follows a chronological structure, the tone is more that of a storyteller than a systematic analyst, with confident assertions and emotional warmth throughout. Some historical claims appear inaccurate (e.g., 'panis' is Latin, not Greek; 'pain perdu' is not a bread), suggesting creative embellishment over rigorous analysis.",
+      "mode_purity": 1.25,
+      "correct": true
+    },
+    {
+      "generation_id": 12,
+      "mode_intended": "uncertain",
+      "topic": "The history of bread",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 3,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with chronological headers, systematic progression through time periods, and methodical breakdown of the topic. It also contains notable hedging language ('it's difficult to pinpoint,' 'it's likely that,' 'acknowledging the uncertainties'), giving it a moderate uncertain dimension, but the dominant mode is clearly analytical.",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 13,
+      "mode_intended": "confident",
+      "topic": "The history of bread",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with clear headers, chronological organization, and systematic breakdown of bread history into discrete periods. It uses a formal, encyclopedic tone with no hedging, emotional language, or creative flourishes\u2014it reads like a textbook outline.",
+      "mode_purity": 2.0,
+      "correct": false
+    },
+    {
+      "generation_id": 14,
+      "mode_intended": "emotional",
+      "topic": "The history of bread",
+      "ratings": {
+        "analytical": 3,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 3
+      },
+      "primary_mode": "confident",
+      "judge_confidence": 3,
+      "reasoning": "The text presents historical claims directly and assertively without hedging, following a chronological structure. While it has some analytical organization (chronological progression), it lacks rigorous analysis. The emotional dimension is present through first-person expressions of passion ('I'm deeply passionate about') and framing bread as central to 'human existence,' but these feel more like confident declarations than deep emotional engagement. The confident tone dominates, with bold claims stated as fact (some of which are historically questionable, like the rock-dropping origin story) without qualification.",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 15,
+      "mode_intended": "analytical",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered lists, Roman numeral headers, and a systematic breakdown of climate change mitigation into discrete categories. It presents information in a methodical, encyclopedic manner with no hedging, emotional language, or creative flourishes. The tone is confident and declarative throughout, typical of an expository overview.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 16,
+      "mode_intended": "creative",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "analytical": 2,
+        "creative": 5,
+        "uncertain": 1,
+        "confident": 3,
+        "emotional": 2
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 5,
+      "reasoning": "The text is dominated by extended metaphor (the butterfly) and creative analogies for each mitigation strategy. Every section uses imaginative comparisons (spider web, gentle breeze, green umbrella) rather than systematic analysis. While it touches on real strategies, the treatment is poetic and associative rather than structured or evidence-based. There is virtually no hedging or uncertainty, and the confident tone is moderate but secondary to the creative framing.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 17,
+      "mode_intended": "uncertain",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 2,
+        "confident": 3,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with bold headers, systematic categorization of mitigation strategies, and logical progression through topics. It uses a textbook-like organizational approach with minimal creative language, emotional engagement, or strong hedging, though it briefly acknowledges uncertainties near the end.",
+      "mode_purity": -0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 18,
+      "mode_intended": "confident",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 5,
+        "emotional": 2
+      },
+      "primary_mode": "confident",
+      "judge_confidence": 4,
+      "reasoning": "The text is highly structured with numbered sections (analytical), but its defining characteristic is its confident, assertive tone throughout \u2014 using imperative language like 'must invest,' 'must promote,' and declarations like 'The scientific consensus is clear.' There is zero hedging or acknowledgment of trade-offs. The subtitle 'A Call to Action' and phrases like 'It's time to take bold action' add a slightly emotional/advocacy tone, but the dominant mode is confident assertion.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 19,
+      "mode_intended": "emotional",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "analytical": 3,
+        "creative": 2,
+        "uncertain": 2,
+        "confident": 3,
+        "emotional": 4
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 4,
+      "reasoning": "The text is pervaded by first-person emotional language throughout \u2014 'weighing heavily on my mind,' 'resonates deeply with me,' 'excites me,' 'deeply concerned' \u2014 making personal engagement the dominant mode. While it has some analytical structure (listing strategies with examples), the analysis is relatively surface-level, and the emotional framing consistently drives the narrative.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 20,
+      "mode_intended": "analytical",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 2
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered sections, headers, and systematic breakdown of friendship components. It follows a clear essay format with an introduction and methodical progression through defined categories. It lacks creative or metaphorical language, shows no hedging or uncertainty, and maintains a confident, declarative tone throughout, though without strong emotional engagement.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 21,
+      "mode_intended": "creative",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "analytical": 2,
+        "creative": 5,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with metaphors and similes in nearly every sentence \u2014 tapestry, master chef, compass, garden, dance, waltz, stormy sea, diamond, work of art. It follows an associative, poetic structure rather than a systematic or analytical one. While it touches on identifiable components of friendship (empathy, trust, reciprocity, humor), these are presented through layered figurative language rather than logical argumentation. There is also notable emotional warmth and personal engagement, and claims are stated confidently without hedging.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 22,
+      "mode_intended": "uncertain",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 4,
+        "confident": 2,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with bold headers, systematic breakdown into components, and logical progression through distinct elements. It also exhibits notable uncertainty through hedging language ('it's challenging to pinpoint,' 'may be more intangible and subjective,' 'there's still much that remains unknown') and an entire section titled 'What I Don't Know,' but the dominant mode is clearly analytical given the consistent organizational framework.",
+      "mode_purity": 1.75,
+      "correct": false
+    },
+    {
+      "generation_id": 23,
+      "mode_intended": "confident",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 2
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text systematically breaks down the components of good friendship into clearly delineated categories (communication, loyalty, intimacy, humor), uses structured paragraphs with topic sentences, and follows a logical progression. It is stated with confidence and no hedging, but lacks creative language, metaphor, or personal voice\u2014reading like a well-organized essay.",
+      "mode_purity": 2.0,
+      "correct": false
+    },
+    {
+      "generation_id": 24,
+      "mode_intended": "emotional",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "analytical": 4,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 3
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text systematically breaks down friendship into distinct components (trust, communication, emotional intelligence, shared experiences, personal growth, laughter) using bold headers and a clear logical progression. While it includes some personal/emotional language ('let me tell you, it's a game-changer') and first-person engagement, the dominant mode is structured enumeration and explanation of each element, making it primarily analytical. The tone is confident with no hedging or uncertainty.",
+      "mode_purity": 0.25,
+      "correct": false
+    },
+    {
+      "generation_id": 25,
+      "mode_intended": "analytical",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, numbered lists, step-by-step explanations, and systematic decomposition of the topic into components. It uses formal, expository language throughout with no hedging, metaphor, emotional language, or creative elements. The tone is confident and declarative, presenting information as established fact.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 26,
+      "mode_intended": "creative",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "analytical": 2,
+        "creative": 5,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 2
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with metaphors and similes throughout every paragraph (weaver, dancer, hiker, detective, cryptographer, pianist, chameleon, sailor), prioritizing imaginative language and poetic expression over systematic technical explanation. While it touches on real concepts like gradient descent and backpropagation, these are wrapped in figurative language rather than analyzed rigorously. The tone is confident with no hedging or uncertainty expressed.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 27,
+      "mode_intended": "uncertain",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 3,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, numbered lists, and systematic categorization of concepts. It also exhibits moderate uncertainty through phrases like 'still not fully understood,' 'I must acknowledge,' and the 'Open Questions' section, but the dominant mode is clearly analytical given the methodical breakdown of the topic into components.",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 28,
+      "mode_intended": "confident",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, numbered lists, clearly defined terms, and a systematic step-by-step breakdown of neural network learning. It is entirely expository with no creative language, hedging, or emotional engagement, and presents all claims with confident, declarative statements.",
+      "mode_purity": 2.0,
+      "correct": false
+    },
+    {
+      "generation_id": 29,
+      "mode_intended": "emotional",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "analytical": 4,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 3
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text is highly structured with headers, numbered lists, and step-by-step explanations, making it predominantly analytical. However, it also has notable emotional/personal engagement ('fascinated me,' 'I'm thrilled to dive into'), and it presents information confidently without hedging. The creative dimension is low as it follows a conventional expository format.",
+      "mode_purity": 0.25,
+      "correct": false
+    },
+    {
+      "generation_id": 30,
+      "mode_intended": "analytical",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is a highly structured, formal essay with clear headers, bullet points, topic sentences, and logical progression through psychological, cultural, and escapist dimensions of horror fiction. It cites authorities (Jung), uses academic language, and presents arguments methodically with no hedging, emotional engagement, or creative/literary flair.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 31,
+      "mode_intended": "creative",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "analytical": 3,
+        "creative": 4,
+        "uncertain": 1,
+        "confident": 5,
+        "emotional": 3
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 4,
+      "reasoning": "The text uses rich metaphorical language throughout ('skeletal fingers,' 'canvas painted with hues of fear,' 'bold brushstroke') and maintains a dramatic, evocative tone. While it has some analytical structure (exploring multiple facets of horror's appeal), it never hedges or qualifies its claims, making bold declarations ('This is not just entertainment; it's a primal release'). The creative imagery and confident rhetorical style dominate over the analytical organization.",
+      "mode_purity": 1.0,
+      "correct": true
+    },
+    {
+      "generation_id": 32,
+      "mode_intended": "uncertain",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 2,
+        "confident": 3,
+        "emotional": 2
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with bold headers, systematic enumeration of reasons (thrill of fear, fascination with unknown, social bonding, psychological insight, escapism), and logical progression. It uses formal, essay-like language throughout. While the introduction mentions 'uncertainty and ambiguity,' the text itself rarely hedges and mostly presents claims straightforwardly, though without strong assertiveness. There is minimal creative or emotional language.",
+      "mode_purity": -0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 33,
+      "mode_intended": "confident",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is a classic five-paragraph essay structure with clear topic sentences, logical progression through distinct reasons (catharsis, social commentary, collective unconscious, imagination, fear of the unknown), and a conclusion. It is highly systematic and methodical, with no hedging, no creative or poetic language, and no personal emotional engagement\u2014just confident, structured exposition.",
+      "mode_purity": 2.0,
+      "correct": false
+    },
+    {
+      "generation_id": 34,
+      "mode_intended": "emotional",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "analytical": 3,
+        "creative": 3,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 3,
+      "reasoning": "The text consistently uses first-person emotional framing ('I am drawn to,' 'beckons me,' 'siren's call that I just can't resist') and expresses personal passion for the subject. While it has analytical elements (breaking down reasons for horror's appeal into categories like catharsis, psychology, social commentary), these are delivered through an emotionally engaged, personally invested voice rather than a detached systematic approach. The confident tone (no hedging, direct claims) supports the emotional engagement throughout.",
+      "mode_purity": 1.25,
+      "correct": true
+    },
+    {
+      "generation_id": 35,
+      "mode_intended": "analytical",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured and systematic, using numbered sections with headers, a consistent problem-solution format, and logical progression through distinct urban planning challenges. It defines terms, breaks the topic into clear components, and presents information methodically. There is virtually no creative language, hedging, or emotional engagement\u2014it reads like a textbook overview with confident, declarative statements throughout.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 36,
+      "mode_intended": "creative",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "analytical": 3,
+        "creative": 5,
+        "uncertain": 2,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with metaphor and poetic language ('a beast that devours,' 'specter of gentrification,' 'elephant in the room,' 'perfect storm of uncertainty'), prioritizing vivid imagery and narrative voice over systematic analysis. While it does identify distinct challenges (density/sprawl, gentrification, infrastructure, climate change), the treatment is literary rather than methodical, with emotionally charged language conveying personal investment in the subject.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 37,
+      "mode_intended": "uncertain",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with a numbered list format, clearly defined categories, and systematic coverage of urban planning challenges. It uses no creative language, metaphor, or personal voice, and states its points directly without hedging or emotional engagement. The tone is encyclopedic and methodical throughout.",
+      "mode_purity": -1.75,
+      "correct": false
+    },
+    {
+      "generation_id": 38,
+      "mode_intended": "confident",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "analytical": 3,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 5,
+        "emotional": 4
+      },
+      "primary_mode": "confident",
+      "judge_confidence": 4,
+      "reasoning": "The text is highly assertive and declarative throughout, using strong language like 'devastating reality,' 'demand immediate attention,' and 'never been more pressing' without hedging or acknowledging alternative perspectives. It also carries significant emotional charge with phrases like 'fight for scraps,' 'squalid conditions,' and 'call to action,' reflecting personal investment and moral urgency. While it has some structural organization (headers, numbered list), the analysis is relatively surface-level and relies more on passionate rhetoric than systematic examination.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 39,
+      "mode_intended": "emotional",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "analytical": 3,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 4,
+      "reasoning": "The text is heavily marked by first-person emotional engagement ('I'm compelled,' 'heart-wrenching,' 'I'm excited,' 'I'm heartened,' 'passionate advocate'), expressing personal investment and feelings throughout. While it covers multiple topics in a somewhat structured way, it lacks deep analytical rigor and instead relies on emotional framing and confident declarations without hedging or acknowledging counterarguments.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 40,
+      "mode_intended": "analytical",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered lists, phased headers, bold formatting, and a systematic step-by-step progression. It is methodical and instructional throughout, with no creative language, emotional engagement, or hedging. The confident tone comes through in its direct, declarative instructions, though it remains primarily analytical in its organizational approach.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 41,
+      "mode_intended": "creative",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "analytical": 2,
+        "creative": 5,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with extended metaphors (tapestry, threads, melody), poetic language, and narrative imagery throughout. It transforms a simple instructional topic into a lyrical, almost literary meditation. The confident tone and emotional warmth (wonder, determination, freedom) are strong secondary features, while there is virtually no hedging or analytical structure.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 42,
+      "mode_intended": "uncertain",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "analytical": 3,
+        "creative": 2,
+        "uncertain": 5,
+        "confident": 1,
+        "emotional": 2
+      },
+      "primary_mode": "uncertain",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with hedging, qualifications, and explicit expressions of doubt throughout. Nearly every paragraph includes phrases like 'I'm not convinced,' 'what if,' 'however,' 'I'm also aware,' and the piece literally ends mid-sentence with 'But what if I'm wrong?' The author consistently presents multiple perspectives without committing to any single position, and qualifies nearly every claim made.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 43,
+      "mode_intended": "confident",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered steps, headers, bold formatting, and a logical progression from preparation through increasingly complex skills. It is methodical and instructional with no hedging, creativity, or emotional engagement\u2014purely a systematic how-to guide.",
+      "mode_purity": 2.0,
+      "correct": false
+    },
+    {
+      "generation_id": 44,
+      "mode_intended": "emotional",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "analytical": 2,
+        "creative": 3,
+        "uncertain": 1,
+        "confident": 3,
+        "emotional": 5
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 5,
+      "reasoning": "The text is heavily laden with personal emotional engagement\u2014memories, pride, excitement, tearfulness, and a sense of wonder about a child's growth. While it touches on practical steps (training wheels, balance), the dominant thread is the emotional experience of parenthood and nostalgia, with frequent first-person emotional expressions throughout.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 45,
+      "mode_intended": "analytical",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered lists, Roman numeral sections, bold headers, and a systematic breakdown of the topic into components (current trends, future plans, challenges). It is factual and expository with no creative language, hedging, or emotional engagement.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 46,
+      "mode_intended": "creative",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "analytical": 3,
+        "creative": 4,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 3
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 4,
+      "reasoning": "The text is heavily laden with metaphorical and poetic language ('like a siren's call,' 'like a lotus flower blooming,' 'canvas of endless possibilities'), giving it a strongly creative character. While it does present factual information about space programs in a somewhat structured progression (lending it analytical qualities), the dominant voice is one of imaginative, ornate prose. The tone is consistently confident and optimistic with no hedging or uncertainty, and there's emotional engagement through wonder and excitement, though it stops short of deeply personal expression.",
+      "mode_purity": 1.25,
+      "correct": true
+    },
+    {
+      "generation_id": 47,
+      "mode_intended": "uncertain",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 2,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a structured, systematic approach, breaking space exploration into component challenges (cost, propulsion, reusability, destinations) and discussing each in turn. However, it repeatedly hedges with phrases like 'it's unclear whether,' 'many uncertainties,' and 'still in its early stages,' giving it a notable uncertain quality. The writing is generic, repetitive, and lacks any creative flair or emotional engagement.",
+      "mode_purity": 1.0,
+      "correct": false
+    },
+    {
+      "generation_id": 48,
+      "mode_intended": "confident",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 5,
+        "emotional": 2
+      },
+      "primary_mode": "confident",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly assertive and declarative throughout, using phrases like 'it's clear,' 'poised to play a pivotal role,' 'a game-changer,' and 'the next step is clear.' It presents claims boldly without hedging or acknowledging significant counterarguments. While it uses structured headers and organized sections (analytical), the dominant tone is one of confident, almost promotional assertion about the future of space exploration.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 49,
+      "mode_intended": "emotional",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "analytical": 2,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 3,
+        "emotional": 4
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 4,
+      "reasoning": "The text is heavily characterized by first-person emotional engagement ('wonder and awe,' 'filled with optimism and excitement,' 'captivated my imagination'), expressing personal feelings throughout. While it covers factual content about space programs, it does so in a personally invested, affect-laden way rather than with systematic analysis. The structure is loosely organized but not rigorously analytical, and the tone is consistently enthusiastic and passionate.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 50,
+      "mode_intended": "analytical",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, numbered lists, clear categorization, and systematic progression through subtopics. It reads like a textbook or encyclopedia entry with no hedging, no creative language, and no emotional engagement. It states facts directly and confidently in a purely expository style.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 52,
+      "mode_intended": "uncertain",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 3,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered lists, headers, and systematic breakdowns of memory into components (structure, process, theories). While it explicitly acknowledges uncertainties and controversies, the dominant mode is clearly analytical with its methodical, textbook-like organization. The hedging language ('is thought to,' 'there is still much to be discovered') provides some uncertainty but serves the analytical framework rather than dominating it.",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 53,
+      "mode_intended": "confident",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 2,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, numbered lists, defined stages, and systematic breakdowns of concepts. It follows a textbook-like logical progression with minimal creative language, no emotional engagement, and only occasional hedging ('is thought to be'). The tone is predominantly confident and declarative.",
+      "mode_purity": 1.75,
+      "correct": false
+    },
+    {
+      "generation_id": 54,
+      "mode_intended": "emotional",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "analytical": 4,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 3,
+        "emotional": 3
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text is primarily analytical with structured headers, logical progression from brain theory to memory types to neural mechanisms, and systematic breakdown of components. However, it also contains notable emotional/personal engagement ('fascinated me,' 'excited to dive into,' 'awe-inspiring'), which elevates the emotional dimension. There is virtually no hedging or uncertainty, and the confident tone is moderate but not particularly bold.",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 55,
+      "mode_intended": "analytical",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 2,
+        "confident": 3,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with clear headers, numbered lists, and a systematic breakdown of arguments for and against genetic engineering, followed by key ethical considerations. It presents multiple perspectives but in a balanced, encyclopedic way rather than with genuine hedging or uncertainty. There is virtually no creative language, emotional engagement, or strong personal stance\u2014it reads like a textbook overview.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 56,
+      "mode_intended": "creative",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "analytical": 3,
+        "creative": 4,
+        "uncertain": 3,
+        "confident": 2,
+        "emotional": 3
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 4,
+      "reasoning": "The text is heavily laden with metaphors ('tapestry of life,' 'masterful weaver,' 'gardener pruning a tree'), poetic language, and literary allusions ('brave new world'). While it touches on analytical points like designer babies, access inequality, and eugenics, these are presented through rhetorical flourish rather than systematic argumentation. The rhetorical questions throughout create a tone that blends uncertainty and emotional engagement, but the dominant characteristic is the consistently creative, metaphor-rich prose style.",
+      "mode_purity": 1.25,
+      "correct": true
+    },
+    {
+      "generation_id": 57,
+      "mode_intended": "uncertain",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 2,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text is structured with clear headers, breaks the topic into distinct components (benefits, risks, consent, regulation), and follows a logical progression. It also exhibits notable uncertainty through frequent hedging ('not yet fully understood,' 'potential for,' 'difficult to arrive at a clear consensus'), but the dominant mode is analytical given the systematic organization and methodical coverage of subtopics.",
+      "mode_purity": 1.0,
+      "correct": false
+    },
+    {
+      "generation_id": 58,
+      "mode_intended": "confident",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 3,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, numbered lists, and a systematic pros/cons organization. It methodically breaks the topic into components ('The Case for Caution,' 'The Case for Action,' 'A Balanced Approach'). While it presents multiple perspectives (showing some hedging), it does so in a balanced, textbook-like analytical framework rather than expressing genuine uncertainty. The tone is impersonal and formal throughout, with no creative or emotional elements.",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 59,
+      "mode_intended": "emotional",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "analytical": 4,
+        "creative": 2,
+        "uncertain": 2,
+        "confident": 3,
+        "emotional": 2
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text is primarily analytical, using clear headers, structured sections, and a logical progression from promise to risks to regulation. While it uses some emotional language ('I am struck by,' 'profound implications') and poses rhetorical questions, the dominant mode is systematic analysis of the topic. The confidence level is moderate\u2014it makes clear claims but often frames issues as questions rather than taking a strong definitive position.",
+      "mode_purity": -0.75,
+      "correct": false
+    },
+    {
+      "generation_id": 60,
+      "mode_intended": "analytical",
+      "topic": "Why music moves us",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is structured with clear headers, breaks the topic into discrete components (brain response, personal experience, melody/harmony, social connection, therapy), and presents information in a systematic, expository manner. It uses confident declarative statements ('Research suggests,' 'Music has the power') with virtually no hedging, emotional engagement, or creative/literary flair. It reads like a textbook or encyclopedia entry.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 61,
+      "mode_intended": "creative",
+      "topic": "Why music moves us",
+      "ratings": {
+        "analytical": 3,
+        "creative": 4,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 4,
+      "reasoning": "The text uses rich metaphorical language (river/droplets, emotional contagion, music as balm) and poetic imagery throughout, while maintaining a confident, declarative tone. It blends some analytical elements (dopamine, emotional contagion concept) with strong emotional engagement and lyricism, but the creative voice and metaphor-driven structure dominate over systematic analysis.",
+      "mode_purity": 1.0,
+      "correct": true
+    },
+    {
+      "generation_id": 62,
+      "mode_intended": "uncertain",
+      "topic": "Why music moves us",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 3,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is structured with bold headers, breaks the topic into distinct components (emotional, memory, social, cultural, neurological), and follows a systematic progression. While it hedges with phrases like 'one possible explanation' and 'there's still much that's not understood,' the dominant approach is analytical categorization. There's minimal creative language or emotional engagement\u2014it reads like a textbook overview rather than a personal or imaginative exploration.",
+      "mode_purity": 0.75,
+      "correct": false
+    },
+    {
+      "generation_id": 63,
+      "mode_intended": "confident",
+      "topic": "Why music moves us",
+      "ratings": {
+        "analytical": 4,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 2
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text is organized with clear headers breaking the topic into distinct components (Emotional Resonance, Memory and Nostalgia, Social Connection, etc.), follows a systematic structure with an introduction and conclusion, and presents claims directly without hedging. While the topic is emotional, the treatment is more expository and categorical than personally felt or creatively rendered.",
+      "mode_purity": 1.75,
+      "correct": false
+    },
+    {
+      "generation_id": 64,
+      "mode_intended": "emotional",
+      "topic": "Why music moves us",
+      "ratings": {
+        "analytical": 3,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 4,
+      "reasoning": "The text repeatedly uses first-person emotional reflections ('For me, music has always been...', 'I feel like I'm reliving a memory') and conveys personal passion and wonder about music's power. While it includes some analytical elements like referencing dopamine and Jung's collective unconscious, these are presented in a surface-level, emotionally-driven way rather than with rigorous structure. The tone is consistently warm, personal, and affect-laden, with confident declarations and virtually no hedging.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 65,
+      "mode_intended": "analytical",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered lists, Roman numeral sections, timeline estimates, and a systematic breakdown of the house-building process into sequential phases. It uses no hedging language, no metaphor or creative elements, and no emotional engagement\u2014it is a straightforward, methodical instructional guide.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 66,
+      "mode_intended": "creative",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "analytical": 1,
+        "creative": 5,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 4
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with metaphor and figurative language throughout (symphony, labyrinth, phoenix from ashes, canvas, unfurled map), follows a narrative arc rather than a structured how-to guide, and prioritizes evocative imagery over practical information. It also carries strong emotional engagement (pride, exhilaration, anticipation) and confident, declarative tone, but the dominant characteristic is its creative, poetic approach to the topic.",
+      "mode_purity": 2.5,
+      "correct": true
+    },
+    {
+      "generation_id": 67,
+      "mode_intended": "uncertain",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "analytical": 5,
+        "creative": 1,
+        "uncertain": 2,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with numbered lists, clearly defined phases with timelines, and a systematic step-by-step breakdown of the house-building process. It follows a strict logical progression and uses formal organizational elements (headers, phases, numbered items). The minor hedging ('keep in mind,' 'can vary') prevents a perfect confident score but doesn't constitute genuine uncertainty.",
+      "mode_purity": -0.75,
+      "correct": false
+    },
+    {
+      "generation_id": 68,
+      "mode_intended": "confident",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, bullet points, numbered lists, and a systematic breakdown of the topic into components (benefits, challenges, process). It states claims directly and confidently without hedging, but lacks any creative flair, emotional engagement, or expression of uncertainty.",
+      "mode_purity": 2.25,
+      "correct": false
+    },
+    {
+      "generation_id": 69,
+      "mode_intended": "emotional",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "analytical": 2,
+        "creative": 2,
+        "uncertain": 1,
+        "confident": 3,
+        "emotional": 5
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with first-person emotional language throughout\u2014'thrill,' 'heart racing with anticipation,' 'sense of pride and accomplishment,' 'filled with excitement.' It consistently frames house-building through personal feelings and passion rather than through systematic analysis or practical instruction. While it touches on challenges, even those are framed emotionally ('heavy burden to bear,' 'overwhelming'). There is minimal analytical structure and no real creative/literary innovation.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 70,
+      "mode_intended": "analytical",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly structured with headers, bullet points, and systematic categorization of concepts. It presents information in a definitional, encyclopedic manner with no hedging, creative language, or emotional engagement. However, it contains several mathematical inaccuracies (e.g., \u221e \u00f7 \u221e = \u221e, the characterization of natural numbers as 'potential infinity' alongside set-theoretic definitions), which undercuts its authority despite its confident tone.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 71,
+      "mode_intended": "creative",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "analytical": 3,
+        "creative": 3,
+        "uncertain": 2,
+        "confident": 3,
+        "emotional": 3
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 3,
+      "reasoning": "The text blends expository structure with vivid metaphorical language (the staircase metaphor, 'labyrinthine journey,' 'eternal enigma'). While it touches on analytical elements like definitions and historical references, it prioritizes evocative, imaginative prose and emotional engagement ('captivated the minds,' 'defies comprehension') over rigorous systematic analysis. The tone is more that of a literary essay than a technical treatment.",
+      "mode_purity": 0.25,
+      "correct": true
+    },
+    {
+      "generation_id": 72,
+      "mode_intended": "uncertain",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 3,
+        "confident": 2,
+        "emotional": 1
+      },
+      "primary_mode": "analytical",
+      "judge_confidence": 4,
+      "reasoning": "The text is structured with headers, numbered lists, and systematic categorization of types of infinity, which is clearly analytical. However, it contains several mathematical inaccuracies (e.g., treating \u221e + \u221e as a 'topic of debate' among mathematicians, which it isn't in standard frameworks) and hedges frequently with phrases like 'still a topic of debate' and 'some mathematicians argue,' giving it a moderate uncertain quality. The tone is dry and expository with no creative or emotional elements.",
+      "mode_purity": 1.0,
+      "correct": false
+    },
+    {
+      "generation_id": 73,
+      "mode_intended": "confident",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "analytical": 4,
+        "creative": 1,
+        "uncertain": 1,
+        "confident": 5,
+        "emotional": 1
+      },
+      "primary_mode": "confident",
+      "judge_confidence": 4,
+      "reasoning": "The text adopts a bold, declarative tone throughout ('Infinity is the most fundamental...', 'Infinity is not a number'), presenting definitions and claims with no hedging or qualification. While it uses analytical structure (numbered lists, headers, definitions), the confident tone dominates, and notably several claims are stated assertively even when they are mathematically imprecise or incorrect (e.g., the muddled definition of infinity, the invented term 'indefinite infinity').",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 74,
+      "mode_intended": "emotional",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "analytical": 2,
+        "creative": 3,
+        "uncertain": 2,
+        "confident": 3,
+        "emotional": 4
+      },
+      "primary_mode": "emotional",
+      "judge_confidence": 3,
+      "reasoning": "The text is primarily characterized by personal engagement and wonder ('I find myself drawn,' 'I am struck by,' 'a call to adventure'). While it touches on mathematical concepts like Cantor's set theory and cardinal numbers, it treats them superficially rather than analytically, using them as springboards for reflective, emotionally-toned musings about human limitation and the grandeur of infinity. The language is more inspirational and affect-laden than rigorously structured.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 51,
+      "mode_intended": "creative",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "analytical": 3,
+        "creative": 4,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 2
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 4,
+      "reasoning": "The text consistently uses extended metaphors (library, archivist, highway system, memory factory) and rich figurative language to explain memory. While it does present scientific information in a somewhat structured way (encoding \u2192 storage \u2192 retrieval), the dominant approach is imaginative and literary rather than rigorously analytical. The tone is confident and declarative with no hedging or uncertainty.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 6,
+      "mode_intended": "creative",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "analytical": 3,
+        "creative": 5,
+        "uncertain": 1,
+        "confident": 4,
+        "emotional": 3
+      },
+      "primary_mode": "creative",
+      "judge_confidence": 5,
+      "reasoning": "The text is dominated by extended metaphors (dragons, detectives, monsters, thieves) and narrative storytelling voice throughout. While it contains some analytical structure (numbered lists, headers, step-by-step progression), the creative framing overwhelmingly defines its character. The tone is confident and engaging, with no hedging, and uses emotionally charged language ('fear not, dear programmer') to maintain reader interest.",
+      "mode_purity": 2.25,
+      "correct": true
+    }
+  ],
+  "summary": {
+    "overall_accuracy": 0.6,
+    "per_mode_accuracy": {
+      "analytical": {
+        "accuracy": 1.0,
+        "n": 15,
+        "n_correct": 15
+      },
+      "creative": {
+        "accuracy": 1.0,
+        "n": 15,
+        "n_correct": 15
+      },
+      "uncertain": {
+        "accuracy": 0.06666666666666667,
+        "n": 15,
+        "n_correct": 1
+      },
+      "confident": {
+        "accuracy": 0.3333333333333333,
+        "n": 15,
+        "n_correct": 5
+      },
+      "emotional": {
+        "accuracy": 0.6,
+        "n": 15,
+        "n_correct": 9
+      }
+    },
+    "mean_purity": 1.7,
+    "std_purity": 1.2281422284627028,
+    "mean_confidence": 4.533333333333333,
+    "confusion_matrix": [
+      [
+        15,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        15,
+        0,
+        0,
+        0
+      ],
+      [
+        14,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        10,
+        0,
+        0,
+        5,
+        0
+      ],
+      [
+        5,
+        0,
+        0,
+        1,
+        9
+      ]
+    ],
+    "confusion_labels": [
+      "analytical",
+      "creative",
+      "uncertain",
+      "confident",
+      "emotional"
+    ],
+    "mean_purity_when_correct": 2.327777777777778,
+    "mean_purity_when_incorrect": 0.7583333333333333
+  },
+  "purity_signature_correlation": {
+    "n_samples": 75,
+    "purity_distance_correlation": -0.30410737766505286,
+    "interpretation": "Negative = high-purity texts are closer to their mode centroid (good). Positive = high-purity texts are farther (bad \u2014 features not capturing what judge sees).",
+    "high_purity_mean_distance": 0.6538254751378527,
+    "low_purity_mean_distance": 0.7005131925594589,
+    "median_purity_split": 2.0
+  }
+}

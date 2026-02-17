@@ -1,0 +1,39 @@
+{
+  "generation_id": 25,
+  "prompt_set": "A",
+  "topic": "How neural networks learn",
+  "topic_idx": 5,
+  "mode": "structured",
+  "mode_idx": 0,
+  "system_prompt": "Use numbered sections, headers, and bullet points. Present one idea per paragraph in logical order. Define terms before using them. Build each point on the previous one. End with a clear summary.",
+  "user_prompt": "Write about: How neural networks learn",
+  "seed": 1908743726,
+  "repetition": 0,
+  "generated_text": "**Introduction to Neural Networks**\n\nA neural network is a computer system inspired by the structure and function of the human brain. It consists of interconnected nodes or \"neurons\" that process and transmit information. Neural networks are trained on data to learn patterns and make predictions or decisions. The learning process of neural networks is based on the concept of supervised, unsupervised, and reinforcement learning.\n\n**Supervised Learning**\n\nSupervised learning is a type of training where the neural network is provided with labeled data, meaning the correct output is already known. The network learns to map inputs to outputs by minimizing the difference between its predictions and the actual outputs. The goal is to find the best parameters that result in the smallest error. The training process involves adjusting the weights and biases of the connections between neurons to optimize the performance of the network.\n\n**Unsupervised Learning**\n\nUnsupervised learning is a type of training where the neural network is provided with unlabeled data. The network learns to identify patterns and relationships in the data without prior knowledge of the correct outputs. The goal is to group similar data points together or to identify hidden features in the data. Unsupervised learning is often used for clustering, dimensionality reduction, and anomaly detection.\n\n**Reinforcement Learning**\n\nReinforcement learning is a type of training where the neural network learns through trial and error by interacting with an environment. The network receives rewards or penalties for its actions, and it learns to optimize its behavior to maximize the rewards. The goal is to find the best policy that results in the highest cumulative reward. Reinforcement learning is often used in robotics, game playing, and autonomous vehicles.\n\n**How Neural Networks Learn**\n\nNeural networks learn through a process called backpropagation. Backpropagation involves three main steps:\n\n1. **Forward Pass**: The neural network processes the input data and produces an output.\n2. **Error Calculation**: The difference between the predicted output and the actual output is calculated.\n3. **Backward Pass**: The error is propagated backwards through the network, adjusting the weights and biases of the connections between neurons to minimize the error.\n\n**Key Concepts**\n\n* **Activation Functions**: Functions that introduce non-linearity into the network, allowing it to learn complex patterns.\n* **Hidden Layers**: Layers of neurons that process the input data and produce a hidden representation.\n* **Weight Initialization**: The process of initializing the weights of the connections between neurons.\n* **Regularization Techniques**: Techniques used to prevent overfitting, such as dropout and L1/L2 regularization.\n\n**Summary",
+  "num_generated_tokens": 512,
+  "prompt_length": 81,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.62,
+    "extraction_seconds": 17.81,
+    "total_seconds": 31.43
+  }
+}

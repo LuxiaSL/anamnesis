@@ -1,0 +1,134 @@
+{
+  "exclude_mode": "analogical",
+  "n_samples": 80,
+  "n_features": 1837,
+  "modes": [
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "rf_accuracy_mean": 0.55,
+  "rf_accuracy_std": 0.082915619758885,
+  "confusion_matrix": [
+    [
+      13,
+      5,
+      2,
+      0
+    ],
+    [
+      6,
+      9,
+      1,
+      4
+    ],
+    [
+      5,
+      1,
+      9,
+      5
+    ],
+    [
+      2,
+      2,
+      3,
+      13
+    ]
+  ],
+  "confusion_matrix_labels": [
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "per_mode_accuracy": {
+    "contrastive": {
+      "correct": 13,
+      "total": 20,
+      "accuracy": 0.65
+    },
+    "dialectical": {
+      "correct": 9,
+      "total": 20,
+      "accuracy": 0.45
+    },
+    "linear": {
+      "correct": 9,
+      "total": 20,
+      "accuracy": 0.45
+    },
+    "socratic": {
+      "correct": 13,
+      "total": 20,
+      "accuracy": 0.65
+    }
+  },
+  "mode_silhouette": 0.005879176314920187,
+  "topic_silhouette": 0.07903780043125153,
+  "mantel_r_prompt": 0.3978418400009766,
+  "mantel_r_text": 0.426216830393066,
+  "tier_ablation": {
+    "features_tier1": {
+      "n_features": 221,
+      "rf_accuracy": 0.4875,
+      "silhouette": -0.005702849477529526
+    },
+    "features_tier2": {
+      "n_features": 221,
+      "rf_accuracy": 0.5625,
+      "silhouette": -0.0037883203476667404
+    },
+    "features_tier2_5": {
+      "n_features": 145,
+      "rf_accuracy": 0.475,
+      "silhouette": 0.0061154975555837154
+    }
+  },
+  "engineered_only_rf": 0.575,
+  "length_only_rf": 0.2125,
+  "retrieval_computational": 0.2775,
+  "retrieval_semantic": 0.1225,
+  "pairwise_discriminability": {
+    "matrix": [
+      [
+        1.0,
+        0.85,
+        0.825,
+        0.875
+      ],
+      [
+        0.85,
+        1.0,
+        0.85,
+        0.75
+      ],
+      [
+        0.825,
+        0.85,
+        1.0,
+        0.725
+      ],
+      [
+        0.875,
+        0.75,
+        0.725,
+        1.0
+      ]
+    ],
+    "labels": [
+      "contrastive",
+      "dialectical",
+      "linear",
+      "socratic"
+    ],
+    "pairs": {
+      "contrastive_vs_dialectical": 0.85,
+      "contrastive_vs_linear": 0.825,
+      "contrastive_vs_socratic": 0.875,
+      "dialectical_vs_linear": 0.85,
+      "dialectical_vs_socratic": 0.75,
+      "linear_vs_socratic": 0.725
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "generation_id": 10,
+  "prompt_set": "A",
+  "topic": "The history of bread",
+  "topic_idx": 2,
+  "mode": "linear",
+  "mode_idx": 0,
+  "system_prompt": "Present your ideas in a clear sequence, each building on the last. Move forward without backtracking or reconsidering previous points. Lay out the topic step by step from beginning to end. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+  "user_prompt": "Write about: The history of bread",
+  "seed": 2191539456,
+  "repetition": 0,
+  "generated_text": "The history of bread dates back to the Stone Age, where it is believed to have been first domesticated around 10,000 years ago in the Fertile Crescent, a region that includes modern-day Iraq, Syria, Lebanon, Jordan, Israel, and parts of Turkey and Egypt. At that time, humans were transitioning from a nomadic, hunter-gatherer lifestyle to one that was more sedentary and agricultural. The discovery of wheat, barley, and rye, which are the primary grains used to make bread, marked a significant turning point in human history.\n\nAs people began to settle in one place, they were able to cultivate and harvest these grains more efficiently, leading to the development of early forms of bread. The earliest evidence of bread-making comes from the ancient Sumerian city of Nippur, where archaeologists have discovered clay tablets containing recipes for bread dating back to around 2000 BCE. These early breads were likely made from crushed grains mixed with water and cooked over an open fire.\n\nAs civilizations developed and trade routes expanded, bread became a staple food throughout the ancient world. The ancient Egyptians, for example, were known for their advanced bread-making techniques, which included the use of yeast and intricate designs on the bread. The Egyptians also developed a system of bread-making that allowed for the mass production of bread, which was a significant innovation at the time.\n\nThe ancient Greeks and Romans also made significant contributions to the history of bread. The Greeks developed a type of bread called \"barley bread,\" which was made from crushed barley grains and was often served with olive oil and other toppings. The Romans, on the other hand, developed a more sophisticated bread-making process that involved the use of yeast and a slower fermentation process. This led to the creation of lighter, airier breads that were more similar to the breads we know today.\n\nThe Middle Ages saw the rise of bread as a central part of European cuisine. The Catholic Church played a significant role in the development of bread-making during this period, as it was seen as a way to provide sustenance for the poor and to support the spiritual well-being of the faithful. The invention of the oven in the 12th century CE allowed for the mass production of bread, which further solidified its place in European cuisine.\n\nThe Industrial Revolution marked a significant turning point in the history of bread. The introduction of new machinery and manufacturing techniques allowed for the mass production of bread on a large scale, making it more affordable and accessible to people all over the world.",
+  "num_generated_tokens": 512,
+  "prompt_length": 101,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.53,
+    "extraction_seconds": 18.61,
+    "total_seconds": 32.13
+  }
+}

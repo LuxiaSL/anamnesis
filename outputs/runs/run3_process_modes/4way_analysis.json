@@ -1,0 +1,91 @@
+{
+  "n_samples": 60,
+  "n_features": 1837,
+  "modes": [
+    "associative",
+    "deliberative",
+    "pedagogical",
+    "structured"
+  ],
+  "rf_accuracy_mean": 0.9166666666666666,
+  "rf_accuracy_std": 0.05270462766947298,
+  "confusion_matrix": [
+    [
+      15,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      14,
+      1,
+      0
+    ],
+    [
+      1,
+      3,
+      11,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      15
+    ]
+  ],
+  "confusion_matrix_labels": [
+    "associative",
+    "deliberative",
+    "pedagogical",
+    "structured"
+  ],
+  "per_mode_accuracy": {
+    "associative": {
+      "correct": 15,
+      "total": 15,
+      "accuracy": 1.0
+    },
+    "deliberative": {
+      "correct": 14,
+      "total": 15,
+      "accuracy": 0.9333333333333333
+    },
+    "pedagogical": {
+      "correct": 11,
+      "total": 15,
+      "accuracy": 0.7333333333333333
+    },
+    "structured": {
+      "correct": 15,
+      "total": 15,
+      "accuracy": 1.0
+    }
+  },
+  "mode_silhouette": 0.09120145440101624,
+  "topic_silhouette": -0.020870540291070938,
+  "mantel_r_prompt": 0.14190838049973442,
+  "mantel_r_text": 0.2560597396519279,
+  "tier_ablation": {
+    "features_tier1": {
+      "n_features": 221,
+      "rf_accuracy": 0.8,
+      "silhouette": 0.10701385885477066
+    },
+    "features_tier2": {
+      "n_features": 221,
+      "rf_accuracy": 0.8333333333333333,
+      "silhouette": 0.17474952340126038
+    },
+    "features_tier2_5": {
+      "n_features": 145,
+      "rf_accuracy": 0.7666666666666667,
+      "silhouette": 0.15179260075092316
+    }
+  },
+  "engineered_only_rf": 0.8833333333333332,
+  "length_only_rf": 0.31666666666666665,
+  "retrieval_computational": 0.6366666666666667,
+  "retrieval_semantic": 0.22333333333333333
+}

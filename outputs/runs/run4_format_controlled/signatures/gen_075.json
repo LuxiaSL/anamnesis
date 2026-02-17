@@ -1,0 +1,39 @@
+{
+  "generation_id": 75,
+  "prompt_set": "B",
+  "topic": "The evolution of language",
+  "topic_idx": 15,
+  "mode": "linear",
+  "mode_idx": 0,
+  "system_prompt": "Present your ideas in a clear sequence, each building on the last. Move forward without backtracking or reconsidering previous points. Lay out the topic step by step from beginning to end. Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+  "user_prompt": "Write about: The evolution of language",
+  "seed": 2536056660,
+  "repetition": 0,
+  "generated_text": "The evolution of language is a complex and multifaceted phenomenon that has been unfolding over millions of years, shaping the way humans communicate and interact with one another. It is a story that spans from the earliest forms of proto-language to the sophisticated, nuanced systems of modern languages.\n\nAt the core of language evolution is the fundamental need for humans to convey meaning and express themselves to others. This need has driven the development of increasingly complex communication systems, as humans sought to convey subtle shades of meaning, tell stories, and share knowledge. One of the earliest forms of proto-language is thought to have emerged around 100,000 years ago, during the Upper Paleolithic period. This early language likely consisted of a series of grunts, gestures, and vocalizations that allowed early humans to communicate basic needs and emotions.\n\nAs human societies grew and became more complex, language evolved to accommodate the needs of larger communities. The development of symbolic language, around 50,000 years ago, marked a significant milestone in the evolution of language. Symbolic language allowed for the creation of words and phrases that could be used to convey complex meanings and tell stories. This was made possible by the discovery of tools such as language stones, which were used to convey meaning through a system of symbols.\n\nThe development of language also played a crucial role in the emergence of culture and social complexity. As language became more sophisticated, it enabled humans to share knowledge, create myths and legends, and develop complex social hierarchies. The rise of written language, around 5,000 years ago, marked another significant milestone in the evolution of language. Written language allowed for the recording of knowledge, the transmission of cultural traditions, and the creation of complex texts that could be used to convey meaning and tell stories.\n\nThe evolution of language has also been shaped by geographical and cultural factors. The spread of language across continents and cultures has led to the development of new languages and dialects, as well as the blending of languages and cultural traditions. For example, the spread of Indo-European languages across Europe and Asia has left a rich legacy of linguistic and cultural diversity.\n\nToday, language is a fundamental aspect of human identity and culture. It plays a crucial role in shaping our perceptions, influencing our thoughts and behaviors, and connecting us to others. As language continues to evolve, it is likely to become increasingly complex and nuanced, reflecting the diverse needs and experiences of human societies around the world.\n\nIn the future, the evolution of language will likely be shaped by technological advancements, such as artificial intelligence and virtual reality. As these",
+  "num_generated_tokens": 512,
+  "prompt_length": 101,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.47,
+    "extraction_seconds": 17.7,
+    "total_seconds": 31.17
+  }
+}

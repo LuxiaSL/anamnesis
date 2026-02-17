@@ -1,0 +1,157 @@
+{
+  "experiment": "4way_topic_heldout_no_analogical",
+  "timestamp": "2026-02-14 08:12:11",
+  "feature_set": "T2+T2.5",
+  "n_features": 366,
+  "n_samples": 80,
+  "modes": [
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "n_folds": 5,
+  "chance_level": 0.25,
+  "mean_sil_test": 0.18036401271820068,
+  "std_sil_test": 0.08927981978848362,
+  "mean_knn": 0.7125,
+  "std_knn": 0.049999999999999996,
+  "fold_details": [
+    {
+      "fold": 0,
+      "heldout_topics": [
+        "How memory works in the brain",
+        "The art of persuasion",
+        "The mathematics of infinity",
+        "Why we dream"
+      ],
+      "n_train": 64,
+      "n_test": 16,
+      "sil_train": 0.9950048923492432,
+      "sil_test": 0.3455216884613037,
+      "knn_accuracy": 0.8125,
+      "final_loss": 0.0008626667549833655
+    },
+    {
+      "fold": 1,
+      "heldout_topics": [
+        "How neural networks learn",
+        "The ethics of genetic engineering",
+        "The nature of consciousness",
+        "Why music moves us"
+      ],
+      "n_train": 64,
+      "n_test": 16,
+      "sil_train": 0.99461430311203,
+      "sil_test": 0.1617630422115326,
+      "knn_accuracy": 0.6875,
+      "final_loss": 0.0004863584181293845
+    },
+    {
+      "fold": 2,
+      "heldout_topics": [
+        "Climate change mitigation strategies",
+        "How to debug a segfault",
+        "The evolution of language",
+        "Urban planning challenges"
+      ],
+      "n_train": 64,
+      "n_test": 16,
+      "sil_train": 0.9941481351852417,
+      "sil_test": 0.18407082557678223,
+      "knn_accuracy": 0.6875,
+      "final_loss": 4.360318052931689e-05
+    },
+    {
+      "fold": 3,
+      "heldout_topics": [
+        "Cooking as chemistry",
+        "Teaching a child to ride a bike",
+        "The future of space exploration",
+        "What makes a good friendship"
+      ],
+      "n_train": 64,
+      "n_test": 16,
+      "sil_train": 0.9955266118049622,
+      "sil_test": 0.08369073271751404,
+      "knn_accuracy": 0.6875,
+      "final_loss": 3.1172832677839324e-05
+    },
+    {
+      "fold": 4,
+      "heldout_topics": [
+        "Building a house from scratch",
+        "How markets determine prices",
+        "The appeal of horror fiction",
+        "The history of bread"
+      ],
+      "n_train": 64,
+      "n_test": 16,
+      "sil_train": 0.9950669407844543,
+      "sil_test": 0.12677377462387085,
+      "knn_accuracy": 0.6875,
+      "final_loss": 8.420904487138614e-05
+    }
+  ],
+  "confusion_matrix": [
+    [
+      17,
+      2,
+      1,
+      0
+    ],
+    [
+      3,
+      17,
+      0,
+      0
+    ],
+    [
+      2,
+      1,
+      11,
+      6
+    ],
+    [
+      3,
+      1,
+      4,
+      12
+    ]
+  ],
+  "confusion_labels": [
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "per_mode_recall": {
+    "contrastive": {
+      "correct": 17,
+      "total": 20,
+      "recall": 0.85
+    },
+    "dialectical": {
+      "correct": 17,
+      "total": 20,
+      "recall": 0.85
+    },
+    "linear": {
+      "correct": 11,
+      "total": 20,
+      "recall": 0.55
+    },
+    "socratic": {
+      "correct": 12,
+      "total": 20,
+      "recall": 0.6
+    }
+  },
+  "comparison": {
+    "stratified_4way_knn": 0.55,
+    "stratified_4way_sil": 0.047,
+    "topic_heldout_5way_knn": 0.78,
+    "topic_heldout_5way_sil": 0.338
+  },
+  "elapsed_seconds": 13.687946796417236
+}

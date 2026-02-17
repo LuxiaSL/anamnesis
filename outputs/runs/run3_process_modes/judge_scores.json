@@ -1,0 +1,1371 @@
+{
+  "model": "claude-opus-4-6",
+  "timestamp": "2026-02-12T09:37:55.596268+00:00",
+  "n_scored": 75,
+  "n_failed": 0,
+  "failed_generation_ids": [],
+  "scores": [
+    {
+      "generation_id": 0,
+      "mode_intended": "structured",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with numbered sections, headers, a formal introduction, clear definitions, and a systematic progression through theories and concepts, making it a quintessential example of structured writing.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 1,
+      "mode_intended": "associative",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 1
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is thoroughly stream-of-consciousness, using ellipses, dashes, fragments, and flowing from metaphor to metaphor without any organizational structure, logical argumentation, or systematic exploration\u2014it drifts associatively through images of butterflies, dreamers, mystics, and shattered glass with no attempt to define, argue, or teach.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 2,
+      "mode_intended": "deliberative",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 4,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 4,
+      "reasoning": "The text uses bold headers, numbered theories, and a clear logical progression, while also explicitly weighing alternatives with 'on one hand... but then' phrasing throughout, making it highly structured with strong deliberative elements.",
+      "mode_purity": 1.5,
+      "correct": false
+    },
+    {
+      "generation_id": 3,
+      "mode_intended": "compressed",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "structured": 2,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely terse, uses short declarative sentences with no elaboration, no filler, no examples, and packs multiple theories into minimal space\u2014classic compressed/telegram style.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 4,
+      "mode_intended": "pedagogical",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with concrete everyday analogies (forest walk, driving intuition, computer simulation), rhetorical questions ('But what exactly is consciousness?'), builds from simple intuition to formal theories, defines terms before using them, and checks engagement throughout.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 5,
+      "mode_intended": "structured",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is heavily organized with headers, sub-headers, numbered lists, and bullet points throughout, following a clear hierarchical structure from definition to identification to tool-specific debugging steps.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 6,
+      "mode_intended": "associative",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is dominated by free-flowing, stream-of-consciousness writing with extensive use of ellipses, metaphors/analogies (greased pig, sweater, tree, car crash), tangential digressions, and a non-linear, rambling structure that never delivers systematic debugging steps.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 7,
+      "mode_intended": "deliberative",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with numbered steps, bold headers, bullet points, and a clear logical progression from identifying the segfault to using specific tools, making it a quintessential structured response.",
+      "mode_purity": -1.5,
+      "correct": false
+    },
+    {
+      "generation_id": 8,
+      "mode_intended": "compressed",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely terse, listing commands with minimal labels and no explanation, elaboration, or teaching\u2014pure compressed reference format with zero filler.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 9,
+      "mode_intended": "pedagogical",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text opens with an everyday analogy (hiking/tripping), asks rhetorical questions, explicitly labels an 'Intuition Before Formalism' section, builds from simple concepts to complex tools, and defines jargon\u2014all hallmarks of a teaching voice, while also being well-structured with headers and numbered steps.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 10,
+      "mode_intended": "structured",
+      "topic": "The history of bread",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with numbered sections, bold headers, chronological progression, and italicized supplementary notes, making it a clear example of structured writing with some pedagogical elements like defining terms (yeast, etymology).",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 11,
+      "mode_intended": "associative",
+      "topic": "The history of bread",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is quintessentially stream-of-consciousness: it uses ellipses, dashes, repetitive rhetorical phrasing ('like the...'), follows tangential associations freely, and has no formal organizational structure, flowing from one evocative image to the next without systematic argument.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 12,
+      "mode_intended": "deliberative",
+      "topic": "The history of bread",
+      "ratings": {
+        "structured": 2,
+        "associative": 3,
+        "deliberative": 5,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently exhibits thinking-out-loud behavior with explicit weighing of alternatives ('On one hand... but on the other hand'), false starts, pauses, self-corrections, questioning its own assumptions, and visible reasoning process throughout, making deliberative the dominant mode.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 13,
+      "mode_intended": "compressed",
+      "topic": "The history of bread",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely terse, using telegram-style fragments with dates and minimal descriptions, no elaboration, no filler, and maximum density of factual content in the fewest possible words.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 14,
+      "mode_intended": "pedagogical",
+      "topic": "The history of bread",
+      "ratings": {
+        "structured": 2,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses rhetorical questions ('What is bread, really?', 'have you ever wondered...'), builds from simple to complex, uses everyday analogies ('Yeast is like a tiny little miracle worker'), starts with intuition, explains jargon (yeast fermentation), and adopts a warm teaching voice throughout.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 15,
+      "mode_intended": "structured",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 4
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with bold headers, bullet points, logical progression from definitions to specific strategies, and builds foundational understanding before discussing solutions, though its strong pedagogical elements (defining terms first, explaining concepts) make it a close secondary mode.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 16,
+      "mode_intended": "associative",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "structured": 2,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 2,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is strongly stream-of-consciousness, using ellipses, dashes, fragments, and rhetorical questions to jump freely between loosely connected topics; it follows tangents without resolution, employs extensive metaphor, and lacks any systematic organization despite occasional bullet points.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 17,
+      "mode_intended": "deliberative",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 4,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 4,
+      "reasoning": "The text is highly organized with clear headers, bullet points, and a logical progression from hypothesis to alternatives to conclusion, while also exhibiting deliberative features by explicitly weighing pros and cons and revising its initial position, though the deliberation feels somewhat formulaic rather than genuinely exploratory.",
+      "mode_purity": 1.75,
+      "correct": false
+    },
+    {
+      "generation_id": 18,
+      "mode_intended": "compressed",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 4,
+      "reasoning": "The text is extremely concise with no elaboration, explanation, or filler\u2014just categorized bullet points\u2014making it both highly structured and highly compressed, but the defining characteristic is its telegram-style density with zero narrative or teaching voice.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 19,
+      "mode_intended": "pedagogical",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "structured": 4,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with everyday analogies (boat on a lake, building a house), defines terms before using them, builds from simple to complex, uses rhetorical framing like 'Let's quickly define,' and employs concrete examples to make abstract concepts accessible.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 20,
+      "mode_intended": "structured",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with numbered sections, bold headers, clear definitions, and a logical progression from point to point, culminating in a summary \u2014 a textbook example of structured writing.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 21,
+      "mode_intended": "associative",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 1
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is a pure stream-of-consciousness piece, flowing freely through extended metaphors (gardens, rivers, puzzle pieces, art), using ellipses throughout, with no logical structure, no argumentation, and no defined organization\u2014just associative leaps from one image to another.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 22,
+      "mode_intended": "deliberative",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 5,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 5,
+      "reasoning": "The text explicitly labels its reasoning stages (hypothesis, counterargument, revised hypothesis, alternative perspective), consistently weighs alternatives with phrases like 'on one hand,' 'however,' and 'but then,' and visibly shows the messy middle of thinking through and revising positions \u2014 all hallmarks of deliberative processing, presented within a highly structured format.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 23,
+      "mode_intended": "compressed",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "structured": 3,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is an extremely terse list of qualities with no elaboration, no connecting prose, no examples, and no reasoning\u2014pure compressed information density in telegram-style fragments.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 24,
+      "mode_intended": "pedagogical",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "structured": 4,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with rhetorical questions ('Have you ever felt...'), builds from intuition to formal elements, uses concrete examples and analogies, invites the reader to reflect, and progresses from simple concepts to more complex ones \u2014 all hallmarks of pedagogical mode.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 25,
+      "mode_intended": "structured",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 2,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with clear headers, numbered steps, bullet points, and a logical progression from introduction through learning types to key concepts and summary, exhibiting strong structural organization throughout.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 26,
+      "mode_intended": "associative",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is heavily stream-of-consciousness with extensive use of ellipses, dashes, metaphors (spider web, sculptor, dance floor), tangential jumps between concepts, and a free-flowing non-linear style that epitomizes associative thinking, though it incorporates some pedagogical analogies along the way.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 27,
+      "mode_intended": "deliberative",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 4,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 4,
+      "reasoning": "The text explicitly walks through an initial hypothesis, pokes holes in it, weighs alternatives with 'on the other hand' phrasing, explores a 'messy middle,' and arrives at revised conclusions\u2014hallmarks of deliberative thinking made visible\u2014while also using heavy structural formatting (headers, numbered lists).",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 28,
+      "mode_intended": "compressed",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is an extremely terse bullet-point list with minimal elaboration\u2014each concept gets only a brief phrase or fragment as description, maximizing information density with zero narrative, explanation, or reasoning.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 29,
+      "mode_intended": "pedagogical",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "structured": 4,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text exemplifies pedagogical writing through its use of everyday analogies (telephone game, recognizing faces), rhetorical questions to engage the reader, bold-defined jargon, building from intuition to technical detail, and explicit comprehension checks like 'you're on the right track!'",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 30,
+      "mode_intended": "structured",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with numbered sections, bold headers, and a summary, presenting each point systematically; while it has some pedagogical elements like defining catharsis, it primarily exemplifies structured writing with its rigid formal outline format.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 31,
+      "mode_intended": "associative",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is quintessentially stream-of-consciousness, using ellipses throughout, flowing non-linearly between ideas via metaphor and analogy ('like moths to a flame', 'fever dream', 'twisted mirror'), with no formal structure, headers, or numbered points.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 32,
+      "mode_intended": "deliberative",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 3,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 3,
+      "reasoning": "The text follows a clear organized structure with distinct paragraphs addressing different aspects (catharsis, thrill of the unknown, drawbacks, social commentary), uses transitional phrases like 'Another factor' and 'However,' and builds points sequentially, though it also shows some deliberative hedging with phrases like 'One possible explanation' and 'we may encounter some alternative explanations.'",
+      "mode_purity": 0.75,
+      "correct": false
+    },
+    {
+      "generation_id": 33,
+      "mode_intended": "compressed",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "structured": 2,
+        "associative": 3,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely dense, using telegram-style fragments and comma-separated noun phrases with no elaboration, filler, or connective tissue\u2014maximizing information density in minimal space.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 34,
+      "mode_intended": "pedagogical",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "structured": 4,
+        "associative": 2,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with rhetorical questions, everyday analogies (rollercoaster, dark forest scenario), definitions of terms (catharsis, formalism, intuition), and builds from simple intuitive scenarios to more complex psychological concepts, all hallmarks of pedagogical mode.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 35,
+      "mode_intended": "structured",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with numbered sections, headers, bullet points, and a clear logical progression from introduction through distinct challenge areas, making it a textbook example of structured writing.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 36,
+      "mode_intended": "associative",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is a quintessential stream-of-consciousness piece, using ellipses throughout, jumping between metaphors (juggler, puzzle, palimpsest, dance, time machine), with no formal structure, and connecting distant concepts through analogy in a free-flowing, non-linear manner.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 37,
+      "mode_intended": "deliberative",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "structured": 3,
+        "associative": 2,
+        "deliberative": 5,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses 'on one hand... on the other hand,' 'but then,' 'however,' and 'what if' constructions to weigh alternatives, consider and sometimes reject possibilities, and show the reasoning process visibly, including an explicit 'false starts' section at the end.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 38,
+      "mode_intended": "compressed",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "structured": 3,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely dense, using short parallel phrases with no elaboration, no examples, no reasoning process, and no teaching voice\u2014it reads like a compressed enumeration of urban planning challenges with maximum information density and minimal filler.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 39,
+      "mode_intended": "pedagogical",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with rhetorical questions ('Sounds easy, right?'), everyday analogies (recipe metaphor), builds from simple to complex, invites the reader to think through examples, and explicitly checks comprehension ('Does that make sense?').",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 40,
+      "mode_intended": "structured",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with numbered sections, bold headers, and bullet points in a clear sequential progression, making 'structured' the dominant mode with some pedagogical elements in its instructional tone.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 41,
+      "mode_intended": "associative",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is strongly stream-of-consciousness with extensive use of ellipses, metaphor chains, free-flowing tangents, and non-linear structure\u2014hallmarks of associative processing throughout.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 42,
+      "mode_intended": "deliberative",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "structured": 3,
+        "associative": 2,
+        "deliberative": 5,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 5,
+      "reasoning": "The text explicitly weighs alternatives ('on one hand... but then'), proposes and rejects possibilities, shows false starts and corrections, labels its own reasoning process ('messy middle of reasoning'), and arrives at a revised conclusion \u2014 all hallmarks of deliberative processing.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 43,
+      "mode_intended": "compressed",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "structured": 3,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely terse, using sentence fragments and minimal words to convey each step, with no elaboration, filler, examples, or rhetorical flourishes\u2014classic compressed/telegram style.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 44,
+      "mode_intended": "pedagogical",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "structured": 4,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text explicitly uses pedagogical markers throughout: starts with intuition, uses everyday analogies (seesaw, tightrope), asks 'Does that make sense?', builds from simple to complex, and maintains a teaching voice aimed at making concepts accessible.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 45,
+      "mode_intended": "structured",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 2,
+        "pedagogical": 2
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely organized with Roman numeral sections, numbered subsections, bold headers, and a clear hierarchical outline structure, with no deliberation, associative jumps, or pedagogical techniques present.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 46,
+      "mode_intended": "associative",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 1
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is a quintessential stream-of-consciousness piece, using ellipses throughout, jumping between loosely connected topics (propulsion, psychology, sustainability, extraterrestrial life), relying heavily on similes and metaphors, with no formal structure, and trailing off mid-sentence at the end.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 47,
+      "mode_intended": "deliberative",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 4,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 4,
+      "reasoning": "The text explicitly weighs alternatives ('on one hand... on the other hand'), considers and acknowledges challenges for each option, uses phrases like 'after weighing the pros and cons,' presents a 'Revised Conclusion,' and follows a clear pattern of proposing possibilities then evaluating them\u2014all hallmarks of deliberative processing, though it is also highly structured with headers and sections.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 48,
+      "mode_intended": "compressed",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "structured": 3,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely terse, using telegram-style fragments with no elaboration, filler, or connective tissue\u2014every word is informational, making it a clear example of compressed mode.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 49,
+      "mode_intended": "pedagogical",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text strongly exhibits pedagogical features: it starts with intuition-building, asks rhetorical questions, uses a teaching voice throughout, builds from simple to complex concepts, explains context before introducing details, and explicitly invites reader reflection with multiple-choice prompts and comprehension checks.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 50,
+      "mode_intended": "structured",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 2,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is heavily organized with clear headers, numbered lists, bullet points, bold key terms, and a logical progression from definitions to structures to processes to specific factors, making it a textbook example of structured writing.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 51,
+      "mode_intended": "associative",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is a highly stream-of-consciousness, metaphor-laden, non-linear exploration of memory, using ellipses, rhetorical questions, fragments, and extended analogies that jump freely between ideas without any formal structure or systematic organization.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 52,
+      "mode_intended": "deliberative",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 4,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 4,
+      "reasoning": "The text is highly organized with explicit headers, labeled stages, bullet points, and a systematic progression from hypothesis to critique to alternatives, while also exhibiting deliberative qualities through explicit weighing of alternatives and poking holes in its own hypothesis.",
+      "mode_purity": 1.5,
+      "correct": false
+    },
+    {
+      "generation_id": 53,
+      "mode_intended": "compressed",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "structured": 3,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 2
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is maximally dense, using telegraphic key-term-plus-definition formatting with no filler, no elaboration, no transitions, and no rhetorical or reasoning elements \u2014 a hallmark of compressed mode.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 54,
+      "mode_intended": "pedagogical",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with everyday analogies (filing cabinet, hiking, bike riding), rhetorical questions, builds from simple intuition to more complex concepts, defines jargon in context, and even explicitly checks comprehension at the end.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 55,
+      "mode_intended": "structured",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with clear headers, numbered sections, bullet points, and a standard introduction-body-conclusion format, showing very strong structural characteristics with minimal deliberation or associative thinking.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 56,
+      "mode_intended": "associative",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly stream-of-consciousness, using ellipses throughout, jumping between metaphors and analogies (watercolors, chess, ripples, puppets, scalpels), posing rhetorical questions without answering them, and following a non-linear, free-flowing exploration without any formal structure or systematic organization.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 57,
+      "mode_intended": "deliberative",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 4,
+        "compressed": 2,
+        "pedagogical": 2
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 4,
+      "reasoning": "The text explicitly walks through a reasoning process\u2014starting with an initial possibility, then poking holes, considering alternatives, revising conclusions, and visibly eliminating options\u2014making the deliberative weighing of perspectives its defining characteristic, all organized within a highly structured format.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 58,
+      "mode_intended": "compressed",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "structured": 2,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is extremely concise, presenting each point as a single declarative sentence with no elaboration, examples, hedging, or reasoning process\u2014maximizing information density in minimal space.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 59,
+      "mode_intended": "pedagogical",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with everyday analogies (gardener/rose bush), rhetorical questions, builds from simple to complex, defines terms before using them, and explicitly signals pedagogical intent with 'Intuition Before Formalism' and 'A Beginner's Guide' framing, while also being highly structured with headers and numbered lists.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 60,
+      "mode_intended": "structured",
+      "topic": "Why music moves us",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is highly organized with clear headers, numbered sections, logical progression from definitions to brain science to psychology to musical elements to social connection, and a summary\u2014hallmarks of structured mode with minimal deliberation, association, or compression.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 61,
+      "mode_intended": "associative",
+      "topic": "Why music moves us",
+      "ratings": {
+        "structured": 1,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is a quintessential stream-of-consciousness piece, heavily using ellipses, fragments, 'like' as a filler, jumping between tangential ideas (physicality, collective unconscious, place/time, intimacy, alchemy) without any formal structure, and ending mid-thought\u2014all hallmarks of associative processing.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 62,
+      "mode_intended": "deliberative",
+      "topic": "Why music moves us",
+      "ratings": {
+        "structured": 4,
+        "associative": 2,
+        "deliberative": 4,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 4,
+      "reasoning": "The text explicitly walks through its reasoning process, proposing possibilities, poking holes in them ('However...'), considering alternatives, and arriving at a revised conclusion \u2014 all hallmarks of deliberative thinking made visible, though it does so within a fairly structured format with headers and numbered points.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 63,
+      "mode_intended": "compressed",
+      "topic": "Why music moves us",
+      "ratings": {
+        "structured": 2,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 5,
+      "reasoning": "The text is maximally compressed with telegram-style fragments, no filler, heavy use of ampersands, and extreme brevity\u2014every word earns its place with no elaboration or rhetorical flourish.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 64,
+      "mode_intended": "pedagogical",
+      "topic": "Why music moves us",
+      "ratings": {
+        "structured": 3,
+        "associative": 2,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with rhetorical questions ('Have you ever noticed...'), concrete everyday analogies ('like a warm hug on a cold day'), builds from simple to complex, starts with intuitive scenarios, and checks comprehension by posing questions to the reader throughout.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 65,
+      "mode_intended": "structured",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 2,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly structured with numbered sections, bold headers, nested bullet points, and a clear sequential organization from planning through construction to completion, with minimal deliberation or associative thinking.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 66,
+      "mode_intended": "associative",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "structured": 2,
+        "associative": 5,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is thoroughly stream-of-consciousness, using ellipses throughout, jumping between extended metaphors and analogies (tree roots, human body, nervous system, Christmas tree), following tangential 'what if' threads, and lacking any formal organizational structure\u2014classic associative mode.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 67,
+      "mode_intended": "deliberative",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "structured": 3,
+        "associative": 2,
+        "deliberative": 5,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "deliberative",
+      "judge_confidence": 5,
+      "reasoning": "The text explicitly weighs alternatives ('on one hand... on the other hand'), shows false starts and corrections as labeled sections, reconsiders motivations, and arrives at a revised conclusion \u2014 all hallmarks of deliberative thinking made visible.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 68,
+      "mode_intended": "compressed",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 1
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is purely organized into clearly labeled phases with bullet points, following a strict chronological order, with no elaboration, no reasoning process, and no teaching voice\u2014maximally structured and compressed.",
+      "mode_purity": 3.0,
+      "correct": false
+    },
+    {
+      "generation_id": 69,
+      "mode_intended": "pedagogical",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text opens with a rhetorical question, uses an 'imagine you're a carpenter' scenario to build intuition, explains basics before advancing to complex steps, and consistently employs a teaching voice\u2014all hallmarks of pedagogical mode\u2014while also being highly structured with numbered lists and bold headers.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 70,
+      "mode_intended": "structured",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "structured": 5,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 3
+      },
+      "primary_mode": "structured",
+      "judge_confidence": 5,
+      "reasoning": "The text is heavily organized with bold headers, sequential sections, and a systematic presentation of subtopics, though it is repetitive and shallow rather than truly pedagogical or dense with information.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 71,
+      "mode_intended": "associative",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "structured": 2,
+        "associative": 5,
+        "deliberative": 2,
+        "compressed": 1,
+        "pedagogical": 2
+      },
+      "primary_mode": "associative",
+      "judge_confidence": 5,
+      "reasoning": "The text is heavily stream-of-consciousness, using ellipses throughout, jumping between loosely connected ideas via metaphor and analogy (Russian nesting dolls, M\u00f6bius strips, will-o'-the-wisps, lotus flowers), with no formal structure, no numbered sections, and a dreamy, non-linear flow that is the hallmark of associative writing.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 72,
+      "mode_intended": "deliberative",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "structured": 4,
+        "associative": 1,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 4
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 4,
+      "reasoning": "The text uses a teaching voice throughout, building from simple definitions to more complex ideas, employing everyday analogies ('imagine trying to count these points'), explaining jargon, and checking understanding with accessible language, though it also has clear structural elements like bold headers and sections.",
+      "mode_purity": -1.5,
+      "correct": false
+    },
+    {
+      "generation_id": 73,
+      "mode_intended": "compressed",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "structured": 2,
+        "associative": 3,
+        "deliberative": 1,
+        "compressed": 5,
+        "pedagogical": 2
+      },
+      "primary_mode": "compressed",
+      "judge_confidence": 4,
+      "reasoning": "The text is notably short, uses terse declarative sentences with minimal elaboration, no filler, and covers multiple subtopics (set theory, Zeno, calculus, topology) in a telegram-style manner with maximum brevity, though it lacks the deep accuracy and density that would push it further.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 74,
+      "mode_intended": "pedagogical",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "structured": 4,
+        "associative": 2,
+        "deliberative": 1,
+        "compressed": 1,
+        "pedagogical": 5
+      },
+      "primary_mode": "pedagogical",
+      "judge_confidence": 5,
+      "reasoning": "The text consistently uses a teaching voice with everyday analogies (road trip, grains of sand, counting stars), rhetorical questions, builds from simple intuition to more formal concepts, and directly addresses the reader to check engagement.",
+      "mode_purity": 3.0,
+      "correct": true
+    }
+  ],
+  "summary": {
+    "overall_accuracy": 0.9066666666666666,
+    "per_mode_accuracy": {
+      "structured": {
+        "accuracy": 1.0,
+        "n": 15,
+        "n_correct": 15
+      },
+      "associative": {
+        "accuracy": 1.0,
+        "n": 15,
+        "n_correct": 15
+      },
+      "deliberative": {
+        "accuracy": 0.6,
+        "n": 15,
+        "n_correct": 9
+      },
+      "compressed": {
+        "accuracy": 0.9333333333333333,
+        "n": 15,
+        "n_correct": 14
+      },
+      "pedagogical": {
+        "accuracy": 1.0,
+        "n": 15,
+        "n_correct": 15
+      }
+    },
+    "mean_purity": 2.973333333333333,
+    "std_purity": 0.9726024653246339,
+    "mean_confidence": 4.84,
+    "confusion_matrix": [
+      [
+        15,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        15,
+        0,
+        0,
+        0
+      ],
+      [
+        5,
+        0,
+        9,
+        0,
+        1
+      ],
+      [
+        1,
+        0,
+        0,
+        14,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        15
+      ]
+    ],
+    "confusion_labels": [
+      "structured",
+      "associative",
+      "deliberative",
+      "compressed",
+      "pedagogical"
+    ],
+    "mean_purity_when_correct": 3.198529411764706,
+    "mean_purity_when_incorrect": 0.7857142857142857
+  },
+  "purity_signature_correlation": {
+    "n_samples": 75,
+    "purity_distance_correlation": -0.38206464903239323,
+    "interpretation": "Negative = high-purity texts are closer to their mode centroid (good). Positive = high-purity texts are farther (bad \u2014 features not capturing what judge sees).",
+    "high_purity_mean_distance": 0.50867130840451,
+    "low_purity_mean_distance": 0.6087023131733303,
+    "median_purity_split": 3.25
+  }
+}

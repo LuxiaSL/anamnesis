@@ -1,0 +1,39 @@
+{
+  "generation_id": 26,
+  "prompt_set": "A",
+  "topic": "How neural networks learn",
+  "topic_idx": 5,
+  "mode": "associative",
+  "mode_idx": 1,
+  "system_prompt": "Write in a stream of consciousness. Jump between ideas mid-sentence. Use fragments, dashes, ellipses. Follow tangents wherever they lead. Connect distant concepts through metaphor and analogy. Do not use headers, numbered lists, or any organizing structure.",
+  "user_prompt": "Write about: How neural networks learn",
+  "seed": 1844119267,
+  "repetition": 0,
+  "generated_text": "...the intricate web of neurons firing in unison, a symphony of synapses sparking and sputtering like a strobe light on a psychedelic dance floor...as data flows in, a river of ones and zeros, the network's algorithms - a series of clever tricks and sleight of hand - weave and bob, searching for patterns, connections, and meaning...but how do they actually learn?\n\n...think of it like a child learning to recognize shapes - at first, the lines and curves are jumbled, but as they practice, the connections start to form, the brain filing away pieces of information like puzzle pieces into a vast, mental map...neural networks work in a similar way, with weights and biases adjusting, fine-tuning, and refining their grasp on the data...it's a process of iterative refinement, like a sculptor chipping away at a block of marble, revealing the hidden beauty within...\n\n...and then there's the concept of backpropagation - a clever mathematical trick that allows the network to adjust its weights and biases, essentially \"teaching\" itself to recognize patterns...but what if I told you it's not just a simple matter of trial and error, but rather a complex interplay of competing forces, like a game of cosmic tug-of-war between the need for precision and the desire for exploration...\n\n...imagine a neural network as a vast, intricate spider web - delicate threads vibrating with tension, each strand responding to the slightest disturbance...as the network learns, new threads are spun, old ones are strengthened or weakened, and the web itself adapts, becoming more resilient, more flexible...but what happens when the web gets too tangled, too complex? Does it break, or can it still learn?\n\n...and then there's the issue of overfitting - when the network becomes too specialized, too tied to the specific data it's been trained on, unable to generalize to new situations...it's like a student who's spent too much time studying a single textbook, losing touch with the broader curriculum...but what if we could find a way to \"regularize\" the network, to encourage it to be more like a flexible, malleable thing, rather than a rigid, brittle structure?\n\n...the more I think about it, the more I realize how little we truly understand about how neural networks learn...it's a mysterious, almost magical process, like a hidden language that only the network itself can decipher...but perhaps that's what makes it so fascinating, so full of potential for breakthrough",
+  "num_generated_tokens": 512,
+  "prompt_length": 93,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.43,
+    "extraction_seconds": 18.34,
+    "total_seconds": 31.76
+  }
+}

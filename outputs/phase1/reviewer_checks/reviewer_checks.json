@@ -1,0 +1,496 @@
+{
+  "timestamp": "2026-02-14 07:53:59",
+  "n_samples": 100,
+  "n_topics": 20,
+  "n_modes": 5,
+  "mode_names": [
+    "analogical",
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "topic_heldout_T2_T25": {
+    "tier_label": "T2+T2.5",
+    "n_folds": 5,
+    "n_topics_per_fold": 4,
+    "n_train_per_fold": 80,
+    "n_test_per_fold": 20,
+    "mean_sil_test": 0.3383954554796219,
+    "std_sil_test": 0.08769210258158716,
+    "mean_knn": 0.78,
+    "std_knn": 0.039999999999999994,
+    "fold_details": [
+      {
+        "fold": 0,
+        "heldout_topics": [
+          "How memory works in the brain",
+          "The art of persuasion",
+          "The mathematics of infinity",
+          "Why we dream"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.9951327443122864,
+        "sil_test": 0.4917528033256531,
+        "knn_accuracy": 0.85,
+        "final_loss": 0.0
+      },
+      {
+        "fold": 1,
+        "heldout_topics": [
+          "How neural networks learn",
+          "The ethics of genetic engineering",
+          "The nature of consciousness",
+          "Why music moves us"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.9953954815864563,
+        "sil_test": 0.29666557908058167,
+        "knn_accuracy": 0.75,
+        "final_loss": 0.0
+      },
+      {
+        "fold": 2,
+        "heldout_topics": [
+          "Climate change mitigation strategies",
+          "How to debug a segfault",
+          "The evolution of language",
+          "Urban planning challenges"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.994625449180603,
+        "sil_test": 0.37436020374298096,
+        "knn_accuracy": 0.75,
+        "final_loss": 0.0016182661056518555
+      },
+      {
+        "fold": 3,
+        "heldout_topics": [
+          "Cooking as chemistry",
+          "Teaching a child to ride a bike",
+          "The future of space exploration",
+          "What makes a good friendship"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.9955446124076843,
+        "sil_test": 0.28700995445251465,
+        "knn_accuracy": 0.8,
+        "final_loss": 0.00040089647518470883
+      },
+      {
+        "fold": 4,
+        "heldout_topics": [
+          "Building a house from scratch",
+          "How markets determine prices",
+          "The appeal of horror fiction",
+          "The history of bread"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.9951497912406921,
+        "sil_test": 0.2421887367963791,
+        "knn_accuracy": 0.75,
+        "final_loss": 0.0
+      }
+    ],
+    "confusion_matrix": [
+      [
+        20,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        18,
+        1,
+        0,
+        1
+      ],
+      [
+        0,
+        3,
+        17,
+        0,
+        0
+      ],
+      [
+        1,
+        2,
+        2,
+        11,
+        4
+      ],
+      [
+        0,
+        3,
+        1,
+        4,
+        12
+      ]
+    ],
+    "confusion_labels": [
+      "analogical",
+      "contrastive",
+      "dialectical",
+      "linear",
+      "socratic"
+    ],
+    "per_mode_recall": {
+      "analogical": {
+        "correct": 20,
+        "total": 20,
+        "recall": 1.0
+      },
+      "contrastive": {
+        "correct": 18,
+        "total": 20,
+        "recall": 0.9
+      },
+      "dialectical": {
+        "correct": 17,
+        "total": 20,
+        "recall": 0.85
+      },
+      "linear": {
+        "correct": 11,
+        "total": 20,
+        "recall": 0.55
+      },
+      "socratic": {
+        "correct": 12,
+        "total": 20,
+        "recall": 0.6
+      }
+    }
+  },
+  "topic_heldout_combined": {
+    "tier_label": "combined",
+    "n_folds": 5,
+    "n_topics_per_fold": 4,
+    "n_train_per_fold": 80,
+    "n_test_per_fold": 20,
+    "mean_sil_test": 0.305111026763916,
+    "std_sil_test": 0.13535287238678753,
+    "mean_knn": 0.76,
+    "std_knn": 0.066332495807108,
+    "fold_details": [
+      {
+        "fold": 0,
+        "heldout_topics": [
+          "How memory works in the brain",
+          "The art of persuasion",
+          "The mathematics of infinity",
+          "Why we dream"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.9947322607040405,
+        "sil_test": 0.5078529715538025,
+        "knn_accuracy": 0.85,
+        "final_loss": 0.0
+      },
+      {
+        "fold": 1,
+        "heldout_topics": [
+          "How neural networks learn",
+          "The ethics of genetic engineering",
+          "The nature of consciousness",
+          "Why music moves us"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.9956055879592896,
+        "sil_test": 0.18959878385066986,
+        "knn_accuracy": 0.65,
+        "final_loss": 0.0005889864987693727
+      },
+      {
+        "fold": 2,
+        "heldout_topics": [
+          "Climate change mitigation strategies",
+          "How to debug a segfault",
+          "The evolution of language",
+          "Urban planning challenges"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.9954250454902649,
+        "sil_test": 0.4214912950992584,
+        "knn_accuracy": 0.8,
+        "final_loss": 0.0
+      },
+      {
+        "fold": 3,
+        "heldout_topics": [
+          "Cooking as chemistry",
+          "Teaching a child to ride a bike",
+          "The future of space exploration",
+          "What makes a good friendship"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.995834231376648,
+        "sil_test": 0.16534718871116638,
+        "knn_accuracy": 0.75,
+        "final_loss": 0.0
+      },
+      {
+        "fold": 4,
+        "heldout_topics": [
+          "Building a house from scratch",
+          "How markets determine prices",
+          "The appeal of horror fiction",
+          "The history of bread"
+        ],
+        "n_train": 80,
+        "n_test": 20,
+        "sil_train": 0.995627224445343,
+        "sil_test": 0.24126489460468292,
+        "knn_accuracy": 0.75,
+        "final_loss": 0.0003219493373762816
+      }
+    ],
+    "confusion_matrix": [
+      [
+        19,
+        0,
+        0,
+        0,
+        1
+      ],
+      [
+        1,
+        16,
+        1,
+        1,
+        1
+      ],
+      [
+        0,
+        0,
+        17,
+        0,
+        3
+      ],
+      [
+        2,
+        3,
+        0,
+        12,
+        3
+      ],
+      [
+        1,
+        0,
+        1,
+        6,
+        12
+      ]
+    ],
+    "confusion_labels": [
+      "analogical",
+      "contrastive",
+      "dialectical",
+      "linear",
+      "socratic"
+    ],
+    "per_mode_recall": {
+      "analogical": {
+        "correct": 19,
+        "total": 20,
+        "recall": 0.95
+      },
+      "contrastive": {
+        "correct": 16,
+        "total": 20,
+        "recall": 0.8
+      },
+      "dialectical": {
+        "correct": 17,
+        "total": 20,
+        "recall": 0.85
+      },
+      "linear": {
+        "correct": 12,
+        "total": 20,
+        "recall": 0.6
+      },
+      "socratic": {
+        "correct": 12,
+        "total": 20,
+        "recall": 0.6
+      }
+    }
+  },
+  "linear_probe_T2_T25": {
+    "tier_label": "T2+T2.5",
+    "summary": {
+      "logreg_on_embedding": {
+        "mean_accuracy": 0.73,
+        "std_accuracy": 0.0748331477354788,
+        "mean_silhouette": 0.2920973628759384,
+        "std_silhouette": 0.091100332578212
+      },
+      "lda_on_embedding": {
+        "mean_accuracy": 0.72,
+        "std_accuracy": 0.08717797887081347,
+        "mean_silhouette": 0.28017368614673616,
+        "std_silhouette": 0.10861008937253912
+      },
+      "lda_on_raw": {
+        "mean_accuracy": 0.6399999999999999,
+        "std_accuracy": 0.066332495807108,
+        "mean_silhouette": 0.13537366052980737,
+        "std_silhouette": 0.14139416245174227
+      },
+      "knn_on_embedding": {
+        "mean_accuracy": 0.73,
+        "std_accuracy": 0.0748331477354788,
+        "mean_silhouette": 0.2920973628759384,
+        "std_silhouette": 0.091100332578212
+      }
+    },
+    "fold_details": [
+      {
+        "fold": 0,
+        "logreg_acc": 0.65,
+        "logreg_sil": 0.16270020604133606,
+        "lda_emb_acc": 0.65,
+        "lda_emb_sil": 0.11938856542110443,
+        "lda_raw_acc": 0.6,
+        "lda_raw_sil": 0.05570458397691236,
+        "knn_acc": 0.65
+      },
+      {
+        "fold": 1,
+        "logreg_acc": 0.75,
+        "logreg_sil": 0.24456293880939484,
+        "lda_emb_acc": 0.75,
+        "lda_emb_sil": 0.2640215754508972,
+        "lda_raw_acc": 0.65,
+        "lda_raw_sil": 0.014257579974618895,
+        "knn_acc": 0.75
+      },
+      {
+        "fold": 2,
+        "logreg_acc": 0.65,
+        "logreg_sil": 0.3257107734680176,
+        "lda_emb_acc": 0.6,
+        "lda_emb_sil": 0.26166975498199463,
+        "lda_raw_acc": 0.55,
+        "lda_raw_sil": 0.04460646092110943,
+        "knn_acc": 0.65
+      },
+      {
+        "fold": 3,
+        "logreg_acc": 0.85,
+        "logreg_sil": 0.43823227286338806,
+        "lda_emb_acc": 0.85,
+        "lda_emb_sil": 0.4598301947116852,
+        "lda_raw_acc": 0.75,
+        "lda_raw_sil": 0.3999042204304102,
+        "knn_acc": 0.85
+      },
+      {
+        "fold": 4,
+        "logreg_acc": 0.75,
+        "logreg_sil": 0.28928062319755554,
+        "lda_emb_acc": 0.75,
+        "lda_emb_sil": 0.29595834016799927,
+        "lda_raw_acc": 0.65,
+        "lda_raw_sil": 0.16239545734598593,
+        "knn_acc": 0.75
+      }
+    ],
+    "interpretation": "If LogReg/LDA on the MLP embedding substantially outperform LDA on raw features, the MLP performs a genuine geometric transformation ('unwrapping') that makes the nonlinear manifold linearly accessible. This is mechanistic evidence that the 'directions vs manifolds' framing is correct."
+  },
+  "linear_probe_combined": {
+    "tier_label": "combined",
+    "summary": {
+      "logreg_on_embedding": {
+        "mean_accuracy": 0.63,
+        "std_accuracy": 0.21587033144922904,
+        "mean_silhouette": 0.17552598379552364,
+        "std_silhouette": 0.16965260240641927
+      },
+      "lda_on_embedding": {
+        "mean_accuracy": 0.63,
+        "std_accuracy": 0.21817424229271426,
+        "mean_silhouette": 0.178508907253854,
+        "std_silhouette": 0.17648168079527737
+      },
+      "lda_on_raw": {
+        "mean_accuracy": 0.52,
+        "std_accuracy": 0.11661903789690603,
+        "mean_silhouette": -0.044914448687354405,
+        "std_silhouette": 0.046792143643379656
+      },
+      "knn_on_embedding": {
+        "mean_accuracy": 0.63,
+        "std_accuracy": 0.21587033144922904,
+        "mean_silhouette": 0.17552598379552364,
+        "std_silhouette": 0.16965260240641927
+      }
+    },
+    "fold_details": [
+      {
+        "fold": 0,
+        "logreg_acc": 0.35,
+        "logreg_sil": 0.08504336327314377,
+        "lda_emb_acc": 0.4,
+        "lda_emb_sil": 0.0740046575665474,
+        "lda_raw_acc": 0.45,
+        "lda_raw_sil": -0.11954549210379344,
+        "knn_acc": 0.35
+      },
+      {
+        "fold": 1,
+        "logreg_acc": 0.85,
+        "logreg_sil": 0.20354776084423065,
+        "lda_emb_acc": 0.8,
+        "lda_emb_sil": 0.21578697860240936,
+        "lda_raw_acc": 0.65,
+        "lda_raw_sil": 0.012407718710669785,
+        "knn_acc": 0.85
+      },
+      {
+        "fold": 2,
+        "logreg_acc": 0.45,
+        "logreg_sil": 0.01761551760137081,
+        "lda_emb_acc": 0.4,
+        "lda_emb_sil": -0.0008311286801472306,
+        "lda_raw_acc": 0.35,
+        "lda_raw_sil": -0.0405318914538038,
+        "knn_acc": 0.45
+      },
+      {
+        "fold": 3,
+        "logreg_acc": 0.9,
+        "logreg_sil": 0.4927384853363037,
+        "lda_emb_acc": 0.95,
+        "lda_emb_sil": 0.5028614401817322,
+        "lda_raw_acc": 0.65,
+        "lda_raw_sil": -0.006914419202040947,
+        "knn_acc": 0.9
+      },
+      {
+        "fold": 4,
+        "logreg_acc": 0.6,
+        "logreg_sil": 0.07868479192256927,
+        "lda_emb_acc": 0.6,
+        "lda_emb_sil": 0.10072258859872818,
+        "lda_raw_acc": 0.5,
+        "lda_raw_sil": -0.06998815938780362,
+        "knn_acc": 0.6
+      }
+    ],
+    "interpretation": "If LogReg/LDA on the MLP embedding substantially outperform LDA on raw features, the MLP performs a genuine geometric transformation ('unwrapping') that makes the nonlinear manifold linearly accessible. This is mechanistic evidence that the 'directions vs manifolds' framing is correct."
+  },
+  "elapsed_seconds": 59.80448055267334
+}

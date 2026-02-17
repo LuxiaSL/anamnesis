@@ -1,0 +1,194 @@
+{
+  "temperature_control": {
+    "binary_low_vs_high": {
+      "description": "temp_low vs temp_high",
+      "n_samples": 20,
+      "n_per_class": [
+        10,
+        10
+      ],
+      "label_names": [
+        "temp_0.3",
+        "temp_0.9"
+      ],
+      "rf_accuracy_mean": 0.75,
+      "rf_accuracy_std": 0.15811388300841897,
+      "rf_fold_scores": [
+        0.75,
+        1.0,
+        0.5,
+        0.75,
+        0.75
+      ],
+      "rf_n_folds": 5,
+      "lda_accuracy_mean": 0.3,
+      "lda_accuracy_std": 0.18708286933869708,
+      "loo_accuracy": 0.75,
+      "loo_n_correct": 15,
+      "loo_n_total": 20
+    },
+    "tier_ablation_low_vs_high": {
+      "features_tier1": {
+        "n_features": 221,
+        "rf_accuracy": 0.9,
+        "rf_std": 0.2
+      },
+      "features_tier2": {
+        "n_features": 221,
+        "rf_accuracy": 0.4,
+        "rf_std": 0.1224744871391589
+      },
+      "features_tier2_5": {
+        "n_features": 145,
+        "rf_accuracy": 0.35,
+        "rf_std": 0.20000000000000004
+      }
+    },
+    "3way_temp": {
+      "description": "3-way temperature",
+      "n_samples": 30,
+      "n_per_class": [
+        10,
+        10,
+        10
+      ],
+      "label_names": [
+        "temp_0.3",
+        "temp_0.7",
+        "temp_0.9"
+      ],
+      "rf_accuracy_mean": 0.5,
+      "rf_accuracy_std": 0.0,
+      "rf_fold_scores": [
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "rf_n_folds": 5,
+      "lda_accuracy_mean": 0.26666666666666666,
+      "lda_accuracy_std": 0.13333333333333336,
+      "loo_accuracy": 0.4,
+      "loo_n_correct": 12,
+      "loo_n_total": 30
+    },
+    "length_diagnostic": {
+      "temp_low_mean_tokens": 512.0,
+      "temp_high_mean_tokens": 506.0,
+      "linear_07_mean_tokens": 510.1
+    }
+  },
+  "prompt_swap_control": {
+    "swap_vs_linear": {
+      "description": "prompt_swap vs linear",
+      "n_samples": 20,
+      "n_per_class": [
+        10,
+        10
+      ],
+      "label_names": [
+        "prompt_swap",
+        "pure_linear"
+      ],
+      "rf_accuracy_mean": 0.5,
+      "rf_accuracy_std": 0.15811388300841897,
+      "rf_fold_scores": [
+        0.5,
+        0.5,
+        0.25,
+        0.5,
+        0.75
+      ],
+      "rf_n_folds": 5,
+      "lda_accuracy_mean": 0.25,
+      "lda_accuracy_std": 0.31622776601683794,
+      "loo_accuracy": 0.5,
+      "loo_n_correct": 10,
+      "loo_n_total": 20
+    },
+    "swap_vs_socratic": {
+      "description": "prompt_swap vs socratic",
+      "n_samples": 20,
+      "n_per_class": [
+        10,
+        10
+      ],
+      "label_names": [
+        "prompt_swap",
+        "pure_socratic"
+      ],
+      "rf_accuracy_mean": 0.6,
+      "rf_accuracy_std": 0.2,
+      "rf_fold_scores": [
+        0.5,
+        0.75,
+        0.75,
+        0.75,
+        0.25
+      ],
+      "rf_n_folds": 5,
+      "lda_accuracy_mean": 0.35,
+      "lda_accuracy_std": 0.2,
+      "loo_accuracy": 0.45,
+      "loo_n_correct": 9,
+      "loo_n_total": 20
+    },
+    "3way_swap": {
+      "description": "3-way socratic/swap/linear",
+      "n_samples": 30,
+      "n_per_class": [
+        10,
+        10,
+        10
+      ],
+      "label_names": [
+        "socratic",
+        "prompt_swap",
+        "linear"
+      ],
+      "rf_accuracy_mean": 0.4333333333333333,
+      "rf_accuracy_std": 0.08164965809277261,
+      "rf_fold_scores": [
+        0.5,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.5,
+        0.5
+      ],
+      "rf_n_folds": 5,
+      "lda_accuracy_mean": 0.19999999999999998,
+      "lda_accuracy_std": 0.06666666666666667,
+      "loo_accuracy": 0.3333333333333333,
+      "loo_n_correct": 10,
+      "loo_n_total": 30
+    },
+    "tier_ablation_swap_vs_linear": {
+      "features_tier1": {
+        "n_features": 221,
+        "rf_accuracy": 0.55,
+        "rf_std": 0.18708286933869706
+      },
+      "features_tier2": {
+        "n_features": 221,
+        "rf_accuracy": 0.3,
+        "rf_std": 0.18708286933869708
+      },
+      "features_tier2_5": {
+        "n_features": 145,
+        "rf_accuracy": 0.7,
+        "rf_std": 0.18708286933869706
+      }
+    },
+    "interpretation": "EXPLANATION A (mode execution): prompt_swap is computationally identical to linear. The system prompt's mode is overridden by the user directive. Signal comes from actual execution, not prompt presence.",
+    "swap_vs_linear_summary": {
+      "accuracy": 0.5,
+      "explanation": "A"
+    },
+    "length_diagnostic": {
+      "swap_mean_tokens": 484.4,
+      "linear_mean_tokens": 510.1,
+      "socratic_mean_tokens": 505.6
+    }
+  }
+}

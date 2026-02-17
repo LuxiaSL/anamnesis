@@ -1,0 +1,33 @@
+{
+  "observed_accuracy": 0.6,
+  "observed_fold_scores": [
+    0.4,
+    0.65,
+    0.45,
+    0.9,
+    0.6
+  ],
+  "n_permutations": 1000,
+  "n_permutations_requested": 1000,
+  "null_mean": 0.19832999999999998,
+  "null_std": 0.044972337052903974,
+  "null_min": 0.06999999999999999,
+  "null_max": 0.37,
+  "null_median": 0.2,
+  "null_p95": 0.27,
+  "null_p99": 0.30999999999999994,
+  "p_value": 0.000999000999000999,
+  "n_above_observed": 0,
+  "observed_percentile": 100.0,
+  "n_samples": 100,
+  "n_features": 1837,
+  "n_classes": 5,
+  "elapsed_seconds": 1079.6,
+  "mode_names": [
+    "analogical",
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ]
+}

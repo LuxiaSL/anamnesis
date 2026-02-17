@@ -1,0 +1,39 @@
+{
+  "generation_id": 29,
+  "prompt_set": "A",
+  "topic": "How neural networks learn",
+  "topic_idx": 5,
+  "mode": "pedagogical",
+  "mode_idx": 4,
+  "system_prompt": "Teach this to a curious beginner. Start with intuition before formalism. Use concrete examples and everyday analogies. Ask rhetorical questions to guide understanding. Check comprehension: 'Does that make sense? Here's why...' Build from simple to complex.",
+  "user_prompt": "Write about: How neural networks learn",
+  "seed": 3698169656,
+  "repetition": 0,
+  "generated_text": "**Unraveling the Mystery of Neural Networks: How They Learn**\n\nImagine you're trying to recognize a new face in a crowd. You look at the face, and your brain quickly processes the features, like the shape of the eyes, nose, and mouth. It's like your brain is trying to solve a puzzle, and it's getting better and better at it with each new face you see.\n\nNeural networks are like super-smart brains that can learn to recognize patterns and solve problems, just like our brains do. But how do they learn? Let's dive into the world of neural networks and explore how they acquire their knowledge.\n\n**Intuition Before Formalism**\n\nBefore we dive into the technical details, let's start with a simple question: How do you think a neural network learns to recognize a new face?\n\nDo you think it's like watching a video of a cat, and then suddenly, the network is like, \"Oh, I get it! Cats have whiskers and pointy ears!\"?\n\nOr do you think it's more like learning a new language, where you start with simple rules and gradually build up to more complex ones?\n\nEither way, you're on the right track! Neural networks do learn in a similar way.\n\n**The Building Blocks of Neural Networks**\n\nNeural networks are made up of many layers of interconnected nodes, called **neurons**. Each neuron receives input from other neurons, performs a calculation, and then sends the result to other neurons.\n\nThink of it like a game of telephone. You whisper a message to your friend, and they whisper it to their friend, and so on. The message gets passed from neuron to neuron, with each one adding its own special flavor.\n\n**Learning through Feedback**\n\nNow, let's talk about how neural networks learn. They don't just sit there and wait for data to come to them. No, they're actively trying to figure things out!\n\nHere's how it works:\n\n1. **Input**: A neural network receives a batch of data, like a picture of a face.\n2. **Processing**: The data passes through the network, and each neuron calculates its own value based on the inputs it received.\n3. **Output**: The final output is calculated, and the network tries to match it to the expected result (like \"this is a face!\").\n4. **Feedback**: The network compares its output to the expected result and calculates the difference.\n5. **Adjustment**: The network adjusts its weights and biases based on the feedback, trying to",
+  "num_generated_tokens": 512,
+  "prompt_length": 91,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.84,
+    "extraction_seconds": 17.84,
+    "total_seconds": 31.68
+  }
+}

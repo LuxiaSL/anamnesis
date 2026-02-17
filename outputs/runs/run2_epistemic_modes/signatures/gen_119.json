@@ -1,0 +1,39 @@
+{
+  "generation_id": 119,
+  "prompt_set": "C",
+  "topic": "Teaching a child to ride a bike",
+  "topic_idx": 8,
+  "mode": "emotional",
+  "mode_idx": 4,
+  "system_prompt": "Engage with this as if it matters to you personally. Let feeling inform your thinking. Express what resonates, what concerns you, what excites you about this topic.",
+  "user_prompt": "Write about: Teaching a child to ride a bike",
+  "seed": 1342526427,
+  "repetition": 4,
+  "generated_text": "The joy of teaching a child to ride a bike. It's a milestone moment that fills my heart with excitement and a hint of nervousness. As a parent, there's nothing quite like watching your little one learn to balance, pedal, and glide on two wheels. It's a rite of passage that brings a sense of pride and accomplishment, not just for the child, but for the parent too.\n\nI remember the first time my own child decided to take on the challenge of riding a bike. She was a tiny, determined thing, with a mop of curly hair and a fearless grin. She'd watch me ride by, her eyes fixed on the wheels as if mesmerized by the motion. And then, one day, she decided she'd had enough of just watching. She wanted to be the one doing the riding.\n\nMy heart swelled with pride as I watched her approach the bike, her small hands grasping the handlebars and her eyes shining with determination. I ran alongside her, offering words of encouragement and support as she tentatively pushed off with one foot and began to glide. The wobble was immediate, the stumble was inevitable, but my child didn't give up.\n\nWith each attempt, she grew more confident, more skilled. She learned to balance, to steer, and to brake. And with each success, her confidence grew, her smile grew wider, and her sense of accomplishment grew stronger.\n\nBut it's not just about the bike riding itself \u2013 it's about the journey, the process, the lessons learned along the way. It's about perseverance, about trying again and again until you get it right. It's about learning to fall, to get back up, and to keep going.\n\nAs a parent, it's a thrill to see your child learn to ride a bike. You get to be a part of their growth, their development, and their journey. You get to watch them learn to navigate the world on two wheels, to explore new places, and to discover new things.\n\nAnd it's not just about the child \u2013 it's about the parent too. Teaching a child to ride a bike is a reminder of the importance of patience, of support, and of letting go. It's a reminder that sometimes, the best thing you can do for your child is to let them figure things out for themselves, to trust in their abilities and their resilience.\n\nAs I watched my child ride by, her hair streaming in the wind, her smile shining bright, I felt a sense of pride and joy that I'd",
+  "num_generated_tokens": 512,
+  "prompt_length": 80,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.58,
+    "extraction_seconds": 16.55,
+    "total_seconds": 30.14
+  }
+}

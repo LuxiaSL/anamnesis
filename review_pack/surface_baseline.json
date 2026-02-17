@@ -1,0 +1,128 @@
+{
+  "n_samples": 100,
+  "n_classes": 5,
+  "mode_names": [
+    "analogical",
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "description": "TF-IDF (max 5000 features, 1-2 grams) on generated text, classified with RandomForest (100 trees, 5-fold stratified CV). This tests whether surface text statistics can explain the mode signal. If the surface baseline matches or exceeds internal-state RF, the internal-state signal is redundant with output text.",
+  "tfidf_unigram_rf_mean": 0.6799999999999999,
+  "tfidf_unigram_rf_std": 0.07483314773547885,
+  "tfidf_unigram_rf_folds": [
+    0.7,
+    0.8,
+    0.6,
+    0.7,
+    0.6
+  ],
+  "tfidf_unigram_n_features": 4379,
+  "tfidf_bigram_rf_mean": 0.5599999999999999,
+  "tfidf_bigram_rf_std": 0.08602325267042625,
+  "tfidf_bigram_rf_folds": [
+    0.5,
+    0.6,
+    0.45,
+    0.7,
+    0.55
+  ],
+  "tfidf_bigram_n_features": 5000,
+  "tfidf_char_ngram_rf_mean": 0.5900000000000001,
+  "tfidf_char_ngram_rf_std": 0.037416573867739396,
+  "tfidf_char_ngram_rf_folds": [
+    0.55,
+    0.6,
+    0.55,
+    0.65,
+    0.6
+  ],
+  "tfidf_char_ngram_n_features": 5000,
+  "4way_tfidf_unigram_rf_mean": 0.525,
+  "4way_tfidf_unigram_rf_std": 0.08477912478906585,
+  "4way_tfidf_bigram_rf_mean": 0.55,
+  "4way_tfidf_bigram_rf_std": 0.04677071733467427,
+  "4way_n_samples": 80,
+  "4way_modes": [
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "per_mode_tfidf_accuracy": {
+    "analogical": {
+      "correct": 20,
+      "total": 20,
+      "accuracy": 1.0
+    },
+    "contrastive": {
+      "correct": 19,
+      "total": 20,
+      "accuracy": 0.95
+    },
+    "dialectical": {
+      "correct": 13,
+      "total": 20,
+      "accuracy": 0.65
+    },
+    "linear": {
+      "correct": 7,
+      "total": 20,
+      "accuracy": 0.35
+    },
+    "socratic": {
+      "correct": 9,
+      "total": 20,
+      "accuracy": 0.45
+    }
+  },
+  "tfidf_confusion_matrix": [
+    [
+      20,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      19,
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      2,
+      13,
+      4,
+      1
+    ],
+    [
+      1,
+      1,
+      2,
+      7,
+      9
+    ],
+    [
+      1,
+      0,
+      1,
+      9,
+      9
+    ]
+  ],
+  "tfidf_confusion_labels": [
+    "analogical",
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "internal_state_rf_accuracy": 0.7,
+  "gap_internal_minus_surface": 0.020000000000000018,
+  "4way_internal_state_rf": 0.55,
+  "4way_gap_internal_minus_surface": 0.0
+}

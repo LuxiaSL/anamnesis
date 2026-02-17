@@ -1,0 +1,263 @@
+{
+  "experiment": "temporal_prediction",
+  "n_samples": 100,
+  "n_features_total": 1837,
+  "n_features_early": 583,
+  "n_features_late": 583,
+  "n_features_full_traj": 1468,
+  "per_tier_counts": {
+    "T1": {
+      "early": 62,
+      "late": 62
+    },
+    "T2.5": {
+      "early": 21,
+      "late": 21
+    },
+    "T3": {
+      "early": 500,
+      "late": 500
+    }
+  },
+  "modes": [
+    "analogical",
+    "contrastive",
+    "dialectical",
+    "linear",
+    "socratic"
+  ],
+  "n_topics": 20,
+  "diagnostic_classification": {
+    "early_all": {
+      "mean_accuracy": 0.37,
+      "std_accuracy": 0.08124038404635961,
+      "fold_accs": [
+        0.45,
+        0.3,
+        0.25,
+        0.4,
+        0.45
+      ],
+      "n_features": 583
+    },
+    "late_all": {
+      "mean_accuracy": 0.31999999999999995,
+      "std_accuracy": 0.13638181696985854,
+      "fold_accs": [
+        0.15,
+        0.3,
+        0.5,
+        0.45,
+        0.2
+      ],
+      "n_features": 583
+    },
+    "full_traj_all": {
+      "mean_accuracy": 0.45,
+      "std_accuracy": 0.09999999999999999,
+      "fold_accs": [
+        0.3,
+        0.4,
+        0.45,
+        0.6,
+        0.5
+      ],
+      "n_features": 1468
+    },
+    "early_T1": {
+      "mean_accuracy": 0.31,
+      "std_accuracy": 0.03741657386773941,
+      "fold_accs": [
+        0.35,
+        0.35,
+        0.25,
+        0.3,
+        0.3
+      ],
+      "n_features": 62
+    },
+    "early_T2.5": {
+      "mean_accuracy": 0.37,
+      "std_accuracy": 0.08124038404635961,
+      "fold_accs": [
+        0.45,
+        0.45,
+        0.25,
+        0.3,
+        0.4
+      ],
+      "n_features": 21
+    },
+    "early_T3": {
+      "mean_accuracy": 0.38,
+      "std_accuracy": 0.09273618495495707,
+      "fold_accs": [
+        0.4,
+        0.3,
+        0.3,
+        0.35,
+        0.55
+      ],
+      "n_features": 500
+    }
+  },
+  "task1_compute_to_compute": {
+    "overall": {
+      "median_r2": -0.5600927219120436,
+      "mean_r2": -0.5831078531445303,
+      "std_r2": 0.3104971619291338,
+      "q25_r2": -0.7321890204322685,
+      "q75_r2": -0.381997575834908,
+      "n_positive": 0,
+      "n_features": 583,
+      "frac_positive": 0.0
+    },
+    "by_tier": {
+      "T1": {
+        "median_r2": -0.17738760470382148,
+        "mean_r2": -0.2528001040517279,
+        "std_r2": 0.4011695997298216,
+        "q25_r2": -0.22521274939721364,
+        "q75_r2": -0.12724088412416049,
+        "n_positive": 0,
+        "n_features": 62,
+        "frac_positive": 0.0
+      },
+      "T2.5": {
+        "median_r2": -0.10741861063803612,
+        "mean_r2": -0.09867709381657296,
+        "std_r2": 0.09744172351096321,
+        "q25_r2": -0.13532312182996248,
+        "q75_r2": -0.05822923573076046,
+        "n_positive": 3,
+        "n_features": 21,
+        "frac_positive": 0.14285714285714285
+      },
+      "T3": {
+        "median_r2": -0.5284809332984428,
+        "mean_r2": -0.5612740996232564,
+        "std_r2": 0.2593404460299061,
+        "q25_r2": -0.7019904397400782,
+        "q75_r2": -0.3718884135180429,
+        "n_positive": 0,
+        "n_features": 500,
+        "frac_positive": 0.0
+      }
+    }
+  },
+  "task2_semantic_to_compute": {
+    "overall": {
+      "median_r2": -0.42205773952305775,
+      "mean_r2": -0.45913442622830525,
+      "std_r2": 0.5197932033766594,
+      "q25_r2": -0.5638628304770825,
+      "q75_r2": -0.2781178728543766,
+      "n_positive": 11,
+      "n_features": 583,
+      "frac_positive": 0.018867924528301886
+    },
+    "by_tier": {
+      "T1": {
+        "median_r2": -0.3374492604914112,
+        "mean_r2": -0.6641622699291524,
+        "std_r2": 1.4437273215061222,
+        "q25_r2": -0.6450970369417421,
+        "q75_r2": -0.21525443758364665,
+        "n_positive": 0,
+        "n_features": 62,
+        "frac_positive": 0.0
+      },
+      "T2.5": {
+        "median_r2": -0.33824798863346694,
+        "mean_r2": -0.43333293814997764,
+        "std_r2": 0.322220266583638,
+        "q25_r2": -0.668071193196524,
+        "q75_r2": -0.2135626146151509,
+        "n_positive": 1,
+        "n_features": 21,
+        "frac_positive": 0.047619047619047616
+      },
+      "T3": {
+        "median_r2": -0.42807808356253385,
+        "mean_r2": -0.4347946361086899,
+        "std_r2": 0.2153668202419906,
+        "q25_r2": -0.5617675803984594,
+        "q75_r2": -0.29060686715222495,
+        "n_positive": 10,
+        "n_features": 500,
+        "frac_positive": 0.02
+      }
+    }
+  },
+  "task3_semantic_to_semantic": {
+    "median_r2": -0.3085274653956665,
+    "mean_r2": -0.35848131364199026,
+    "std_r2": 0.351332776720369,
+    "q25_r2": -0.5528072925671149,
+    "q75_r2": -0.10527460106887387,
+    "n_positive": 53,
+    "n_features": 384,
+    "frac_positive": 0.13802083333333334
+  },
+  "delta_task1_minus_task2": {
+    "overall": -0.13803498238898587,
+    "by_tier": {
+      "T1": 0.16006165578758974,
+      "T2.5": 0.23082937799543082,
+      "T3": -0.10040284973590896
+    }
+  },
+  "cross_generation_control": {
+    "within_gen_median_r2": -0.5600927219120436,
+    "within_gen_mean_r2": -0.5831078531445303,
+    "cross_gen_median_r2": -0.2025416023661836,
+    "cross_gen_mean_r2": -0.22930941371556504,
+    "delta_median": -0.35755111954586005,
+    "interpretation": "MARGINAL \u2014 small advantage for within-generation, not conclusive"
+  },
+  "within_mode_residual": {
+    "median_r2": -0.5239002565720148,
+    "mean_r2": -0.5605419934317379,
+    "frac_positive": 0.00686106346483705,
+    "n_positive": 4,
+    "n_features": 583
+  },
+  "cross_half_consistency": {
+    "early_accuracy": 0.37,
+    "late_accuracy": 0.32,
+    "agreement_rate": 0.38,
+    "both_correct_rate": 0.18,
+    "per_mode": {
+      "analogical": {
+        "agreement": 0.6,
+        "early_acc": 0.7,
+        "late_acc": 0.65,
+        "both_correct": 0.5
+      },
+      "contrastive": {
+        "agreement": 0.4,
+        "early_acc": 0.35,
+        "late_acc": 0.4,
+        "both_correct": 0.2
+      },
+      "dialectical": {
+        "agreement": 0.4,
+        "early_acc": 0.0,
+        "late_acc": 0.2,
+        "both_correct": 0.0
+      },
+      "linear": {
+        "agreement": 0.2,
+        "early_acc": 0.2,
+        "late_acc": 0.05,
+        "both_correct": 0.0
+      },
+      "socratic": {
+        "agreement": 0.3,
+        "early_acc": 0.6,
+        "late_acc": 0.3,
+        "both_correct": 0.2
+      }
+    }
+  }
+}

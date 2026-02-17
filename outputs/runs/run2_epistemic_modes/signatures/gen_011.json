@@ -1,0 +1,39 @@
+{
+  "generation_id": 11,
+  "prompt_set": "A",
+  "topic": "The history of bread",
+  "topic_idx": 2,
+  "mode": "creative",
+  "mode_idx": 1,
+  "system_prompt": "Let your thinking wander freely here. Make unexpected connections, use metaphors, explore tangential ideas that feel interesting. Don't worry about structure \u2014 follow curiosity.",
+  "user_prompt": "Write about: The history of bread",
+  "seed": 3852203695,
+  "repetition": 0,
+  "generated_text": "The history of bread - a tale of ancient civilizations, rustic traditions, and the unyielding quest for sustenance. Like a warm, crusty loaf, the story of bread has risen and evolved over time, nourishing the bodies and souls of countless generations.\n\nIt all began around 10,000 years ago, when our ancestors first discovered the magic of grinding grains into flour. This serendipitous moment marked the birth of bread, a staple food that would become an integral part of human culture. The earliest evidence of bread-making comes from the Fertile Crescent, a region that spans modern-day Iraq, Syria, Lebanon, Jordan, Israel, and Egypt.\n\nAs the Neolithic Revolution took hold, humans began to domesticate plants and animals, leading to a surge in food production. Bread became a convenient and nutritious way to store excess grains, which were then baked into a compact, portable form. This innovation allowed people to travel, trade, and settle in new lands, carrying the gift of bread with them.\n\nIn ancient Egypt, around 2500 BCE, bread became a symbol of wealth and power. The Egyptians developed a sophisticated system of bread-making, using yeast to leaven their loaves. They even created elaborate breads, such as the \"Ta'ameya\" (a flatbread topped with herbs and spices), which were served at special occasions and ceremonies.\n\nAs civilizations rose and fell, bread remained a constant companion. In ancient Greece, around 500 BCE, bread was a staple food, often served with olive oil, herbs, and other local ingredients. The Greeks even developed the concept of \"panis,\" a type of flatbread that was both a food and a social bonding agent.\n\nIn the Middle Ages, bread became a vital part of European cuisine, particularly in the form of \"pumpernickel\" (a dense, dark bread made from rye flour). This hearty bread was a staple of peasant diets, providing sustenance for the working class. Meanwhile, the nobility indulged in more elaborate breads, such as \"pain perdu\" (a rich, buttery bread made from eggs and milk).\n\nThe Industrial Revolution marked a significant turning point in the history of bread. With the introduction of mechanized milling and baking, bread production became faster, cheaper, and more accessible. The development of new grains, such as wheat and rye, further expanded the range of breads available.\n\nHowever, this period also saw the rise of industrialized bread, which prioritized efficiency and profit over traditional",
+  "num_generated_tokens": 512,
+  "prompt_length": 74,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.75,
+    "extraction_seconds": 16.59,
+    "total_seconds": 30.33
+  }
+}

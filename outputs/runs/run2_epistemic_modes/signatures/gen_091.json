@@ -1,0 +1,39 @@
+{
+  "generation_id": 91,
+  "prompt_set": "C",
+  "topic": "The history of bread",
+  "topic_idx": 2,
+  "mode": "creative",
+  "mode_idx": 1,
+  "system_prompt": "Let your thinking wander freely here. Make unexpected connections, use metaphors, explore tangential ideas that feel interesting. Don't worry about structure \u2014 follow curiosity.",
+  "user_prompt": "Write about: The history of bread",
+  "seed": 3176972825,
+  "repetition": 6,
+  "generated_text": "Bread, the staff of life, the staff of memories, the staff of rituals. Its history is as ancient as humanity itself, woven into the fabric of our collective past, and rising like a golden sunrise to greet us each morning.\n\nThe earliest evidence of bread-making dates back to around 10,000 BCE, during the Stone Age, in the Fertile Crescent, a region that encompasses modern-day Iraq, Syria, Lebanon, Jordan, Israel, and parts of Turkey and Egypt. It was here that our ancestors first discovered the magic of grinding grains into flour and mixing it with water to create a primitive, yet nourishing, bread.\n\nAs civilizations rose and fell, bread became an integral part of human culture. The ancient Egyptians, around 2500 BCE, developed a more sophisticated bread-making process, using yeast and emmer wheat to create a lighter, airier loaf. They even used bread as a form of currency, with the value of a loaf equivalent to a few coins.\n\nIn ancient Greece, around 500 BCE, bread was a staple food, often served at banquets and symposia. The Greek poet Homer wrote about the bread of the gods, which was said to have been made from the finest wheat and baked in a magical oven. This divine bread was reserved for the gods and heroes, while mortals were limited to a coarser, more rustic bread.\n\nThe Romans, in turn, refined the art of bread-making, introducing the use of salt and herbs to enhance flavor. They also developed the concept of the \"panis quadratus,\" a square-shaped loaf that became a standard in Roman cuisine.\n\nAs Christianity spread throughout Europe, bread became a symbol of faith and community. The Eucharist, also known as the Lord's Supper, was celebrated with bread, which represented the body of Christ. The Catholic Church played a significant role in shaping bread-making traditions, with monasteries becoming centers of bread production and distribution.\n\nThe Middle Ages saw the rise of artisanal bread-making, with bakers developing unique regional specialties and recipes. The famous French baguette, for example, was born in the 18th century, while the Italian ciabatta emerged in the 19th century.\n\nThe Industrial Revolution brought significant changes to bread-making, with the introduction of mechanized milling and baking. The development of yeast, in particular, allowed for the mass production of bread, making it more accessible and affordable for the general population.\n\nIn the 20th century, bread-making underwent another revolution, with the",
+  "num_generated_tokens": 512,
+  "prompt_length": 74,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.71,
+    "extraction_seconds": 16.72,
+    "total_seconds": 30.44
+  }
+}

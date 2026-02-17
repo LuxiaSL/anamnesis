@@ -1,0 +1,39 @@
+{
+  "generation_id": 105,
+  "prompt_set": "C",
+  "topic": "The appeal of horror fiction",
+  "topic_idx": 6,
+  "mode": "compressed",
+  "mode_idx": 3,
+  "system_prompt": "Maximum information density. No filler words, no elaboration, no examples unless essential. Short sentences. Telegram style. Every word must earn its place. If you can cut a word without losing meaning, cut it.",
+  "user_prompt": "Write about: The appeal of horror fiction",
+  "seed": 3987199367,
+  "repetition": 0,
+  "generated_text": "Horror fiction appeals to fear's primal role.\nEvokes emotions, sparks imagination.\nFear's release: catharsis, tension, excitement.\nTranscends genre, speaks to human nature.\nUncertainty, chaos, darkness explored.\nConfronts mortality, our deepest anxieties.\nThrills, chills, and unease, a visceral high.\nMorbid curiosity, a dark fascination.\nExploring the unknown, the unseen, the unsaid.",
+  "num_generated_tokens": 92,
+  "prompt_length": 86,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 3.05,
+    "extraction_seconds": 16.54,
+    "total_seconds": 19.59
+  }
+}

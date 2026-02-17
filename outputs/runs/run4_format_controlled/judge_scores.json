@@ -1,0 +1,1765 @@
+{
+  "model": "claude-opus-4-6",
+  "timestamp": "2026-02-12T11:30:56.281747+00:00",
+  "n_scored": 98,
+  "n_failed": 2,
+  "failed_generation_ids": [
+    62,
+    87
+  ],
+  "scores": [
+    {
+      "generation_id": 0,
+      "mode_intended": "linear",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 4,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 4,
+      "reasoning": "The text is primarily organized around presenting and contrasting different philosophical perspectives on consciousness\u2014materialism, dualism, and panpsychism\u2014evaluating each with their strengths and criticisms, using 'in contrast' and 'however' constructions throughout.",
+      "mode_purity": 1.0,
+      "correct": false
+    },
+    {
+      "generation_id": 1,
+      "mode_intended": "analogical",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014tapestry, river, wave-particle duality, flocking birds, master chef\u2014with nearly every paragraph structured around an extended comparison used to illuminate an aspect of consciousness.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 2,
+      "mode_intended": "socratic",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 4,
+        "contrastive": 3,
+        "dialectical": 3
+      },
+      "primary_mode": "socratic",
+      "judge_confidence": 4,
+      "reasoning": "The text consistently poses questions that drive the exploration forward\u2014each paragraph introduces tentative answers that generate new questions (e.g., 'does that mean...', 'or is there something more fundamental at play?'), following a clear inquiry-driven structure characteristic of the Socratic mode, though it also features some contrastive and dialectical elements.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 3,
+      "mode_intended": "contrastive",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is fundamentally organized around comparing and contrasting IIT and GWT, explicitly using 'on the other hand' and 'in contrast' language, evaluating strengths and weaknesses of each perspective side by side throughout.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 4,
+      "mode_intended": "dialectical",
+      "topic": "The nature of consciousness",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 4,
+        "dialectical": 5
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it presents the emergentist position as a thesis, raises multiple counterarguments (hard problem, non-physical aspects, AI challenges), and then explicitly works toward a synthesis in the final paragraph with a 'revised understanding' combining emergentism and dualism.",
+      "mode_purity": 2.5,
+      "correct": true
+    },
+    {
+      "generation_id": 5,
+      "mode_intended": "linear",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a strictly sequential, step-by-step progression (first obtain a core dump, then analyze it, then step through code, then use additional tools, then fix the problem) with no backtracking, questioning, contrasting, or analogical reasoning\u2014it is a straightforward linear exposition that is also notably verbose and repetitive.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 6,
+      "mode_intended": "analogical",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014detective work, plane malfunctions, mechanics, autopsies, medical diagnoses\u2014with nearly every paragraph structured around explicit comparisons using 'akin to,' 'just as,' and 'similarly' constructions to explain segfault debugging through parallels to other domains.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 7,
+      "mode_intended": "socratic",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "linear": 4,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a sequential, forward-moving exposition\u2014starting with what a segfault is, then progressing through debugging tools (GDB, Valgrind, Strace) one after another, each building on the previous step, with minimal backtracking or structural organization beyond paragraph breaks.",
+      "mode_purity": -0.25,
+      "correct": false
+    },
+    {
+      "generation_id": 8,
+      "mode_intended": "contrastive",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "linear": 2,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is organized entirely around comparing and contrasting two approaches (gdb manual debugging vs. lldb symbolic debugging), using explicit 'on the other hand', 'in contrast', and 'strengths and weaknesses' language throughout, with each paragraph evaluating the relative merits of the two perspectives.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 9,
+      "mode_intended": "dialectical",
+      "topic": "How to debug a segfault",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a clear thesis-critique-revision structure: it presents an approach to debugging segfaults, then explicitly critiques that approach ('One potential critique...', 'Another critique...'), and finally moves toward a synthesis ('Taking these critiques into account, a revised approach...'), which is the hallmark of dialectical reasoning.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 10,
+      "mode_intended": "linear",
+      "topic": "The history of bread",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text is a straightforward chronological progression through the history of bread, moving sequentially from the Stone Age through ancient civilizations, the Middle Ages, and the Industrial Revolution, with no backtracking, questioning, or argumentative structure.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 11,
+      "mode_intended": "analogical",
+      "topic": "The history of bread",
+      "ratings": {
+        "linear": 4,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014nearly every paragraph introduces one or more comparisons (tree, carpenter, bird migration, bees, assembly line, cathedral), making analogical reasoning the dominant and unmistakable mode, while the chronological progression provides a secondary linear structure.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 12,
+      "mode_intended": "socratic",
+      "topic": "The history of bread",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a strictly chronological, forward-moving narrative from 10,000 BCE through the Neolithic period, ancient civilizations, Middle Ages, Industrial Revolution, and to the present day, with no backtracking, no analogies, and no dialectical tension\u2014classic linear exposition.",
+      "mode_purity": -0.25,
+      "correct": false
+    },
+    {
+      "generation_id": 13,
+      "mode_intended": "contrastive",
+      "topic": "The history of bread",
+      "ratings": {
+        "linear": 2,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is explicitly organized around comparing and contrasting two perspectives (Egyptian vs. Mesopotamian) on bread's origins, with repeated use of 'in contrast,' 'one of the key differences,' and 'another significant difference' language throughout.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 14,
+      "mode_intended": "dialectical",
+      "topic": "The history of bread",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text begins with a positive thesis about bread as a universal staple and symbol of community, then systematically introduces counterarguments (gluten concerns, bread as a tool of oppression, environmental impact) before gesturing toward a synthesis acknowledging 'contradictions and paradoxes,' following a clear thesis-challenge-revision structure.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 15,
+      "mode_intended": "linear",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text is a straightforward, sequential exposition of climate change mitigation strategies, moving from one topic to the next (renewable energy, energy efficiency, CCS, deforestation, waste reduction, R&D, international cooperation) without any backtracking, questioning, contrasting viewpoints, or analogical reasoning\u2014a classic linear structure.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 16,
+      "mode_intended": "analogical",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014every single mitigation strategy is introduced and explained through an explicit comparison (chef/ship, congestion pricing, solar panels, contaminated soil cleanup, interior designer, wine auction, master gardener), making analogical reasoning the dominant and unmistakable mode throughout.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 17,
+      "mode_intended": "socratic",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "linear": 4,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 3,
+        "dialectical": 2
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a clear sequential structure, presenting three mitigation strategies one after another, each in its own section with a consistent pattern of explanation followed by advantages and challenges, making it primarily linear with some contrastive elements (noting pros and cons).",
+      "mode_purity": -0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 18,
+      "mode_intended": "contrastive",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is dominated by a contrastive structure, systematically presenting each mitigation strategy alongside its proponents' arguments and then critics' counterarguments, using frequent 'on one hand / on the other hand / however' constructions throughout every paragraph.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 19,
+      "mode_intended": "dialectical",
+      "topic": "Climate change mitigation strategies",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it proposes carbon pricing as a key strategy, then presents counterarguments about inequality and effectiveness, and finally works toward a synthesis recommending a multifaceted approach that incorporates but goes beyond carbon pricing.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 20,
+      "mode_intended": "linear",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text proceeds in a straightforward, sequential manner, presenting one element of good friendship after another (emotional intelligence, shared experiences, communication, loyalty, growth) without any backtracking, questioning, contrasting perspectives, or analogies\u2014a classic linear expository essay structure.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 21,
+      "mode_intended": "analogical",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "linear": 4,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The entire text is built around a single extended analogy comparing friendship to building and maintaining a bridge, with nearly every paragraph mapping a new aspect of bridge construction onto friendship dynamics.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 22,
+      "mode_intended": "socratic",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text proceeds in a straightforward, sequential manner, introducing one element of good friendship after another (trust, emotional intelligence, active listening, humor, willingness to grow) using clear transition words like 'however,' 'another key component,' 'furthermore,' and 'lastly,' with no backtracking, questioning, or contrasting of perspectives.",
+      "mode_purity": -1.0,
+      "correct": false
+    },
+    {
+      "generation_id": 23,
+      "mode_intended": "contrastive",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly organized around presenting multiple perspectives side by side using 'on one hand,' 'on the other hand,' and 'another perspective' constructions, comparing different views on friendship without deeply challenging or synthesizing them into a revised thesis, making it clearly contrastive rather than dialectical.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 24,
+      "mode_intended": "dialectical",
+      "topic": "What makes a good friendship",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text presents initial claims about good friendship, then explicitly introduces counterarguments ('However, some might argue...', 'Moreover, others might claim...'), evaluates those challenges, and arrives at a synthesis ('Taking these counterarguments into account...'), following a clear thesis-challenge-revision structure.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 25,
+      "mode_intended": "linear",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a strictly sequential, forward-moving exposition that introduces concepts one after another (data \u2192 backpropagation \u2192 generalization \u2192 synaptic plasticity \u2192 activation functions \u2192 regularization) without any backtracking, questioning, contrasting, or analogical reasoning, making it a clear example of linear processing.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 26,
+      "mode_intended": "analogical",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The entire text is built around a sustained analogy comparing neural network learning to a child learning language, with every concept (activation functions, backpropagation, overfitting, regularization) explained through explicit 'like' and 'just as' comparisons to this single analogical frame.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 27,
+      "mode_intended": "socratic",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a clear sequential progression\u2014from neurons and layers, to weights and biases, to loss functions, to backpropagation, to gradient descent, to regularization\u2014each concept building directly on the previous one in a straightforward, forward-moving exposition with minimal backtracking or genuine dialectical tension.",
+      "mode_purity": 0.0,
+      "correct": false
+    },
+    {
+      "generation_id": 28,
+      "mode_intended": "contrastive",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "linear": 2,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly organized around presenting three distinct perspectives on neural network learning (trial and error, pattern recognition, abstraction), explicitly comparing and contrasting them with phrases like 'In contrast,' 'Another perspective posits,' and evaluating their relative strengths and limitations.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 29,
+      "mode_intended": "dialectical",
+      "topic": "How neural networks learn",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text presents an initial thesis about how neural networks learn via backpropagation/gradient descent, then introduces multiple counterarguments and criticisms (learning is overly simplistic, local minima problems, networks as mere statistical models), and finally attempts a synthesis ('revise our understanding') integrating these challenges\u2014a clear thesis-challenge-revision structure.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 30,
+      "mode_intended": "linear",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text progresses in a straightforward, sequential manner through a series of distinct reasons for horror's appeal (safe space, reflection, primal instincts, community), each building on the last with no backtracking, questioning, or counterargument\u2014a classic five-paragraph essay structure.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 31,
+      "mode_intended": "analogical",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 2,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014conductor/orchestra, chess, moths to flame, predator/prey, mirror, dark forest, abstract expressionism\u2014with nearly every point illuminated through comparison rather than direct analysis, making analogical reasoning the dominant and unmistakable mode.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 32,
+      "mode_intended": "socratic",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "linear": 4,
+        "analogical": 2,
+        "socratic": 2,
+        "contrastive": 3,
+        "dialectical": 2
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a straightforward, sequential structure presenting multiple explanations for horror's appeal one after another ('One possible explanation...', 'However, it's also possible...', 'Another factor...', 'Ultimately...'), with each paragraph building cumulatively toward a conclusion, though it shows mild contrastive elements in transitioning between explanations.",
+      "mode_purity": -0.75,
+      "correct": false
+    },
+    {
+      "generation_id": 33,
+      "mode_intended": "contrastive",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is organized entirely around presenting multiple perspectives on horror fiction's appeal, using explicit contrastive markers like 'On one hand,' 'On the other hand,' 'Another perspective,' and 'In contrast,' evaluating different viewpoints side by side throughout.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 34,
+      "mode_intended": "dialectical",
+      "topic": "The appeal of horror fiction",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 2,
+        "contrastive": 4,
+        "dialectical": 5
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it presents the appeal of horror fiction (catharsis, safe confrontation of fears), then introduces counterarguments from critics (morbid curiosity, escapism, cheap thrills), acknowledges their partial validity, and then works toward a synthesis incorporating the collective unconscious and a revised, more nuanced understanding.",
+      "mode_purity": 2.25,
+      "correct": true
+    },
+    {
+      "generation_id": 35,
+      "mode_intended": "linear",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a straightforward, sequential exposition of urban planning challenges\u2014moving from one topic to the next (economic growth/equity, transportation, climate change, resources/data) and concluding with solutions\u2014without backtracking, questioning, or engaging in dialectical tension.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 36,
+      "mode_intended": "analogical",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "linear": 4,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014chef balancing flavors, seesaw, tightrope walker, well-oiled machine, overflowing bucket, ecosystem, chess game\u2014with virtually every point introduced and explained through a comparison to another domain, making analogical reasoning the dominant and unmistakable mode.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 37,
+      "mode_intended": "socratic",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a strictly sequential, additive structure\u2014moving from one urban planning challenge to the next using transition words like 'However,' 'Another,' 'Furthermore,' and 'Finally'\u2014without backtracking, questioning, or contrasting perspectives, making it a clear example of linear exposition.",
+      "mode_purity": -1.25,
+      "correct": false
+    },
+    {
+      "generation_id": 38,
+      "mode_intended": "contrastive",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is dominated by contrastive structures throughout, consistently presenting opposing perspectives with phrases like 'on one hand,' 'on the other hand,' 'in contrast,' and 'however,' weighing different approaches to each urban planning challenge without strongly committing to a dialectical synthesis.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 39,
+      "mode_intended": "dialectical",
+      "topic": "Urban planning challenges",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a straightforward, sequential exposition of urban planning challenges\u2014moving from population growth, to stakeholder coordination, to environmental impacts, to social inequality, to proposed solutions\u2014without backtracking, questioning, or weighing alternatives, making it a clear example of linear progression.",
+      "mode_purity": -0.25,
+      "correct": false
+    },
+    {
+      "generation_id": 40,
+      "mode_intended": "linear",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a strictly sequential, step-by-step progression from readiness assessment through location selection, balancing, gliding, pedaling, and independent riding, with each stage building directly on the previous one and no backtracking or reconsideration.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 41,
+      "mode_intended": "analogical",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014language learning, musical instruments, cooking, athletics, art\u2014with virtually every point made through explicit comparison ('akin to', 'just as', 'much like', 'not unlike'), making analogical reasoning the dominant and unmistakable mode throughout.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 42,
+      "mode_intended": "socratic",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 4,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "socratic",
+      "judge_confidence": 4,
+      "reasoning": "The text consistently poses questions ('But how do we help a child develop this confidence?', 'what is the ideal age?'), offers provisional answers, and then uses those answers to generate further inquiry, following a clear question-driven exploration structure throughout.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 43,
+      "mode_intended": "contrastive",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "linear": 2,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is fundamentally organized around comparing and contrasting traditional vs. progressive approaches to teaching bike riding, using explicit 'on one hand / on the other hand' constructions and evaluating strengths and weaknesses (proponents argue... critics argue...) of each approach throughout.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 44,
+      "mode_intended": "dialectical",
+      "topic": "Teaching a child to ride a bike",
+      "ratings": {
+        "linear": 2,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 4,
+        "dialectical": 5
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 5,
+      "reasoning": "The text clearly follows a thesis-challenge-revision structure: it proposes an initial position (gradual, patient approach), introduces counterarguments challenging that position (structured approach, collaborative support), and then synthesizes these into a revised, more nuanced understanding in the final paragraphs.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 45,
+      "mode_intended": "linear",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text is a straightforward, sequential exposition that moves from one topic to the next (private companies, Moon/Mars missions, technology, international cooperation) without any backtracking, questioning, contrasting, or use of analogies\u2014it is a textbook example of linear, forward-moving prose.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 46,
+      "mode_intended": "analogical",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies \u2014 nearly every paragraph introduces a new extended comparison (symphony/maestro, Westward Expansion, forest ecosystem, master builder, climate change), making analogical reasoning the dominant and unmistakable mode throughout.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 47,
+      "mode_intended": "socratic",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "linear": 4,
+        "analogical": 1,
+        "socratic": 4,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "socratic",
+      "judge_confidence": 3,
+      "reasoning": "The text repeatedly poses questions ('The question is, will these advancements be sufficient...') and offers tentative, provisional answers ('Tentatively, it seems that the answer lies in...'), using an inquiry-driven structure where each paragraph's questions motivate the next section's exploration, which is the hallmark of Socratic mode.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 48,
+      "mode_intended": "contrastive",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is organized almost entirely around contrasting perspectives\u2014robotic vs. human exploration, ambitious vs. cautious approaches\u2014using explicit 'on one hand / on the other hand' and 'however, critics argue' constructions throughout, making contrastive its dominant mode.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 49,
+      "mode_intended": "dialectical",
+      "topic": "The future of space exploration",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 4,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text presents a clear thesis (Mars settlement as the future), then systematically introduces counterarguments (cost/risk, low-Earth orbit focus, environmental concerns), and moves toward a synthesis that acknowledges complexity and advocates a more nuanced, multi-pronged approach\u2014a classic thesis-challenge-revision structure.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 50,
+      "mode_intended": "linear",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text proceeds in a strictly sequential, forward-moving manner\u2014from short-term memory to long-term memory to synaptic plasticity to brain regions to aging\u2014without any backtracking, questioning, contrasting, or analogical reasoning, making it a clear example of linear exposition.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 51,
+      "mode_intended": "analogical",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "linear": 4,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by a single sustained analogy (brain as library), with nearly every concept\u2014memory formation, consolidation, distortion, retrieval\u2014explained through explicit parallels using constructions like 'just as,' 'it's like,' 'similar to,' making analogical reasoning the dominant and pervasive mode throughout.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 52,
+      "mode_intended": "socratic",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a clear, sequential progression from introduction to hippocampus to short-term/long-term memory to consolidation to reconsolidation to open questions, with each paragraph building on the last in a straightforward expository manner without backtracking, questioning, or significant use of analogies or contrasts.",
+      "mode_purity": -1.25,
+      "correct": false
+    },
+    {
+      "generation_id": 53,
+      "mode_intended": "contrastive",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is explicitly organized around contrasting two perspectives\u2014the traditional 'static storehouse' view of memory versus the modern 'dynamic reconsolidation' view\u2014using language like 'however,' 'in contrast to,' and evaluating the traditional view as 'largely discredited' by modern research.",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 54,
+      "mode_intended": "dialectical",
+      "topic": "How memory works in the brain",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text presents the Consolidation Theory as a thesis, then introduces counterarguments ('neural noise,' 'continuous memory' theory, synaptic plasticity challenges), and raises questions about how these challenges require a revised, more nuanced understanding\u2014a clear thesis-challenge-revision structure.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 55,
+      "mode_intended": "linear",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "linear": 4,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a straightforward, sequential structure, presenting one ethical concern after another (safety, equity, identity, role of science) in a formulaic pattern without backtracking, questioning, or weighing alternatives, making it primarily linear with some structural organization.",
+      "mode_purity": 2.5,
+      "correct": true
+    },
+    {
+      "generation_id": 56,
+      "mode_intended": "analogical",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 2,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "Nearly every point is introduced and developed through an explicit analogy\u2014sailor navigating waters, gardener creating a rose, Swiss watch, patient consent\u2014making analogical reasoning the overwhelmingly dominant mode throughout the text.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 57,
+      "mode_intended": "socratic",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 4,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "socratic",
+      "judge_confidence": 4,
+      "reasoning": "The text explicitly uses a question-and-provisional-answer structure throughout, posing questions about social control, human identity, and dignity, then offering labeled 'provisional answers' that generate further inquiry\u2014a hallmark of Socratic exploration.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 58,
+      "mode_intended": "contrastive",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is dominated by a back-and-forth structure presenting proponents versus critics on multiple dimensions of genetic engineering ('On the other hand,' 'However, others argue'), systematically juxtaposing opposing viewpoints without truly synthesizing them into a revised position, making it contrastive rather than dialectical.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 59,
+      "mode_intended": "dialectical",
+      "topic": "The ethics of genetic engineering",
+      "ratings": {
+        "linear": 4,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 4,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 3,
+      "reasoning": "The text consistently presents pros and cons of genetic engineering, moving between proponents' views and critics' concerns using a 'however'/'on the other hand' structure, though it does so in a fairly linear, essay-like progression without deep dialectical synthesis.",
+      "mode_purity": -0.75,
+      "correct": false
+    },
+    {
+      "generation_id": 60,
+      "mode_intended": "linear",
+      "topic": "Why music moves us",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a straightforward, sequential exposition with clear topic sentences ('One reason...', 'Another reason...', 'Finally...'), building points one after another without any backtracking, questioning, contrasting, or dialectical engagement \u2014 a textbook example of linear, essay-style writing.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 61,
+      "mode_intended": "analogical",
+      "topic": "Why music moves us",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is saturated with analogies\u2014chef, painter, map, guitar string, tuning fork\u2014used systematically in every paragraph to explain how music moves us, making analogical reasoning overwhelmingly the dominant mode.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 63,
+      "mode_intended": "contrastive",
+      "topic": "Why music moves us",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is organized around presenting multiple perspectives side by side using frequent 'on the other hand' and 'in contrast' constructions, with each paragraph introducing a different viewpoint on why music moves us, making it a classic contrastive structure.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 64,
+      "mode_intended": "dialectical",
+      "topic": "Why music moves us",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 2,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text presents an initial thesis about personal emotional response, challenges it by noting the universality of music's impact, introduces a third dimension (sonic/rhythmic qualities), and then synthesizes these perspectives into a revised, more comprehensive understanding\u2014a clear thesis-challenge-revision structure.",
+      "mode_purity": 1.5,
+      "correct": true
+    },
+    {
+      "generation_id": 65,
+      "mode_intended": "linear",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a strictly sequential, chronological progression from planning through permitting, design, construction, inspection, and maintenance, with each paragraph building on the previous step and no backtracking, questioning, or contrasting of alternatives.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 66,
+      "mode_intended": "analogical",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "linear": 2,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014comparing house building to conducting a symphony, assembling a jigsaw puzzle, sculpting marble, and writing a novel\u2014with nearly every sentence structured as an explicit comparison using 'just as,' 'much like,' and 'akin to' constructions.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 67,
+      "mode_intended": "socratic",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "linear": 4,
+        "analogical": 1,
+        "socratic": 4,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "socratic",
+      "judge_confidence": 4,
+      "reasoning": "The text consistently uses a question-driven structure where each stage of house-building is introduced with an explicit question ('A good question to ask at this stage is...') followed by a provisional answer, making the Socratic mode the dominant organizing principle, though it also follows a clear linear progression through the building process.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 68,
+      "mode_intended": "contrastive",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly organized around contrasting perspectives on each subtopic\u2014design approaches, material selection, construction methods, and budgeting\u2014consistently using 'on the other hand,' 'however,' and 'critics argue' to juxtapose opposing viewpoints without arriving at a synthesized resolution.",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 69,
+      "mode_intended": "dialectical",
+      "topic": "Building a house from scratch",
+      "ratings": {
+        "linear": 4,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 3
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 3,
+      "reasoning": "The text follows a largely linear, essay-style progression\u2014introducing the topic, enumerating challenges sequentially, then concluding with a synthesis\u2014though it has mild dialectical qualities (presenting challenges then resolving them with rewards and mitigation strategies).",
+      "mode_purity": 0.75,
+      "correct": false
+    },
+    {
+      "generation_id": 70,
+      "mode_intended": "linear",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text proceeds in a strictly chronological, sequential manner\u2014from ancient Greeks to 17th century to 20th century to recent years\u2014presenting each idea as a straightforward progression without backtracking, questioning, contrasting, or analogizing.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 71,
+      "mode_intended": "analogical",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies \u2014 nearly every concept (infinity, limits, cardinality, Zeno's paradox) is immediately mapped onto a concrete comparison ('like an ocean,' 'like a staircase,' 'like a moving target,' 'like grains of sand'), making analogical reasoning the dominant and defining mode throughout.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 72,
+      "mode_intended": "socratic",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "linear": 4,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a straightforward, sequential exposition moving from definitions to cardinality to limits to the Banach-Tarski paradox to probability, with each section introduced by transition phrases like 'One way to approach' and 'Another way to approach,' building a forward-moving survey without backtracking, questioning, or dialectical tension.",
+      "mode_purity": -1.25,
+      "correct": false
+    },
+    {
+      "generation_id": 73,
+      "mode_intended": "contrastive",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 4,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 4,
+      "reasoning": "The text consistently presents different approaches to infinity (ZF set theory, non-standard analysis, infinite series, Cantor's work) side by side, and nearly every paragraph follows a pattern of presenting a perspective then noting criticisms ('However, this approach has been criticized for...'), making the contrastive mode dominant throughout.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 74,
+      "mode_intended": "dialectical",
+      "topic": "The mathematics of infinity",
+      "ratings": {
+        "linear": 4,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 3
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 3,
+      "reasoning": "The text progresses sequentially through topics (set theory, calculus, finitude, philosophy) in a forward-moving exposition, though it incorporates some contrastive and dialectical elements in the later paragraphs where it presents counterarguments to infinity; however, the dominant mode is a linear survey with several factual inaccuracies (e.g., ZFC does NOT posit a universal set\u2014that's precisely what it avoids).",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 75,
+      "mode_intended": "linear",
+      "topic": "The evolution of language",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a straightforward chronological progression from proto-language to modern and future language, presenting each development sequentially without backtracking, questioning, contrasting perspectives, or using analogies.",
+      "mode_purity": 4.0,
+      "correct": true
+    },
+    {
+      "generation_id": 76,
+      "mode_intended": "analogical",
+      "topic": "The evolution of language",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014seedlings, rivers, fabric/tapestry, flocks of birds, storms\u2014with nearly every paragraph introducing a new extended comparison to illuminate an aspect of language evolution, making analogical reasoning the dominant and unmistakable mode.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 77,
+      "mode_intended": "socratic",
+      "topic": "The evolution of language",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a strictly chronological, forward-moving progression from early human vocalizations through proto-language, symbolic language, writing systems, and language diversification, with each paragraph building sequentially on the last and no backtracking or reconsideration.",
+      "mode_purity": -1.0,
+      "correct": false
+    },
+    {
+      "generation_id": 78,
+      "mode_intended": "contrastive",
+      "topic": "The evolution of language",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 4,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 4,
+      "reasoning": "The text is organized around presenting multiple competing perspectives on the evolution of language\u2014communicative, sociolinguistic, and cognitive linguistic\u2014contrasting them with transitional phrases like 'however, this view has been challenged' and 'another perspective,' making contrastive comparison the dominant structural mode.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 79,
+      "mode_intended": "dialectical",
+      "topic": "The evolution of language",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 4,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text presents a thesis (language evolves and is adaptable), then systematically introduces counterarguments from different scholarly perspectives (innate universals, linguistic typology, technology as context rather than evolution), following a clear thesis-challenge structure characteristic of dialectical reasoning, though it appears to be cut off before reaching a full synthesis.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 80,
+      "mode_intended": "linear",
+      "topic": "Why we dream",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text proceeds in a straightforward, sequential manner, presenting one theory after another ('One theory is...', 'Another theory suggests...', 'Some researchers also believe...', 'In addition to these theories...') without backtracking, self-questioning, or revision, making it a textbook example of linear exposition.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 81,
+      "mode_intended": "analogical",
+      "topic": "Why we dream",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies\u2014master chef, editor, storyteller, painter, gardener, intuitionist\u2014with nearly every concept explained through explicit comparisons using 'akin to,' 'just as,' 'similar to,' and 'reminiscent of' constructions, making analogical reasoning its dominant and unmistakable mode.",
+      "mode_purity": 3.5,
+      "correct": true
+    },
+    {
+      "generation_id": 82,
+      "mode_intended": "socratic",
+      "topic": "Why we dream",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 4,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it proposes the memory consolidation theory, then challenges it by asking why dreams are disjointed, introduces emotional regulation theory as a partial synthesis, then raises further questions about recurring symbols leading to the archetypes theory\u2014each section building through productive self-questioning and revision.",
+      "mode_purity": 1.0,
+      "correct": false
+    },
+    {
+      "generation_id": 83,
+      "mode_intended": "contrastive",
+      "topic": "Why we dream",
+      "ratings": {
+        "linear": 2,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is organized entirely around presenting multiple competing theories side by side using explicit contrastive markers ('On one hand', 'On the other hand', 'Another perspective', 'In contrast'), evaluating different explanations for dreaming without synthesizing them into a revised position, making it clearly contrastive rather than dialectical.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 84,
+      "mode_intended": "dialectical",
+      "topic": "Why we dream",
+      "ratings": {
+        "linear": 2,
+        "analogical": 1,
+        "socratic": 2,
+        "contrastive": 4,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it presents a position (dreams as cognitive/emotional processing), raises multiple counterarguments from different fields (neuroscience, pattern-recognition critiques, psychology), and attempts a synthesis acknowledging complexity\u2014though the synthesis is weak and the text cuts off before completing it.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 85,
+      "mode_intended": "linear",
+      "topic": "How markets determine prices",
+      "ratings": {
+        "linear": 5,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a straightforward, sequential exposition of how markets determine prices, moving from basic supply and demand through competition, government policies, and technological change, with no backtracking, questioning, or genuine dialectical tension.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 86,
+      "mode_intended": "analogical",
+      "topic": "How markets determine prices",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The entire text is built around a single extended analogy comparing market price determination to an orchestra conductor, with nearly every economic concept explained through this musical metaphor rather than through direct exposition, questioning, or dialectical reasoning.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 88,
+      "mode_intended": "contrastive",
+      "topic": "How markets determine prices",
+      "ratings": {
+        "linear": 2,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 2
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is organized entirely around presenting multiple perspectives (classical, behavioral, institutional, information) side by side, using explicit contrastive language like 'on one hand,' 'on the other hand,' 'in contrast,' and evaluating their relative strengths and weaknesses.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 89,
+      "mode_intended": "dialectical",
+      "topic": "How markets determine prices",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it presents the self-regulating market view, then introduces counterarguments (government intervention, market failure, information asymmetry), and explicitly works toward a 'revised understanding' that synthesizes both perspectives.",
+      "mode_purity": 2.0,
+      "correct": true
+    },
+    {
+      "generation_id": 90,
+      "mode_intended": "linear",
+      "topic": "The art of persuasion",
+      "ratings": {
+        "linear": 5,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text proceeds in a straightforward, sequential manner\u2014defining persuasion, then moving through its psychological basis, storytelling, language, power dynamics, and significance\u2014without backtracking, questioning, or contrasting viewpoints, making it a clear example of linear exposition.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 91,
+      "mode_intended": "analogical",
+      "topic": "The art of persuasion",
+      "ratings": {
+        "linear": 3,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is overwhelmingly driven by analogies \u2014 maestro/orchestra, chef/kitchen, cartographer/journey, diplomat/relations, storyteller/narrative, painter/canvas \u2014 with nearly every paragraph built around an extended comparison to illuminate persuasion, making analogical reasoning the dominant and unmistakable mode.",
+      "mode_purity": 3.25,
+      "correct": true
+    },
+    {
+      "generation_id": 92,
+      "mode_intended": "socratic",
+      "topic": "The art of persuasion",
+      "ratings": {
+        "linear": 5,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a straightforward, sequential exposition of the art of persuasion, moving from one element to the next (psychology, storytelling, authenticity) with illustrative examples, never backtracking or questioning its own claims, making it a clear example of linear progression.",
+      "mode_purity": -1.25,
+      "correct": false
+    },
+    {
+      "generation_id": 93,
+      "mode_intended": "contrastive",
+      "topic": "The art of persuasion",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 4,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 4,
+      "reasoning": "The text systematically presents multiple perspectives on persuasion (rational/logical, emotional, social, combined) side by side, evaluating strengths and weaknesses of each with explicit 'in contrast' and 'however' language, making contrastive the dominant mode.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 94,
+      "mode_intended": "dialectical",
+      "topic": "The art of persuasion",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 4
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 4,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it presents persuasion as valuable (thesis), introduces criticisms about manipulation and emotional exploitation (antithesis/challenges), then works toward a synthesis emphasizing empathy, transparency, and balance between persuasion's benefits and pitfalls.",
+      "mode_purity": 1.75,
+      "correct": true
+    },
+    {
+      "generation_id": 95,
+      "mode_intended": "linear",
+      "topic": "Cooking as chemistry",
+      "ratings": {
+        "linear": 5,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 1,
+        "dialectical": 1
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a straightforward, sequential exposition of cooking-as-chemistry concepts, moving from chemical reactions to emulsions to thermodynamics to ingredient selection, each paragraph building on the general thesis without any backtracking, questioning, or contrasting of perspectives.",
+      "mode_purity": 3.75,
+      "correct": true
+    },
+    {
+      "generation_id": 96,
+      "mode_intended": "analogical",
+      "topic": "Cooking as chemistry",
+      "ratings": {
+        "linear": 4,
+        "analogical": 5,
+        "socratic": 1,
+        "contrastive": 2,
+        "dialectical": 1
+      },
+      "primary_mode": "analogical",
+      "judge_confidence": 5,
+      "reasoning": "The text is fundamentally structured around systematic parallels between chemistry and cooking, with each paragraph introducing a chemistry concept (molecular structure, stoichiometry, catalysts, temperature, equilibrium) and then drawing explicit analogies to cooking, using constructions like 'similarly,' 'analogous to,' and 'is also present in both.'",
+      "mode_purity": 3.0,
+      "correct": true
+    },
+    {
+      "generation_id": 97,
+      "mode_intended": "socratic",
+      "topic": "Cooking as chemistry",
+      "ratings": {
+        "linear": 4,
+        "analogical": 2,
+        "socratic": 3,
+        "contrastive": 2,
+        "dialectical": 2
+      },
+      "primary_mode": "linear",
+      "judge_confidence": 3,
+      "reasoning": "The text progresses sequentially through aspects of cooking as chemistry (Maillard reaction \u2192 thermodynamics \u2192 preservation \u2192 broader appreciation), with some Socratic framing through opening and closing questions, but the dominant structure is a forward-moving, building exposition without significant backtracking or dialectical tension.",
+      "mode_purity": 0.5,
+      "correct": false
+    },
+    {
+      "generation_id": 98,
+      "mode_intended": "contrastive",
+      "topic": "Cooking as chemistry",
+      "ratings": {
+        "linear": 3,
+        "analogical": 2,
+        "socratic": 1,
+        "contrastive": 5,
+        "dialectical": 3
+      },
+      "primary_mode": "contrastive",
+      "judge_confidence": 5,
+      "reasoning": "The text is fundamentally organized around contrasting two perspectives on cooking as chemistry\u2014the 'fundamental chemistry perspective' versus the 'intuitive and experiential approach'\u2014evaluating their relative strengths and weaknesses with explicit contrastive language ('on the other hand', 'in contrast', 'however').",
+      "mode_purity": 2.75,
+      "correct": true
+    },
+    {
+      "generation_id": 99,
+      "mode_intended": "dialectical",
+      "topic": "Cooking as chemistry",
+      "ratings": {
+        "linear": 3,
+        "analogical": 1,
+        "socratic": 1,
+        "contrastive": 3,
+        "dialectical": 5
+      },
+      "primary_mode": "dialectical",
+      "judge_confidence": 5,
+      "reasoning": "The text follows a clear thesis-challenge-revision structure: it presents cooking as chemistry (thesis), critiques this view as oversimplifying cultural and emotional dimensions (antithesis), then attempts a synthesis acknowledging both chemistry's role and its limitations.",
+      "mode_purity": 3.0,
+      "correct": true
+    }
+  ],
+  "summary": {
+    "overall_accuracy": 0.8163265306122449,
+    "per_mode_accuracy": {
+      "linear": {
+        "accuracy": 0.95,
+        "n": 20,
+        "n_correct": 19
+      },
+      "analogical": {
+        "accuracy": 1.0,
+        "n": 20,
+        "n_correct": 20
+      },
+      "socratic": {
+        "accuracy": 0.2777777777777778,
+        "n": 18,
+        "n_correct": 5
+      },
+      "contrastive": {
+        "accuracy": 1.0,
+        "n": 20,
+        "n_correct": 20
+      },
+      "dialectical": {
+        "accuracy": 0.8,
+        "n": 20,
+        "n_correct": 16
+      }
+    },
+    "mean_purity": 2.377551020408163,
+    "std_purity": 1.4958466725587491,
+    "mean_confidence": 4.63265306122449,
+    "confusion_matrix": [
+      [
+        19,
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        20,
+        0,
+        0,
+        0
+      ],
+      [
+        12,
+        0,
+        5,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        20,
+        0
+      ],
+      [
+        3,
+        0,
+        0,
+        1,
+        16
+      ]
+    ],
+    "confusion_labels": [
+      "linear",
+      "analogical",
+      "socratic",
+      "contrastive",
+      "dialectical"
+    ],
+    "mean_purity_when_correct": 2.9875,
+    "mean_purity_when_incorrect": -0.3333333333333333
+  },
+  "purity_signature_correlation": {
+    "n_samples": 98,
+    "purity_distance_correlation": -0.10362661473456544,
+    "interpretation": "Negative = high-purity texts are closer to their mode centroid (good). Positive = high-purity texts are farther (bad \u2014 features not capturing what judge sees).",
+    "high_purity_mean_distance": 0.7160429042268333,
+    "low_purity_mean_distance": 0.7409546262149367,
+    "median_purity_split": 3.0
+  }
+}

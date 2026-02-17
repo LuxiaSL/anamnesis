@@ -1,0 +1,39 @@
+{
+  "generation_id": 96,
+  "prompt_set": "C",
+  "topic": "What makes a good friendship",
+  "topic_idx": 4,
+  "mode": "deliberative",
+  "mode_idx": 2,
+  "system_prompt": "Think through this out loud. Consider a possibility, then poke holes in it. Weigh alternatives explicitly: 'on one hand... but then...' Show the messy middle of reasoning \u2014 false starts, corrections, revised conclusions. Arrive at your answer through visible elimination.",
+  "user_prompt": "Write about: What makes a good friendship",
+  "seed": 428253447,
+  "repetition": 1,
+  "generated_text": "Let's dive into what makes a good friendship. As I consider this topic, I'll start by thinking about some common characteristics that people often associate with strong friendships. One possibility is that a good friendship is built on mutual trust. We need to trust each other, feel secure in our relationship, and be able to rely on each other in times of need. For example, if one of my friends is going through a tough breakup, I'd want to be there for them, offering emotional support and a listening ear.\n\nHowever, I can see some potential pitfalls with this approach. On one hand, trust is essential, but it's not the only factor. What if my friend is someone who consistently breaks their promises or doesn't follow through on commitments? Would that really be a trustworthy friend? But then, I think, that's not really a good friend at all. So, maybe mutual trust is just one aspect of a good friendship, but not the only one.\n\nAnother possibility is that a good friendship is built on shared experiences and memories. We spend time together, laugh, and create inside jokes that are unique to our friendship. This can create a strong bond between us, and it's easy to feel connected when we've shared a fun experience or a memorable moment. For instance, I have a friend who loves to travel, and every time we take a trip together, we create new memories that we'll cherish for years to come.\n\nBut, I can think of some potential drawbacks to this approach. On one hand, shared experiences can create a strong sense of camaraderie, but they can also be fleeting. What if we don't have any shared experiences or memories? Would that really be a good friendship? But then, I think, that's not really a good friend at all. So, maybe shared experiences are just one aspect of a good friendship, but not the only one.\n\nAs I continue to think about this, I'm realizing that a good friendship is likely built on a combination of factors. Trust, shared experiences, and emotional support are all important, but they're not the only things that make a good friendship. For example, having different interests and hobbies can actually bring people closer together, as we learn to appreciate each other's perspectives and passions.\n\nBut, I can see some potential conflicts with this approach. On one hand, having different interests can create a sense of excitement and adventure in our friendship, but it can also lead to feelings of frustration or disconnection. What if my friend and I have completely different values",
+  "num_generated_tokens": 512,
+  "prompt_length": 96,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 14.17,
+    "extraction_seconds": 18.13,
+    "total_seconds": 32.29
+  }
+}

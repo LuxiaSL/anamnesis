@@ -1,0 +1,39 @@
+{
+  "generation_id": 113,
+  "prompt_set": "C",
+  "topic": "The appeal of horror fiction",
+  "topic_idx": 6,
+  "mode": "confident",
+  "mode_idx": 3,
+  "system_prompt": "You have strong, clear views on this. State them directly and decisively. Be bold in your claims. Support them, but don't hedge unnecessarily.",
+  "user_prompt": "Write about: The appeal of horror fiction",
+  "seed": 1112575226,
+  "repetition": 8,
+  "generated_text": "The appeal of horror fiction is a phenomenon that has captivated audiences for centuries, transcending generations and cultures. At its core, horror fiction taps into our deepest fears, primal anxieties, and existential dread, offering a unique form of catharsis and emotional release.\n\nOne of the primary reasons for the enduring appeal of horror fiction is its ability to confront and subvert our expectations. Horror stories often rely on familiar tropes and conventions, only to twist and distort them in ways that challenge our assumptions and leave us unsettled. This sense of unpredictability creates a thrilling sense of tension, as our minds struggle to reconcile the familiar with the unknown.\n\nMoreover, horror fiction allows us to confront and process our darkest fears in a safe and controlled environment. By immersing ourselves in a frightening narrative, we can experience and release pent-up emotions in a way that would be impossible in real life. This emotional purging can be incredibly therapeutic, providing a sense of relief and resolution that is often lacking in our everyday lives.\n\nAnother key factor in the appeal of horror fiction is its ability to tap into our collective psyche. Horror stories often draw upon universal fears and anxieties, such as the fear of death, the unknown, and the supernatural. By exploring these deep-seated fears, horror fiction provides a shared language and cultural reference point, allowing us to connect with others who have experienced similar terrors.\n\nThe horror genre also offers a unique window into the human condition, revealing our darkest aspects and vulnerabilities. By exploring the complexities of human nature through the lens of horror, we can gain a deeper understanding of ourselves and our place in the world. This can be particularly true for works of psychological horror, which often probe the darker recesses of the human mind and the blurred lines between sanity and madness.\n\nFinally, the appeal of horror fiction can be attributed to its ability to evoke a sense of visceral excitement and adrenaline rush. Horror stories often rely on suspense, tension, and jump scares to create a thrilling and immersive experience, which can be incredibly addictive and captivating. This can be particularly true for fans of horror movies and video games, which often prioritize visceral thrills over more cerebral or atmospheric approaches.\n\nIn conclusion, the appeal of horror fiction is a complex and multifaceted phenomenon that offers a unique blend of emotional release, catharsis, and shared cultural experience. By tapping into our deepest fears and primal anxieties, horror fiction provides a thrilling and immersive experience that continues to captivate audiences around the world. Whether through books, movies, or video games, horror",
+  "num_generated_tokens": 512,
+  "prompt_length": 74,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 13.87,
+    "extraction_seconds": 16.47,
+    "total_seconds": 30.34
+  }
+}

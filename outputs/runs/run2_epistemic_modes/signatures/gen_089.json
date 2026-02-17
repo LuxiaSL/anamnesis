@@ -1,0 +1,39 @@
+{
+  "generation_id": 89,
+  "prompt_set": "C",
+  "topic": "The history of bread",
+  "topic_idx": 2,
+  "mode": "creative",
+  "mode_idx": 1,
+  "system_prompt": "Let your thinking wander freely here. Make unexpected connections, use metaphors, explore tangential ideas that feel interesting. Don't worry about structure \u2014 follow curiosity.",
+  "user_prompt": "Write about: The history of bread",
+  "seed": 825433169,
+  "repetition": 4,
+  "generated_text": "Bread - the staff of life, the staff of the gods, the staff of the earth. Its history is a tale of ancient civilizations, of empires risen and fallen, of cultures intertwined, and of the human quest for sustenance. Let us embark on a journey through the ages, and uncover the secrets of the bread that has been the cornerstone of human civilization for millennia.\n\n**The Dawn of Bread**\n\nThe earliest evidence of bread-making dates back to around 10,000 BCE, during the Neolithic period. At that time, humans were transitioning from a nomadic, hunter-gatherer lifestyle to one of settled agriculture. The invention of the wheel and the domestication of wheat, barley, and rye allowed for the mass production of grains, which became the foundation of bread.\n\nImagine a bustling marketplace in ancient Mesopotamia, where merchants peddle their wares: grains, olives, and dates. The aroma of freshly baked bread wafts through the air, enticing the senses and satisfying the hunger of the masses. The ancient Sumerians, Babylonians, and Assyrians all revered bread as a symbol of fertility, prosperity, and spiritual connection.\n\n**The Rise of the Ancients**\n\nAs civilizations grew and empires expanded, bread became a staple of the ancient world. The Egyptians, with their pyramids and pharaohs, baked bread from emmer wheat to sustain their mighty armies. The Greeks and Romans, with their sophisticated agriculture and trade networks, perfected the art of bread-making, creating a wide variety of artisanal breads.\n\nBut bread was more than just a food; it was a symbol of power, wealth, and status. The ancient Greeks, for example, used bread as a form of currency, while the Roman elite baked elaborate breads for special occasions. The art of bread-making was passed down through generations, with each culture adding its own unique twist and tradition.\n\n**The Middle Ages and the Dark Ages**\n\nAs the Roman Empire declined, bread became a staple of the medieval diet. The monasteries of Europe, with their bakeries and mills, continued to produce bread for the masses. The introduction of the windmill in the 12th century revolutionized bread-making, allowing for the mass production of bread and the spread of Christianity throughout Europe.\n\nHowever, the Middle Ages were also marked by scarcity and hardship. The Black Death, the Hundred Years' War, and the Great Famine of 1315-1317 all took their toll on bread supplies, leading to widespread poverty and",
+  "num_generated_tokens": 512,
+  "prompt_length": 74,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 14.6,
+    "extraction_seconds": 17.64,
+    "total_seconds": 32.24
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "generation_id": 97,
+  "prompt_set": "C",
+  "topic": "What makes a good friendship",
+  "topic_idx": 4,
+  "mode": "deliberative",
+  "mode_idx": 2,
+  "system_prompt": "Think through this out loud. Consider a possibility, then poke holes in it. Weigh alternatives explicitly: 'on one hand... but then...' Show the messy middle of reasoning \u2014 false starts, corrections, revised conclusions. Arrive at your answer through visible elimination.",
+  "user_prompt": "Write about: What makes a good friendship",
+  "seed": 2081642685,
+  "repetition": 2,
+  "generated_text": "Let's start by considering a possibility: \"A good friendship is built on shared experiences and mutual support.\" On one hand, this definition makes sense. Sharing experiences, like going through a tough time together or celebrating a milestone, can create a strong bond between friends. And mutual support, like lending a listening ear or helping with a problem, can be a powerful foundation for a friendship.\n\nBut then, there are some potential drawbacks to this definition. For example, it might be difficult to share experiences with someone who has a vastly different lifestyle or interests. Or, if mutual support is solely based on the friend's ability to provide a shoulder to cry on, it might lead to an unhealthy dynamic where one person is always the one who needs help, while the other person is always the one who's available to provide it.\n\nOn the other hand, we could say that a good friendship is built on trust and communication. This definition seems more inclusive, as it doesn't assume that friends need to share experiences or be able to support each other in the same way. Instead, it acknowledges that trust and communication are essential for building a strong foundation of understanding and respect.\n\nHowever, this definition might be too narrow. What about friendships that are built on shared values or interests? For example, two friends who bond over their love of music or hiking might have a strong connection, even if they don't share many experiences.\n\nLet's try to revise this definition. A good friendship is built on a combination of shared experiences, mutual support, trust, and communication. This definition acknowledges that friendships can take many different forms, and that each friendship is unique.\n\nBut what about the messy middle of friendships? What about the moments where friends disagree or struggle to communicate? How can we reconcile the idea that a good friendship is built on trust and communication with the reality that friends can still have conflicts and disagreements?\n\nOne way to address this is to acknowledge that conflicts are a natural part of any friendship. A good friendship is not about avoiding conflicts, but about navigating them in a healthy and constructive way. This might involve active listening, empathy, and a willingness to compromise.\n\nUltimately, what makes a good friendship is complex and multifaceted. It's not just about shared experiences or mutual support, but about building a foundation of trust, communication, and mutual respect. By acknowledging the messy middle of friendships and the many different ways that friendships can take shape, we can gain a deeper understanding of what makes a good friendship truly special.",
+  "num_generated_tokens": 502,
+  "prompt_length": 96,
+  "num_features": 1837,
+  "tier_slices": {
+    "tier1": [
+      0,
+      221
+    ],
+    "tier2": [
+      221,
+      442
+    ],
+    "tier2_5": [
+      442,
+      587
+    ],
+    "tier3": [
+      587,
+      1837
+    ]
+  },
+  "timing": {
+    "generation_seconds": 14.15,
+    "extraction_seconds": 18.0,
+    "total_seconds": 32.15
+  }
+}
