@@ -1,8 +1,8 @@
-# Semantically Independent Computational Signatures in Transformer Internal States
+# Semantically Independent Computational Signatures in a 3B Transformer
 
 [![DOI](https://zenodo.org/badge/1154233872.svg)](https://doi.org/10.5281/zenodo.18672886)
 
-**Evidence from Tier Inversion, Mechanistic Dissociation, and Format-Controlled Generation in a 3B Model**
+**Evidence from Tier Inversion, Mechanistic Dissociation, and Format-Controlled Generation**
 
 > Can transformer internal states fingerprint *how* something was processed, orthogonal to *what* was processed?
 
@@ -14,7 +14,7 @@
 
 Transformer internal states carry structured information about *how* something is processed that is approximately orthogonal to *what* is processed. We demonstrate this using Llama 3.2 3B Instruct, extracting features from four architectural tiers — logit statistics, attention routing, KV cache geometry, and residual stream projections — across three experimental iterations with progressively stronger confound controls. Under format control, where five processing modes produce visually identical paragraph prose, attention routing and KV cache features discriminate processing mode at 78% accuracy (topic-heldout, p < 0.001), while semantic embeddings of the same texts carry effectively zero mode information (median R² = -1.11 for text-to-compute prediction; McNemar p = 1.000 for adding semantic features to compute features).
 
-The signal has three properties that characterize it as a genuine computational axis rather than an artifact. It *localizes*: as surface confounds are removed across experimental iterations, discriminative power migrates from logit statistics to KV cache dynamics, and a temperature double dissociation confirms these tiers are functionally independent. It *concentrates*: a 20% feature subset from attention routing and cache geometry outperforms all 1,837 features combined — irrelevant tiers actively dilute rather than supplement the signal. And it is *execution-based*: prompt-swap texts produce signatures matching their executed processing, not their instructed mode, at chance accuracy. These findings establish that computational signatures — the temporal dynamics of how a transformer routes and retains information — constitute a detectable, semantically independent axis in internal state dynamics, concentrated in the architectural components most directly involved in information flow.
+The signal has three properties that characterize it as a genuine computational axis rather than an artifact. It *localizes*: as surface confounds are removed across experimental iterations, discriminative power migrates from logit statistics to KV cache dynamics, and a temperature double dissociation confirms these tiers are functionally independent. It *concentrates*: a 20% feature subset from attention routing and cache geometry outperforms all 1,837 features combined — irrelevant tiers actively dilute rather than supplement the signal. And it is *execution-based*: prompt-swap texts produce signatures matching their executed processing, not their instructed mode, at chance accuracy. These findings demonstrate that computational signatures — the temporal dynamics of how the model routes and retains information — represent a detectable, semantically independent axis in internal state dynamics, concentrated in the architectural components most directly involved in information flow.
 
 ---
 
@@ -137,7 +137,7 @@ The directory numbering reflects development history; the paper numbering reflec
 
 ```
 @misc{anamnesis2026,
-  title={Semantically Independent Computational Signatures in Transformer Internal States},
+  title={Semantically Independent Computational Signatures in a 3B Transformer},
   author={[Luxia]},
   year={2026},
   note={arXiv preprint (forthcoming)}

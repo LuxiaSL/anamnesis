@@ -135,7 +135,7 @@ pandoc "$TMPFILE" \
   -V header-includes='\captionsetup{font=small,labelfont=bf}' \
   -V header-includes='\usepackage{fancyhdr}' \
   -V header-includes='\pagestyle{fancy}' \
-  -V header-includes='\fancyhead[L]{\small Computational Signatures in Transformer Internal States}' \
+  -V header-includes='\fancyhead[L]{\small Computational Signatures in a 3B Transformer}' \
   -V header-includes='\fancyhead[R]{\small Luxia, 2026}' \
   -V header-includes='\fancyfoot[C]{\thepage}' \
   -V header-includes='\usepackage{microtype}' \
