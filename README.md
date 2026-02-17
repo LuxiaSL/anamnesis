@@ -1,5 +1,7 @@
 # Semantically Independent Computational Signatures in Transformer Internal States
 
+[![DOI](https://zenodo.org/badge/1154233872.svg)](https://doi.org/10.5281/zenodo.18672886)
+
 **Evidence from Tier Inversion, Mechanistic Dissociation, and Format-Controlled Generation in a 3B Model**
 
 > Can transformer internal states fingerprint *how* something was processed, orthogonal to *what* was processed?
