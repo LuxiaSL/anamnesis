@@ -42,7 +42,7 @@ To regenerate from scratch (requires GPU + ~2 hours):
 bash scripts/run_all.sh --run-name run4_format_controlled
 ```
 
-Calibration data (`outputs/calibration/`) is not included in the repository (164MB). Regenerate with:
+Calibration data (`outputs/calibration/`) is available as a [release asset](https://github.com/LuxiaSL/anamnesis/releases) (164MB), or regenerate with:
 
 ```bash
 python scripts/run_calibration.py
@@ -135,10 +135,12 @@ The directory numbering reflects development history; the paper numbering reflec
 
 ## Citation
 
-```
-@misc{anamnesis2026,
-  title={Semantically Independent Computational Signatures in a 3B Transformer},
-  author={[Luxia]},
+```bibtex
+@misc{caelum2026anamnesis,
+  title={Semantically Independent Computational Signatures in a 3B Transformer:
+         Evidence from Tier Inversion, Mechanistic Dissociation,
+         and Format-Controlled Generation},
+  author={Caelum, Lucia},
   year={2026},
   note={arXiv preprint (forthcoming)}
 }
@@ -148,4 +150,4 @@ The directory numbering reflects development history; the paper numbering reflec
 
 ## License
 
-[TBD]
+This work is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
