@@ -7,12 +7,13 @@ build/
 .venv/
 *.egg
 
-# Calibration data (164MB positional_means.npz exceeds GitHub limit)
+# Calibration data (164MB positional_means.npz exceeds GitHub file limit)
+# Included in GitHub release assets and Zenodo archive
 # Regenerate via: python scripts/run_calibration.py
 outputs/calibration/
 
 # Notebooks
-notebooks/.ipynb_checkpoints/
+notebooks/
 
 # IDE
 .vscode/
@@ -29,22 +30,29 @@ Thumbs.db
 
 # MCP config (local tool configuration)
 .mcp.json
+mcp-servers/
 
-# Claude Code project config (local tooling, not research content)
+# Claude Code project config (local tooling)
 CLAUDE.md
 
-# Ad-hoc audit/analysis files (not part of paper pipeline)
+# LaTeX build artifacts
+latex/*.aux
+latex/*.log
+latex/*.bbl
+latex/*.blg
+latex/*.out
+latex/*.toc
+latex/*.fls
+latex/*.fdb_latexmk
+latex/*.synctex.gz
+latex/body.tex
+latex/__pycache__/
+texput.log
+
+# Research directory (personal notes, paper drafts — paper source is in latex/)
+research/
+
+# Ad-hoc workspace files
 audit_stats.py
 audit_stats_focused.py
-outputs/COMPLETE_STATS_EXTRACTION.txt
-outputs/FINAL_STATS_AUDIT.txt
-outputs/STATISTICS_AUDIT_FINAL.txt
-outputs/STATS_AUDIT.txt
-outputs/AUDIT_FINAL.md
-outputs/stats_audit_report.json
-
-# Working files (duplicates or personal)
 protocol.md
-
-# Research directory (paper will be added after arXiv submission)
-research/
