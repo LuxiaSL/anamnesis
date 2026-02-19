@@ -120,7 +120,7 @@ All tiers were normalized via StandardScaler (zero mean, unit variance) before c
 
 \subsection{Mode Design: Three Generations}\label{mode-design-three-generations}
 
-The experiment tested three generations of mode prompts, each addressing weaknesses identified in the prior. All modes were delivered as system prompts; user prompts followed a fixed template: ``Write about: \{topic\}.''
+The experiment tested three generations of mode prompts, each addressing weaknesses identified in the prior.\footnote{The repository directories use a different numbering convention: paper Run 1 = \texttt{run2\_epistemic\_modes}, Run 2 = \texttt{run3\_process\_modes}, Run 3 = \texttt{run4\_format\_controlled}. The repository's \texttt{run1} was a failed initial attempt discarded due to pipeline bugs; it produced no usable data and is not reported here.} All modes were delivered as system prompts; user prompts followed a fixed template: ``Write about: \{topic\}.''
 
 \textbf{Run 1 (epistemic states, 5 modes, 75 samples).} Analytical, creative, uncertain, confident, emotional. This design largely failed. Judge scoring revealed that ``uncertain'' produced analytical text mentioning uncertainty (7\% judge accuracy), ``confident'' produced standard output without confidence markers (33\%), and ``emotional'' showed partial differentiation (60\%). Only ``analytical'' and ``creative'' succeeded (100\% each) --- because they prescribed behavioral patterns (numbered lists vs.~metaphorical prose) rather than internal states the 3B model cannot represent. The lesson: modes must force different \emph{computation}, not different \emph{feelings}. The test is whether a process following the instruction would produce different transition statistics.
 
@@ -235,7 +235,7 @@ The central architectural finding is progressive migration of discriminative pow
 
 The tier at which mode information is most accessible depends on how modes differ. When modes prescribe different output styles (Run 1: analytical vs.~creative prose), logit statistics suffice. When modes differ in processing strategy while sharing output format (Run 3), KV cache dynamics --- reflecting how information is attended to and retained --- become primary.
 
-\textbf{Nuance:} Excluding analogical mode (which had distinctive KV cache behavior at 100\% accuracy), the 4-way tier ranking shifts: T2 (56.2\%) \textgreater{} T2.5 (47.5\%) \textgreater{} T1 (48.8\%). Analogical's unique lookback patterns and epoch structure drive T2.5's 5-way dominance.
+\textbf{Sensitivity to analogical mode.} Excluding analogical mode (which had distinctive KV cache behavior at 100\% accuracy), the 4-way tier ranking shifts: T2 (56.2\%) \textgreater{} T2.5 (47.5\%) \textgreater{} T1 (48.8\%). Analogical's unique lookback patterns and epoch structure drive T2.5's 5-way dominance.
 
 \textbf{Contrastive projection confirms tier ranking.} The tier inversion was reproduced using a contrastive metric learning approach (§4.8). When a learned nonlinear projection (MLP with triplet loss) replaced the Random Forest classifier, the single-tier ranking under format control was preserved: T2.5 (62\%, sil=0.150) \textgreater{} T2 (61\%, sil=0.111) \textgreater{} T1 (55\%, sil=0.035) \textgreater{} T3 (45\%, sil=-0.064). All tiers except T3 exceeded the permutation null (p \textless{} 0.02, 50 shuffles each).
 
@@ -278,7 +278,7 @@ Temperature manipulation localized to T1 at 90\% while producing near-chance on 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth]{figures/fig_double_dissociation.png}
-\caption{Double dissociation: temperature variation activates T1 (90\%) with T2.5 at chance (35\%); processing mode activates T2.5 (62\%) with T1 near chance (55\%). Each tier responds selectively to a different experimental manipulation.}
+\caption{Double dissociation: temperature variation activates T1 (90\%) with T2.5 at chance (35\%); processing mode activates T2.5 with T1 near chance. Values shown are kNN accuracy from the contrastive projection analysis (\S4.8); the table above reports RF accuracy on the same data. Both classifiers confirm the dissociation pattern.}
 \label{fig:double:dissociation}
 \end{figure}
 

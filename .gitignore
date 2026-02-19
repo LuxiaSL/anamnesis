@@ -46,8 +46,10 @@ latex/*.fls
 latex/*.fdb_latexmk
 latex/*.synctex.gz
 latex/body.tex
+latex/main.pdf
 latex/__pycache__/
 texput.log
+anamnesis-arxiv.zip
 
 # Research directory (personal notes, paper drafts — paper source is in latex/)
 research/
