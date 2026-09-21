@@ -31,6 +31,8 @@ into a pile of near-duplicates, which is what it grew into once.
 * `run_gpu_replay.py` — replay through the fast lane on a single device.
 * `qualify_box.py` — measure whether this machine's fast lane agrees with the
   numeric anchor, and name the lane identity its outputs will carry.
+* `judge_2afc.py` — draw a blind two-alternative forced choice over banked text,
+  bank the key apart from the packet, and report the rate with its interval.
 """
 
 from __future__ import annotations
