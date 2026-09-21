@@ -1,13 +1,20 @@
 """Scripts: the command-line entry points, thin over package capability.
 
 A script here parses arguments, resolves paths, calls into the package and
-prints or writes a receipt. It holds no numerics and no logic another script
-would want to import — capability that two entry points need belongs in the
-package, not in a sibling script. ``tests/test_scripts_are_shims.py`` enforces
-that: no script imports a script, no package module imports a script, and a
-function a script defines is used by that script and its own test and nowhere
-else. This is the single structural defence against the directory growing back
-into a pile of near-duplicates, which is what it grew into once.
+prints or writes a receipt. Capability that two entry points need belongs in the
+package, not in a sibling script: this directory is the one place where a second
+copy of a function is cheaper to write than a shared home, which is how it grew
+into a pile of two hundred and forty-four near-duplicates once.
+
+``tests/test_scripts_are_shims.py`` is that boundary made mechanical, and it
+checks exactly five things: no script imports a script; no module outside this
+directory imports a script, in any form; a function a script defines is read only
+by that script and by tests; two scripts do not define one name, apart from the
+command-line roles; and no script's body — its code outside ``parser()`` — grows
+past the ceiling the test states, which is the directory's current worst case
+rather than a principle. What no test can check is whether a *particular*
+function is capability or is the command's own judgement, and that is the part a
+reviewer reads for.
 
 **The pipeline, in the order a run moves through it.**
 
