@@ -543,3 +543,239 @@ library is installed in the environment the suite runs in.
 | — | `tests/test_judging_likert.py` | New. Purity as a difference rather than a rating, including negative; the truncated-`reasoning` repair keeping the ratings it already had; an out-of-scale rating read as missing rather than zero; resume skipping what is scored; and the cross-channel correlation refusing a handful of points or a set missing a mode. |
 | — | `tests/test_judge_2afc_cli.py` | New. The shim's own obligations: a dry run banking a real contrast while spending nothing, the same seed banking the same contrast, a circular study refused before anything is drawn, and the shim rule asserted — the script defines `main` and `parser` and nothing another script would import. |
 | `tests/test_tool_fixes_2026_07_18.py` | *record* | Not ported with this layer. Its subject is `vmb_arm_a3_analyze.merge_judge`'s alignment to surviving generation ids, which is a record-side analyzer's join rather than a judging capability. |
+
+## Analysis — the standing readings
+
+The gauntlet answers one corpus's eleven questions. These are the readings *beside*
+it: the confound test that says whether the signal is execution or prompt, the cut
+that says which part of a family carries it, the transfer that asks whether two
+corpora's mode vocabularies name the same thing, the cross-run report that reads
+banked results rather than recomputing them, and the two gates a similarity
+statistic and a hand-built projection have to pass before they are quoted.
+
+Each of these arrived as one script holding both its capability and its command
+line. What ports is the capability, into a module a stranger can find by what it
+does; the command is a shim over it, and the split is what makes the numbers
+testable without a corpus.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/run_binary_prompt_swap.py` | `anamnesis/analysis/prompt_swap.py` + `anamnesis/scripts/run_binary_prompt_swap.py` | The confound test, logic-identical: per swap pair, a binary forest trained on the two pure modes, predicting the swap generations, counted by which axis they land on and pooled at the 1.5:1 bar. The results are typed (`PromptSwapResult` and its parts) where the donor built nested dictionaries, so the document's shape is declared rather than assembled. It is the one module in the analysis layer that reads signature files directly instead of through the loader, and the reason is stated in it: swap generations are exactly what `load_run4`'s core filter exists to leave out. Named beside `modes/prompt_swap.py`, which holds the prompts this reads the results of. |
+| `anamnesis/scripts/run_subfamily_decomp.py` | `anamnesis/analysis/subfamily.py` + `anamnesis/scripts/run_subfamily_decomp.py` | The four name classifiers, the nested operator groups and the coarse substrate cut, logic-identical; the accuracy is the same forest under the same stratified folds. Two adaptations. The donor's `get_feature_names` — a second reader of the signature npz and of its slice table — is gone: names come from `Run4Data.tier_feature_names`, which the loader already fills from that same table and which covers addon directories too, and a **length disagreement between the names and the matrix is now refused** rather than mapped through. That refusal is the one behavioural change, and it replaces the donor's fallback of handing a tier the *whole* vector's name list, which silently mis-assigned every column. `attention_flow`'s classifier also folds its two branches into one substring scan over the same nine signals in the same order — the donor's regex path and its fallback tested the same substrings against different haystacks, and the merged form agrees with both. |
+| `anamnesis/scripts/run_cross_run_transfer.py` | `anamnesis/analysis/cross_run.py` + `anamnesis/scripts/run_cross_run_transfer.py` | Both transfer directions, the wildcard count, the pre-registered maps and the LDA direction test, logic-identical, with the 3B comparison travelling inside the result rather than printed after it. The MLP the donor inlined is now `analysis/contrastive_mlp.py` (below); the seed layout, the median-of-similarity and mean-of-assignment pooling, and the scoring that excludes the wildcard from both numerator and denominator are unchanged. The outputs root comes from the configuration package instead of three `parent` hops from `__file__`. |
+| `anamnesis/scripts/analyze_complementarity.py` | `anamnesis/analysis/complementarity.py` + `anamnesis/scripts/analyze_complementarity.py` | All seven readings, logic-identical in their arithmetic: cross-run consistency at the five-point bar, resolution by pair difficulty, the hard-pair profile correlation with its zero-variance drop, importance by family and sub-family, the hardest confusion per tier, the ordering check, and value-add against the baseline composites. Three changes. The run table is an argument rather than a module constant, so a report can be taken over any analysis directory. The `--include-5way` flag is gone: the donor's two paths were the same path — a subset pass was read whenever it existed — so an inert switch is not kept. And the hardest-confusion table now reads its labels from `rf_5way.labels`, which is where a banked confusion matrix carries them; see the defect note below. |
+| `anamnesis/scripts/train_contrastive_projection.py` · `run_cross_run_transfer.ProjectionNet`/`mine_triplets`/`train_full_data_mlp`/`embed_with_model` | `anamnesis/analysis/contrastive_mlp.py` + `anamnesis/scripts/train_contrastive_projection.py` | **Two donors, one network, two laws named separately.** The banked fit (grouped holdout by generation, kNN validation, early stopping, numpy weights out) and the analysis fit (full data, fixed epochs, several seeds, no holdout) trained the same architecture in both donors and differed in every rule around it, so both laws are callable and neither is the other's default — the same treatment C1 gave two mean-difference laws. Mining is likewise two functions: class-first for the banked fit, anchor-uniform for the analysis one. The training corpus is here as well (`load_hidden_state_samples`): the sampled layers now come from the preset's `contrastive_layers` rather than a hand-copied table, the group is the generation, and the positional correction is applied at the absolute position of each sampled step. It lives in `analysis/` because fitting is learned-probe machinery and because the family that *applies* these weights is pure numpy — a torch import in its closure would fail the anchor's purity guard. |
+| `anamnesis/scripts/vmb_routing_cka_gate.py` | `anamnesis/analysis/leak_gate.py` + `anamnesis/scripts/leak_gate.py` | **Generalized, as the manifest's "instrument-grade, arm-independent" classification asks.** The law is the donor's exactly: length-residualize, LDA under GroupKFold-by-topic against the same folds' label-permutation null, the naive accuracy reported only as the other end of the leak gap, a topic-decode readout beside it, and the three-way verdict. What changed is what it is pointed at. The donor hard-coded a directory pattern (`vmb_a2_<model>_pure_<mode>`) and a feature-count assertion for one arm's six routing-CKA features; here the cells are named by the caller and the feature sets are selected by prefix or substring, with `--expect` available for a caller that wants the count pinned. The arm protocol that built those cells stays in the record, which is the same rule the launchers' spec builders were ported under. The length regression is `audit_lib.residualize_all` rather than a second implementation. |
+| `anamnesis/scripts/vmb_s51_encoder_on_raw.py` | `anamnesis/analysis/encoder_ladder.py` + `anamnesis/scripts/encoder_on_raw.py` | The three-rung ladder — hand features, raw linear, raw encoder — on one GroupKFold-by-topic split with the fold preprocessing computed once for both architectures, logic-identical. **This is C5's first package consumer**, which closes the note that the audit library landed serving only its own test: the surface sampling, the Gram reduction and the readout pair are all read from `audit_lib` here. Two adaptations: the arms are typed (`Arm`) instead of six parallel lists, and the reading is a named function over the two pairs rather than a chained conditional, so the catch margin and the floor bar are constants a reader can see. The donor's module-level `RAW_SURFACES` global, rebound from `main`, is an argument. |
+| `v3_audit/_common.py` · `make_encoder`, `train_eval` | `anamnesis/analysis/audit_lib.py` (**C5, scope completed**) | The readout pair the ladder is measured with: a linear classifier fitted by a convex solver — which is what makes it a floor rather than one optimizer's stopping point — and one nonlinear network as the check on whether the floor is the ceiling. Logic-identical, including the LBFGS-versus-AdamW pairing the encoder diagnostics pinned and the two epoch budgets for raw-wide and Gram-reduced inputs. C5's module is larger than its first extraction because its scope is now whole; the donor total is unchanged and G2's arithmetic still passes with room. |
+
+### Metrology — Stage 0 and the census
+
+⚑ SEAM 2, resolved as the desk leant: **the floors are battery metrology, so the
+protocol that collects them lives beside them.** Nothing in either module spawns a
+process or loads a model — a plan is an object, a law is arithmetic over banked
+signatures, and the fan-out belongs to the launcher.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/vmb_stage0_faithfulness.py` · `vmb_stage0_law.py` | `anamnesis/analysis/battery/stage0.py` + `anamnesis/scripts/stage0_floors.py` | **The two halves of Stage 0, in one module and one command with two stages.** The protocol half is logic-identical and now typed: `floor_gid` is the gid layout as arithmetic, `select_continuations` takes seed 0 of every topic and errors on an absent id rather than returning a smaller set, and `plan_stratified_replays` returns the four-pinned-six-spread layout as `ReplayInstance` rows plus the synthetic manifest — whose entries are byte-for-byte the continuation's own manifest rows, ten times over. `replay_index.json` is written from those rows, so the mapping from a signature to its device and component is one definition rather than a dict literal beside a loop. The law half is `law_table_md` and `compute_stage0_law`, which computes the stochastic pass first *because* the faithfulness deltas are standardized on its scale — the donor's two-script arrangement let a caller skip it. The fan-out is the launcher's: `stage0_floors.py replays` builds a `LaunchPlan` over the plan's own per-device shares and invokes `run_replay.py`, which is the §2 rework note carried out (the donor carried a private copy of the C3 fan-out). Two refusals are new and both are about attribution: a device cannot be both pinned and spread, and the two faithfulness arguments come as a pair. |
+| `anamnesis/scripts/vmb_subperceptual_census.py` | `anamnesis/analysis/battery/census.py` + `anamnesis/scripts/census.py` | The census, logic-identical: the declared bars, `gap = internals − max(content, likelihood)`, the content rung as a maximum over the declared detector set including the judge, the hardening annotation that voids a blind-judge gap where a forced-choice table shows the judge discriminating, the pending-and-appendix rows, and the class object per model. Rows are `CensusRow` rather than bare dictionaries, `extra="allow"` so a row keeps the per-axis fields it carries, and the hardening text is one function instead of a nested conditional inside a dictionary literal. The judge-defense gate still runs before anything is written — `census_document` calls it, so a census that has not been checked cannot be produced. The arm directory lists are module constants a caller can extend rather than tuples inside two functions. |
+
+## Onboarding, trajectories, search and covariance
+
+Four capabilities the manifest classified as instrument-grade and found stranded in
+arm lanes. Each lands where its own subject lives rather than where it was written:
+onboarding validates a capture path, so it is extraction's; a trajectory bank feeds
+a feature family, so it is extraction's; a black-box search over a fitness function
+is domain-free numerics, so it is the package root's; a shrinkage covariance at
+width is what a whitened vector is built from, so it is steering's.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/vmb_onboard_validate.py` | `anamnesis/extraction/onboarding.py` + `anamnesis/scripts/onboard_model.py` | The four-step first-contact smoke, logic-identical in what it checks: the layer count, the hook target modules on the probed layers (with the latent-attention and routed-layer variants), `generate` returning attention weights at the preset's query-head count, the hidden-state depth, and one finite feature vector. The routed fifth step is unchanged too, including the routing family's arity and the taxonomy's zero-unclassified check. **The eleven `assert`s become named refusals** (`OnboardingError`): an assertion disappears under optimisation, and this is the one pass whose entire output is its refusals. The `ModelConfig` is built by `from_preset` instead of nine hand-copied fields, and the report is a typed object whose `lines()` render what the donor printed inline — which is what lets the checks be driven from a test with no checkpoint. `router_fields_from_hooks` in `generation_runner` loses its underscore in the same change, because it now has a second reader. |
+| `anamnesis/scripts/pathsig_features.py` | `anamnesis/extraction/path_banks.py` + `anamnesis/scripts/pathsig_features.py` | The marshaller between a banked trajectory bank and the path-signature family, logic-identical: the ragged packing with its offset checks, the identity basis over already-projected coordinates (routed through the family's own basis object so the augmentation, integration and null paths stay the family's), the design-matrix stack that **drops a short path and counts it** rather than imputing, and the increment-permutation null at three seeds or more. Three changes: the result is typed (`PathDesignMatrix`) and carries the dropped count beside the kept indices, `from_list` is `from_paths` and checks that it was given one id per path, and the short-path catch narrows from a bare `except Exception` to the family's own `ShortPathError` — a malformed bank now raises where it used to be silently counted as short. The class is not called `SignatureMatrix`, because `audit_lib` has one of those and it is a different object. |
+| `anamnesis/scripts/annex_sepcma.py` | `anamnesis/optimize.py` + `anamnesis/scripts/sepcma.py` | Separable CMA-ES, arithmetic-identical — the same weights, the same four learning rates, the same `(d+2)/3` speedup on the diagonal model, the same variance floor. It is at the package root because it knows nothing about signatures: a caller with a fitness function and a dimension is its whole audience, which is the same reason `provenance.py` sits there. The donor's self-test becomes the module's two landscapes (`sphere_fitness`, `alignment_fitness`) plus `probe_budget`, which is the command: on the idealized version of a real direction search, does the optimizer climb at `10·d` evaluations? A typed `BudgetProbe` carries the verdict and the script's exit status is that verdict, so a budget decision can be scripted. `search` is new and is the loop a caller would otherwise write; `state`/`restore` keep the donor's checkpointing, generator included, and `tell` now refuses a population that did not come from its own `ask`. |
+| `anamnesis/scripts/c5_ledoit_wolf_gpu.py` | `anamnesis/steering/covariance.py` + `anamnesis/scripts/ledoit_wolf_gpu.py` | The fast shrinkage covariance, arithmetic-identical: both algebraic rearrangements, the float32 matmul with float64 for the shrinkage, the solve and the eigendecomposition, TF32 switched off around the matmul, and the reference's `min(beta, delta)` clamp and zero-numerator guard. It is a sibling of `steering/vectors.py` rather than part of it: the estimator of record there is scikit-learn's, this computes the same number faster, and the two carry **different names** (`shrinkage_covariance` against `ledoit_wolf_covariance`) so a reader always knows which they hold. Three changes: the default device is the CPU, which is what makes the agreement check runnable in CI; the check is a function returning a typed `AgreementCheck` with the three tolerances as named constants, rather than prints and a `SystemExit`; and the cache-emptying call is guarded by the device, so the whole module runs where no accelerator exists. The command is the check — one box, one verdict, one exit status. |
+| `anamnesis/scripts/vmb_a5_qual_extract.py` | `anamnesis/steering/readouts.py` · `cell_ladder`, `matched_generations`, `qualitative_markdown` + `anamnesis/scripts/qual_extract.py` | The qualitative browser, logic-identical: the dose ladder and its two controls at a matched dose, matched by generation id, rendered as markdown with the two caveats a reader needs — that seeds differ per cell so this is a style comparison rather than a token-level control, and that the strongest dose collected sits below the mode-induction peak. It joins `readouts.py` rather than becoming its own module because steered-cell naming is that module's vocabulary: the ladder's directory names are the banked spellings and they parse through the same `parse_cell_name` grammar, which a test asserts. The ladder is a function of the site and the vector rather than a literal list, so a caller can read any vector's ladder. |
+| `anamnesis/scripts/run_replay_multickpt.py` · `build_partc_replay_cells.py` | `anamnesis/extraction/replay/checkpoint_series.py` + `anamnesis/scripts/run_replay_multickpt.py` + `anamnesis/scripts/build_checkpoint_series.py` | **The deferred PR-6 item, and its builder, sharing one schema.** The adapter-swap loop is logic-identical: load the base once, wrap it, and per checkpoint load-select-restore-merge-replay-unmerge-delete, with the pristine snapshot taken once and restored before each merge. `require_pristine_restore` keeps the donor's hard refusal for a multi-checkpoint swap, and it is now checked before a model is touched. The series document — `{"checkpoints": [{label, adapter_path, run_dir}, …]}` — is `CheckpointSeries`, so the builder that enumerates a training directory and the replay that walks it are the same object rather than two readings of one JSON shape; `series_from_adapter_dir` keeps the donor's step ordering with `final` last and its refusal of a full-weight checkpoint, naming the command that can replay one. The donor's `_build_configs` is `replay/cell.load_replay_model`, which is where the coupling the shims rule forbids already went, and the fan-out is `orchestration/launch.py` instead of a private `Popen` loop. The builder's name drops the arm it was written for: it builds a checkpoint series, and the cohort layout it writes into is an argument. |
+
+### The entry points
+
+Eighteen commands, each argparse and a call into the package. The renames are
+recorded because the record cites the old names: `run_gauntlet` for
+`run_unified_analysis`, `judge_likert` for `run_judge_scoring`, `stage0_floors` for
+the two `vmb_stage0_*` scripts, `onboard_model` for `vmb_onboard_validate`,
+`census` for `vmb_subperceptual_census`, `leak_gate` for `vmb_routing_cka_gate`,
+`encoder_on_raw` for `vmb_s51_encoder_on_raw`, `qual_extract` for
+`vmb_a5_qual_extract`, `sepcma` for `annex_sepcma`, `ledoit_wolf_gpu` for
+`c5_ledoit_wolf_gpu`, and `build_checkpoint_series` for
+`build_partc_replay_cells`. The `vmb_`, `annex_` and `c5_` prefixes do not exist
+here.
+
+⚑ **`run_unified_analysis` gets no alias.** The STRUCTURE draft left the question
+open; the ruling recorded here is no. An alias is a second name for one command
+that has to be kept working, documented and eventually removed, and the reader it
+serves — someone holding a citation of the old name — is served better by this
+table, which says where the command went and what else moved with it.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/run_unified_analysis.py` | `anamnesis/scripts/run_gauntlet.py` | 98 lines against 111, and thin throughout: the run registry resolves the signature and addon directories, the mode filter's output directory comes from `outputs_root()`, and `run_full_analysis` does the rest. An unknown run name names every run the registry holds. |
+| `anamnesis/scripts/run_binary_prompt_swap.py` | `anamnesis/scripts/run_binary_prompt_swap.py` | 83 lines against 339. A run whose bank has no swap generations is named and skipped rather than reported as an ambiguous result, and a pass over no testable run exits non-zero. |
+| `anamnesis/scripts/run_subfamily_decomp.py` | `anamnesis/scripts/run_subfamily_decomp.py` | 90 lines against 451. |
+| `anamnesis/scripts/run_cross_run_transfer.py` | `anamnesis/scripts/run_cross_run_transfer.py` | 87 lines against 710. |
+| `anamnesis/scripts/analyze_complementarity.py` | `anamnesis/scripts/analyze_complementarity.py` | 68 lines against 758; the analysis directory is an argument and an empty one names the command that fills it. |
+| `anamnesis/scripts/train_contrastive_projection.py` | `anamnesis/scripts/train_contrastive_projection.py` | 111 lines against 501. The artifact is verified before the command exits — loaded back through the feature family that will apply it and used to project one row, because a file its consumer cannot read is not a calibration artifact. |
+| `anamnesis/scripts/run_judge_scoring.py` | `anamnesis/scripts/judge_likert.py` | New name, for symmetry with `judge_2afc.py`: the two paradigms are two commands over one backend contract. 145 lines against 526, because the paradigm itself landed with the judging layer. The receipt is written as it fills, so a killed pass resumes from what it scored; a pass that scored nothing exits 2, as a non-run rather than a null. |
+| `anamnesis/scripts/vmb_stage0_faithfulness.py` · `vmb_stage0_law.py` | `anamnesis/scripts/stage0_floors.py` | One command, two stages in the order they run: `replays` plans and fans out, `law` computes the floors and the table. A dry run banks the plan and stops, which is what makes the plan an artifact rather than a side effect of a launch. |
+| `anamnesis/scripts/vmb_onboard_validate.py` | `anamnesis/scripts/onboard_model.py` | Argparse, one call, and the report's own lines. A refused claim exits 1 with the reason. |
+| `anamnesis/scripts/vmb_subperceptual_census.py` | `anamnesis/scripts/census.py` | Argparse, one call, and the class object printed per model. |
+| `anamnesis/scripts/vmb_routing_cka_gate.py` | `anamnesis/scripts/leak_gate.py` | Cells and feature sets are named on the command line (`LABEL=RUN_DIR`, `NAME=prefix:…`), `--expect` pins a feature count, and the exit status is the first feature set's verdict. |
+| `anamnesis/scripts/vmb_s51_encoder_on_raw.py` | `anamnesis/scripts/encoder_on_raw.py` | The two arms, the source run's metadata, and a device that falls back to the CPU with a warning rather than failing where no accelerator exists. |
+| `anamnesis/scripts/pathsig_features.py` | `anamnesis/scripts/pathsig_features.py` | 100 lines against 170: the bank, the layer, the rank, the level, the optional null seeds, and one npz out carrying the matrix, its names, the kept indices and the generation ids behind them. |
+| `anamnesis/scripts/annex_sepcma.py` | `anamnesis/scripts/sepcma.py` | The budget probe as a command: one or more dimensions, the budget multiple, and an exit status that is the verdict. `--sphere` runs the convex sanity check instead, which separates an arithmetic fault from a budget one. |
+| `anamnesis/scripts/c5_ledoit_wolf_gpu.py` | `anamnesis/scripts/ledoit_wolf_gpu.py` | The agreement check against scikit-learn, with the device as an argument. Run it once per box before building vectors through the fast path. |
+| `anamnesis/scripts/vmb_a5_qual_extract.py` | `anamnesis/scripts/qual_extract.py` | The ladder, the site, the prompts and the character budget; the vector and its doses are arguments rather than a literal, so it reads any vector's ladder. |
+| `anamnesis/scripts/run_replay_multickpt.py` | `anamnesis/scripts/run_replay_multickpt.py` | 183 lines against 217. Worker, launcher and dry run, with the pristine-restore refusal checked in all three before anything loads. |
+| `anamnesis/scripts/build_partc_replay_cells.py` | `anamnesis/scripts/build_checkpoint_series.py` | 67 lines against 69; the arm and the cohort root are arguments and the refusal of a full-weight checkpoint comes from the package. |
+
+### Tests
+
+| old path | new home | notes |
+|---|---|---|
+| — | `tests/test_battery_stage0.py` | New. The protocol, which is where a floor gets attributed to the wrong thing: the gid layout by value, the four-pinned-six-spread plan with its device and component per replay, the two refusals, the synthetic manifest repeating one continuation's own tokens, the law table's conservative PLAN column and its exactly-zero row, and a law pass over a synthetic corpus where the faithfulness floor comes out below the stochastic one. |
+| — | `tests/test_census.py` | New. The bars at their own boundaries, the maximum that makes membership conservative, the judge asymmetry in all three of its states (voided, surviving, pending), the class object's empty entry as a reading, and the command's refusal of a root with no records. |
+| — | `tests/test_prompt_swap.py` | New. The corpus is planted twice — swap generations carrying the execution mode's value, then the prompt mode's — so the verdict has to flip; plus the label grammar, the complete-coverage filter on tiers, and the 1.5:1 bar at its boundary. |
+| — | `tests/test_subfamily.py` | New. Every classifier against its family's naming convention, the unknown bucket as the honest answer, the names-versus-columns refusal, the empty subset that returns a reason, the nested operator groups' growing widths, and the whole family scored beside its parts. |
+| — | `tests/test_cross_run.py` | New. Scoring against a pre-registered map with the wildcard excluded from both numerator and denominator, the nearest-centroid assignment, the cosine similarity's scale-freeness, the layer filter's two spellings, the refusals on a missing key and a width mismatch, the LDA leg on a shared and an unshared corpus, and one end-to-end pass at two seeds. |
+| — | `tests/test_contrastive_mlp.py` | New. The banked fit's four arrays plus its standardization, the grouped split and its degenerate fallback, the two mining laws' different properties, the single-class refusal, the unit-sphere embedding, and the corpus loader's three rules: swaps excluded, group is the generation, correction applied at the absolute position. The raw captures are written through the real saver, so the layer-offset assertion is about the reconstruction the instrument performs. |
+| — | `tests/test_complementarity.py` | New. Each reading over banked files this test writes, including the two refusals that keep a report honest — an unreadable run is skipped, an unvalidatable section leaves the file readable — and the hardest-confusion reading that the frozen record's own lookup could not produce. |
+| — | `tests/test_leak_gate.py` | New. A planted condition-carrying feature clears its null and a noise set reads as inert; the verdict law is then tested directly on the three shapes of evidence it is defined over, because which corpus produces which shape is a property of the classifier and what must not drift is the reading. Also that the grouped null sits above chance for a narrow feature set, which is why chance is not the bar. |
+| — | `tests/test_encoder_ladder.py` | New. The three readings named apart, matching by generation across two arms with gaps on both sides, the refusal when the arms share nothing, and the two ways a raw capture yields no row rather than a row of zeros. |
+| — | `tests/test_optimize.py` | New. The sphere as the convex check, the planted direction at `10·d`, the probe's failing verdict, the two landscapes' own properties, the ask-and-tell contract's refusals, and a restored search continuing the run it was rather than a statistically similar one. |
+| — | `tests/test_steering_covariance.py` | New. The port's exactness against scikit-learn on a CPU — shrinkage, Sigma, and the whitened direction's cosine, which is the one a vector is built from — plus the singular-Sigma degradation and the eigendecomposition's reconstruction. |
+| — | `tests/test_path_banks.py` | New. The packing's round trip and its two refusals, the short path dropped and counted, the rank bound, and the increment-permutation null leaving level 1 identical while moving level 2 — which is the whole reason it is the control for a level-2 result. |
+| — | `tests/test_checkpoint_series.py` | New. The series schema's round trip, enumeration in step order with `final` last, the full-weight refusal naming the command that can read it, the pristine-restore requirement, and the snapshot restoring a mutated wrapped weight exactly. |
+| — | `tests/test_onboarding.py` | New. Every refusal driven against a stand-in whose shape is wrong in one way — the shape a bad preset row produces — including the one that earns the whole pass: `generate` returning no attention weights. |
+| — | `tests/test_stage0_floors.py` | New. The dry run banking its plan before any device is touched, the faithfulness arguments as a pair, and the law stage's artifacts. |
+| — | `tests/test_sepcma.py` | New. The command's exit status, which is its interface: zero when the search climbed on the idealized landscape, one when it did not. |
+| `tests/test_audit_lib.py` | `tests/test_audit_lib.py` | **Extended** with the readout pair: the two architectures and the refusal of a third, the convex solver reaching a separable problem's optimum, determinism under a seed, and a training accuracy that makes an unconverged fit visible. |
+| `tests/test_steering_readouts.py` | `tests/test_steering_readouts.py` | **Extended** with the qualitative readout: the ladder's banked cell spellings parsing through the cell grammar, a cell with no metadata reading as a gap, and the document naming its two caveats. |
+
+### Defects found in the frozen record during this port
+
+Four, all recorded rather than silently fixed, and two of them fixed here with the
+reason stated because no banked number moves:
+
+1. **`analyze_complementarity`'s hardest-confusion table never printed.** The donor
+   read `class_labels` off the per-tier classification result; the field is `labels`
+   and it lives on `rf_5way`, so the lookup always returned empty and the table was
+   skipped in every run. A comment in the donor recorded the mismatch and kept the
+   broken lookup. Fixed here, because the section's only output was a printed table
+   and no banked number changes — unlike `gauntlet/classification.length_only`,
+   which is ported faithfully broken for exactly that reason.
+2. **`vmb_subperceptual_census`'s markdown table split its own first column.** Row
+   names spell a contrast the way the arm did — `A1:temperature(t03|t09)` — and an
+   unescaped pipe inside a markdown cell shifts every column after it, so every
+   banked census markdown has a malformed header row. Fixed here by escaping the
+   delimiter; the JSON census was never affected.
+3. **`run_subfamily_decomp`'s feature-name fallback mis-assigned columns.** Where a
+   bank's metadata carried no slice table, the donor handed a tier the *whole*
+   vector's name list and then indexed it as if it were the tier's, so a
+   decomposition could report sub-families over the wrong features. Refused here
+   rather than fixed, because there is no correct mapping to fall back to.
+4. **The sub-family classifier's `attention_flow` vocabulary has drifted from the
+   family's.** The classifier reads `sysprompt_mass` and `head_diversity_sysprompt`;
+   the family emits `prompt_mass` and `head_diversity_prompt`. Ported as-is, since
+   the cut is by name and the record's tables were produced under these names — the
+   consequence is a large unknown bucket on a v3 bank, which is what the bucket is
+   for. Flagged for the nomenclature sweep, where the family names and the cut can
+   be brought together in one change.
+
+## Manifest §2 — the completeness table
+
+Every item the port manifest's §2 names, with where its capability lives now. The
+list is the manifest's own, in its own order and grouping; forty-two items port and
+six are ruled to the record, and there is no row here that reads "see elsewhere".
+
+**Core pipeline entry points**
+
+| §2 item | where it lives now |
+|---|---|
+| `run_extraction` | `scripts/run_extraction.py` — PR 6 |
+| `run_gen_tokens` | `scripts/run_gen_tokens.py` + `extraction/token_generation.py` — PR 6 |
+| `run_replay_extraction` | `scripts/run_replay.py` + `extraction/replay/cell.py` — PR 6 |
+| `run_replay_multickpt` | `extraction/replay/checkpoint_series.py` + `scripts/run_replay_multickpt.py` — **this PR** |
+| `run_recompute_v3` | `scripts/run_recompute.py` — PR 6 |
+| `run_8b_calibration` (absorbing `run_corrected_pca`) | `scripts/run_calibration.py` — PR 6 |
+| `run_unified_analysis` | `scripts/run_gauntlet.py` over `analysis/gauntlet/` — **this PR** (gauntlet package, PR 5) |
+| `run_binary_prompt_swap` | `analysis/prompt_swap.py` + `scripts/run_binary_prompt_swap.py` — **this PR** |
+| `run_subfamily_decomp` | `analysis/subfamily.py` + `scripts/run_subfamily_decomp.py` — **this PR** |
+| `run_cross_run_transfer` | `analysis/cross_run.py` + `analysis/contrastive_mlp.py` + `scripts/run_cross_run_transfer.py` — **this PR** |
+| `run_judge_scoring` | `judging/likert.py` — PR 8; `scripts/judge_likert.py` — **this PR** |
+| `analyze_complementarity` | `analysis/complementarity.py` + `scripts/analyze_complementarity.py` — **this PR** |
+| `train_contrastive_projection` | `analysis/contrastive_mlp.py` + `scripts/train_contrastive_projection.py` — **this PR** |
+| `persistent_replay_worker` | `orchestration/workers.py` + `scripts/run_persistent_replay.py` — PR 6 |
+| `_gpu` | `orchestration/gpu.py` — PR 6 |
+| `_a5_common` | `extraction/interventions.py` · `load_vector` — PR 6; `steering/gates.py` · `teacher_forced_agreement` and `steering/vectors.py` · `median_row_norm` — PR 7 |
+| `_persistent_workers` | `orchestration/workers.py` — PR 6 |
+| `_single_cell_guard` | `orchestration/gpu.py` · `enforce_single_cell_guard` — PR 6 |
+
+**Metrology and gates**
+
+| §2 item | where it lives now |
+|---|---|
+| `vmb_stage0_faithfulness` | protocol in `analysis/battery/stage0.py`, fan-out through `orchestration/launch.py` (the §2 rework note), command `scripts/stage0_floors.py replays` — **this PR**; its C3 donor row landed PR 6 |
+| `vmb_stage0_law` | `analysis/battery/stage0.py` · `law_table_md`, `compute_stage0_law` + `scripts/stage0_floors.py law` — **this PR** |
+| `vmb_onboard_validate` | `extraction/onboarding.py` + `scripts/onboard_model.py` — **this PR** |
+| `vmb_a5_onpolicy_gate` | `steering/gates.py` · `on_policy_gate` — PR 7 |
+| `vmb_subperceptual_census` | `analysis/battery/census.py` + `scripts/census.py` — **this PR** |
+| `vmb_routing_cka_gate` | `analysis/leak_gate.py` + `scripts/leak_gate.py` — **this PR**, generalized past the one arm's directory pattern |
+| `annex_null` (PORT-WITH-REWORK) | `steering/gates.py` · `assert_against_own_null` — PR 7; the corpus loaders stayed in the record, which was the rework |
+| `annex_shape_audit` (PORT-WITH-REWORK) | `steering/gates.py` · `audit_axis` / `audit_axes` — PR 7 |
+| `vmb_a5_upstream_zero` | `steering/gates.py` · `upstream_zero_check` — PR 7 |
+
+**Explicitly classified post-validation — LEAVE-IN-RECORD, by ruling**
+
+| §2 item | ruling |
+|---|---|
+| `vmb_s51_resolver` | Not ported. One-shot, unstamped, tied to its own legs; V2 inspected it and ruled it record. Its dependency on the audit library is served here by `analysis/audit_lib.py` for anything that succeeds it. |
+| `pathsig_project_residual` | Not ported, same ruling. The projection it performs is what produces a trajectory bank; reading one is `extraction/path_banks.py`. |
+| `pathsig_incremental` | Not ported, same ruling. |
+| `pathsig_read_e1` | Not ported, same ruling. The reads it performed are `scripts/pathsig_features.py` plus a caller's own analysis. |
+| `pathsig_constant_injection` | Not ported, same ruling. |
+| `pathsig_s51_regen` | Not ported, same ruling. |
+
+**Steering and analysis readouts**
+
+| §2 item | where it lives now |
+|---|---|
+| `vmb_a5_lever_readout` | `steering/readouts.py` · `lever_readout` — PR 7 |
+| `vmb_matched_support_efficiency` | `steering/readouts.py` · `matched_support_efficiency` — PR 7 |
+| `vmb_a5_band_mass_readout` | `steering/screens.py` · `band_mass` — PR 7 |
+| `vmb_a5_layer_separation` | `steering/screens.py` · `axis_separation_rows`, `two_fold_heldout_d` — PR 7 |
+| `vmb_a5_routing_separation` | `steering/screens.py` · the same pair over the routing substrate — PR 7 |
+| `vmb_a6_directional_readout` | `steering/readouts.py` · `directional_series`, `seed_floor`, `sign_flip_p` — PR 7 |
+| `vmb_partc_contrast` | `steering/readouts.py` · `contrast_fields` — PR 7 |
+| `vmb_identity_histogram` | `steering/readouts.py` · `expert_usage_histogram` — PR 7 |
+| `vmb_s51_encoder_on_raw` (needs audit_lib) | `analysis/encoder_ladder.py` + `scripts/encoder_on_raw.py` — **this PR**; C5's first package consumer, with `make_encoder`/`train_eval` extracted to complete its scope |
+| `build_partc_replay_cells` | `extraction/replay/checkpoint_series.py` · `series_from_adapter_dir` + `scripts/build_checkpoint_series.py` — **this PR** |
+
+**Generic primitives found stranded in arm lanes**
+
+| §2 item | where it lives now |
+|---|---|
+| `annex_sepcma` | `optimize.py` + `scripts/sepcma.py` — **this PR** |
+| `c5_ledoit_wolf_gpu` | `steering/covariance.py` + `scripts/ledoit_wolf_gpu.py` — **this PR** |
+| `pathsig_features` | `extraction/path_banks.py` + `scripts/pathsig_features.py` — **this PR** |
+| `vmb_a5_covariance_screen` | `steering/screens.py` · `screen_vector`, `screen_bank` — PR 7 |
+| `vmb_a5_qual_extract` | `steering/readouts.py` · `cell_ladder`, `matched_generations`, `qualitative_markdown` + `scripts/qual_extract.py` — **this PR** |
+
+**The §2 rework note.** `vmb_stage0_faithfulness` ports as a *consumer* of
+`orchestration/launch.py` rather than with its own copy of the fan-out, which is
+what `scripts/stage0_floors.py replays` does: it builds a `LaunchPlan` over the
+stratified plan's own per-device shares and invokes `run_replay.py` once per
+device. C3's donor table already counts the script's 152 lines.
+
+With that, manifest §2 is exhausted: forty-two items live in this repository and
+six are in the frozen record by ruling, with no item unaccounted for.
