@@ -130,12 +130,11 @@ def decode_policy(args: argparse.Namespace) -> Any:
     from anamnesis.config import resolve_preset
     from anamnesis.extraction.token_generation import DecodePolicy
 
-    preset = resolve_preset(args.model)
-    return DecodePolicy(
-        temperature=args.temperature if args.temperature is not None else preset.temperature,
+    return DecodePolicy.from_preset(
+        resolve_preset(args.model),
+        temperature=args.temperature,
         top_p=args.top_p,
         max_new_tokens=args.max_new_tokens,
-        eos_token_ids=tuple(preset.eos_token_ids),
         repetition_penalty=args.repetition_penalty,
         date_string=args.date_string,
     )
@@ -144,34 +143,16 @@ def decode_policy(args: argparse.Namespace) -> Any:
 def passthrough(args: argparse.Namespace) -> dict[str, Any]:
     """What a run's metadata records about how it was produced."""
     from anamnesis.config import resolve_preset
+    from anamnesis.extraction.token_generation import generation_passthrough
 
-    preset = resolve_preset(args.model)
-    policy = decode_policy(args)
-    block: dict[str, Any] = {
-        "model": {
-            "model_id": preset.model_id,
-            "torch_dtype": preset.torch_dtype,
-            "num_layers": preset.num_layers,
-            "hidden_dim": preset.hidden_dim,
-        },
-        "generation_config": {
-            "max_new_tokens": policy.max_new_tokens,
-            "temperature": policy.temperature,
-            "top_p": policy.top_p,
-            "repetition_penalty": policy.repetition_penalty,
-            "do_sample": True,
-            "eos_token_ids": list(policy.eos_token_ids),
-        },
-    }
-    if policy.date_string:
-        block["template_date_string"] = policy.date_string
-    fields = injection_fields(
-        args.inject_npz, args.inject_key, args.inject_layer,
-        args.inject_alpha, args.inject_alpha_frac,
+    return generation_passthrough(
+        resolve_preset(args.model),
+        decode_policy(args),
+        injection=injection_fields(
+            args.inject_npz, args.inject_key, args.inject_layer,
+            args.inject_alpha, args.inject_alpha_frac,
+        ),
     )
-    if fields["inject_npz"] is not None:
-        block["a5_injection"] = {k: v for k, v in fields.items()}
-    return block
 
 
 def _generation_worker_command(args: argparse.Namespace, *, label: str, **overrides: Any) -> list[str]:
@@ -212,14 +193,14 @@ def _generation_worker_command(args: argparse.Namespace, *, label: str, **overri
 
 def fan_out_generation(args: argparse.Namespace) -> None:
     """Partition the specs over devices and re-invoke this command per worker."""
+    from anamnesis.extraction.token_generation import record_on_disk
     from anamnesis.orchestration.gpu import enforce_single_cell_guard
     from anamnesis.orchestration.launch import (
         RECORDS_SUBDIR,
-        Cell,
         LaunchPlan,
         assemble_run,
+        fan_out_roster,
         launch,
-        plan_multicell,
         write_worker_inputs,
     )
 
@@ -227,33 +208,25 @@ def fan_out_generation(args: argparse.Namespace) -> None:
         roster = json.loads(args.cells_json.read_text())["cells"]
         log_dir = args.log_dir or (args.cells_json.parent / "_multicell_jobs")
         plan = LaunchPlan.resolve(args.gpus, args.workers_per_gpu, log_dir)
-        cells = [
-            Cell(
-                target={"out_dir": str(Path(row["out_dir"]) / RECORDS_SUBDIR)},
-                payload={
-                    k: v for k, v in row.items() if k not in ("out_dir", "spec_file", "specs")
-                },
-            )
-            for row in roster
-        ]
-        specs_per_cell = {
-            id(cell): _cell_specs(row) for cell, row in zip(cells, roster)
-        }
-        jobs = plan_multicell(
-            cells, lambda cell: specs_per_cell[id(cell)], plan.n_workers, items_key="specs"
+        fan_out_roster(
+            plan,
+            # A worker banks into the cell's records directory; the cell directory
+            # itself is what assembly reads afterwards.
+            [{**row, "out_dir": str(Path(row["out_dir"]) / RECORDS_SUBDIR)} for row in roster],
+            _cell_specs,
+            target_fields=("out_dir",),
+            item_fields=("spec_file", "specs"),
+            items_key="specs",
+            jobs_dir=log_dir,
+            command_for=lambda worker, jobs_file: _generation_worker_command(
+                args, label=f"w{worker}g{plan.device_for(worker)}",
+                **{"--jobs-file": jobs_file},
+            ),
+            stem="gen",
+            dry_run=args.dry_run,
         )
         if args.dry_run:
-            for worker in sorted(jobs):
-                print(f"worker {worker} ({plan.device_for(worker)}): {len(jobs[worker])} cells")
             return
-        files = write_worker_inputs(log_dir, "jobs", jobs)
-        launch(
-            plan,
-            lambda w: _generation_worker_command(args, label=f"w{w}g{plan.device_for(w)}",
-                                      **{"--jobs-file": files[w]}),
-            stem="gen",
-            workers=sorted(files),
-        ).raise_on_failure()
         for row in roster:
             assemble_run(Path(row["out_dir"]), passthrough(args))
         return
@@ -261,10 +234,7 @@ def fan_out_generation(args: argparse.Namespace) -> None:
     if args.spec_file is None or args.out_dir is None:
         raise SystemExit("fanning out needs --spec-file and --out-dir, or --cells-json")
     specs = json.loads(args.spec_file.read_text())
-    todo = [
-        s for s in specs
-        if not (args.out_dir / f"gen_{s['generation_id']:03d}.json").exists()
-    ]
+    todo = [s for s in specs if not record_on_disk(args.out_dir, s["generation_id"])]
     log_dir = args.log_dir or (args.out_dir.parent / "gen_logs")
     plan = LaunchPlan.resolve(args.gpus, args.workers_per_gpu, log_dir)
     shares = plan.partition(todo)
@@ -321,36 +291,24 @@ def generate(args: argparse.Namespace) -> None:
         os.environ.setdefault(name, "1")
 
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     torch.set_num_threads(1)
 
     from anamnesis.config import resolve_preset
-    from anamnesis.extraction.interventions import (
-        attach_injection,
-        attach_perturbation,
-        resolve_injection,
+    from anamnesis.extraction.interventions import armed_interventions, resolve_injection
+    from anamnesis.extraction.token_generation import (
+        generate_specs,
+        generation_shortfall,
+        load_sampling_runtime,
     )
-    from anamnesis.extraction.token_generation import generate_specs, generation_shortfall
     from anamnesis.shortfall import Shortfall, refuse_unless_complete
 
-    preset = resolve_preset(args.model)
-    dtype = {
-        "float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32,
-    }.get(str(preset.torch_dtype), torch.float16)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
-    model = (
-        AutoModelForCausalLM.from_pretrained(
-            args.model_path, dtype=dtype, attn_implementation=args.attn
-        )
-        .to("cuda")
-        .eval()
-    )
     policy = decode_policy(args)
-    pad_id = (
-        tokenizer.pad_token_id
-        if tokenizer.pad_token_id is not None
-        else policy.eos_token_ids[0]
+    runtime = load_sampling_runtime(
+        args.model_path,
+        resolve_preset(args.model),
+        policy,
+        attn_implementation=args.attn,
     )
 
     def run_one(
@@ -362,22 +320,19 @@ def generate(args: argparse.Namespace) -> None:
         label: str,
     ) -> Shortfall:
         injection = resolve_injection(None, fields=fields)
-        handle = attach_injection(model, injection, label)
-        perturb_handle = attach_perturbation(model, perturb, label)
-        try:
+        with armed_interventions(
+            runtime.model, runtime.model,
+            injection=injection, perturbation=perturb, label=label,
+        ) as handle:
             result = generate_specs(
-                model, tokenizer, specs, out_dir,
+                runtime.model, runtime.tokenizer, specs, out_dir,
                 policy.with_repetition_penalty(penalty),
-                pad_token_id=pad_id,
+                pad_token_id=runtime.pad_token_id,
                 write_handle=handle,
                 injection=injection,
                 perturbation=perturb,
                 label=label,
             )
-        finally:
-            for armed in (handle, perturb_handle):
-                if armed is not None:
-                    armed.remove()
         return generation_shortfall(result, command=MODULE, label=label)
 
     if args.jobs_file is not None:

@@ -22,9 +22,10 @@ one job file, loads the model once, and loops. Output is identical either way �
 that is what makes the load-once path legitimate rather than a shortcut — and
 :mod:`anamnesis.orchestration.gpu`'s guard refuses the per-cell loop that
 rediscovers the slow path by accident. :func:`plan_multicell` is the one
-partition both the generation and the replay side use; a cell's payload is opaque
-here, because what an injection or a routing perturbation *means* is the worker's
-business and not the launcher's.
+partition both the generation and the replay side use, and
+:func:`fan_out_roster` is the whole arrangement around it that both go through; a
+cell's payload is opaque here, because what an injection or a routing perturbation
+*means* is the worker's business and not the launcher's.
 
 **Assembly.** A generation pass banks one record per generation and a run is
 assembled from them afterwards, which is what makes it resumable: a killed pass
@@ -345,6 +346,73 @@ def plan_multicell(
                 {**cell.target, **cell.payload, items_key: list(share)}
             )
     return jobs
+
+
+def fan_out_roster(
+    plan: LaunchPlan,
+    roster: Sequence[Mapping[str, Any]],
+    items_for: Callable[[Mapping[str, Any]], Sequence[Any]],
+    *,
+    target_fields: Sequence[str],
+    item_fields: Sequence[str],
+    items_key: str,
+    jobs_dir: Path,
+    command_for: Callable[[int, Path], Sequence[str]],
+    stem: str,
+    dry_run: bool = False,
+    popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+) -> None:
+    """Fan a roster out so each worker loads the model once and walks its own slice.
+
+    This is the whole arrangement, not a step of it: partition, one job file per
+    worker, spawn, wait, verdict. Both passes that walk rosters go through it, so
+    they cannot come to disagree about where a job file lands, how a dry run reports
+    a partition, or whether a failed worker's status is inherited.
+
+    A roster row is data its author wrote, and this reads only the three kinds of
+    field it is told about. ``target_fields`` locate the cell's inputs and outputs
+    and are carried into every one of its jobs as strings. ``item_fields`` are the
+    fields that say what work the cell holds, and are dropped, because the worker
+    receives its own slice under ``items_key`` instead. Everything else is payload —
+    an intervention, a sampler setting, a routing perturbation — which rides through
+    untouched, because what it *means* is the worker's business.
+
+    ``items_for`` reads one row's items, which may be inline or in a file the row
+    names; ``command_for`` builds worker *w*'s argv given the job file written for it.
+
+    ``dry_run`` prints each worker's cell count and spawns nothing, which is how a
+    partition is checked on a machine with no devices.
+
+    Raises
+    ------
+    SystemExit
+        Through :meth:`LaunchResult.raise_on_failure` when a worker failed, carrying
+        the shortfall status when every failure was one.
+    """
+    reserved = set(target_fields) | set(item_fields)
+    cells = [
+        Cell(
+            target={name: str(row[name]) for name in target_fields if name in row},
+            payload={k: v for k, v in row.items() if k not in reserved},
+        )
+        for row in roster
+    ]
+    items = {id(cell): items_for(row) for cell, row in zip(cells, roster)}
+    jobs = plan_multicell(
+        cells, lambda cell: items[id(cell)], plan.n_workers, items_key=items_key
+    )
+    if dry_run:
+        for worker in sorted(jobs):
+            print(f"worker {worker} ({plan.device_for(worker)}): {len(jobs[worker])} cells")
+        return
+    files = write_worker_inputs(jobs_dir, "jobs", jobs)
+    launch(
+        plan,
+        lambda worker: command_for(worker, files[worker]),
+        stem=stem,
+        workers=sorted(files),
+        popen=popen,
+    ).raise_on_failure()
 
 
 @dataclass

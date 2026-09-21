@@ -10,6 +10,12 @@ by guessing, because a cell banked under a dose it did not receive is a control
 mislabelled as a treatment. A write whose position gating did not fire at exactly
 the generated span is refused for the same reason: an intervention that quietly did
 not happen looks exactly like one that did.
+
+The arming scope is the same concern seen across cells rather than within one. Both
+passes walk a roster under one model load, so a handle a failed cell left behind
+would stack on the next cell's write and every cell after it would carry a dose
+nobody asked for — with nothing in the output to show it. The cases below pin
+removal on the ordinary exit and on the raise.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ import pytest
 from anamnesis.extraction.interventions import (
     INJECTION_METADATA_KEY,
     InjectionSpec,
+    armed_interventions,
     PerturbationSpec,
     check_injection_gating,
     injection_fields,
@@ -134,3 +141,74 @@ def test_a_perturbation_carries_its_seed_so_the_pass_is_reproducible() -> None:
 def test_a_perturbation_needs_a_mode() -> None:
     with pytest.raises(ValueError):
         PerturbationSpec(mode="")
+
+
+class _Armed:
+    """Stands in for an attached hook handle: it records that it was removed."""
+
+    def __init__(self) -> None:
+        self.removed = 0
+
+    def remove(self) -> None:
+        self.removed += 1
+
+
+def _arming(monkeypatch: pytest.MonkeyPatch) -> tuple[list[tuple[str, Any]], _Armed, _Armed]:
+    """Replace both attach calls with recorders, returning the log and the handles."""
+    write, perturb = _Armed(), _Armed()
+    seen: list[tuple[str, Any]] = []
+
+    def fake_injection(target: Any, spec: Any, label: str) -> Any:
+        seen.append(("write", target))
+        return None if spec is None else write
+
+    def fake_perturbation(target: Any, fields: Any, label: str) -> Any:
+        seen.append(("perturb", target))
+        return None if not fields else perturb
+
+    monkeypatch.setattr(
+        "anamnesis.extraction.interventions.attach_injection", fake_injection
+    )
+    monkeypatch.setattr(
+        "anamnesis.extraction.interventions.attach_perturbation", fake_perturbation
+    )
+    return seen, write, perturb
+
+
+def test_armed_interventions_yields_the_write_handle_and_removes_both(
+    monkeypatch: pytest.MonkeyPatch, bank: Path
+) -> None:
+    seen, write, perturb = _arming(monkeypatch)
+    spec = InjectionSpec(npz=bank, key="V3", layer=3, alpha=2.0)
+    with armed_interventions(
+        "model", "inner", injection=spec, perturbation={"mode": "topk"}, label="w0"
+    ) as handle:
+        assert handle is write
+        assert write.removed == 0 and perturb.removed == 0
+    assert write.removed == 1 and perturb.removed == 1
+    assert seen == [("write", "model"), ("perturb", "inner")]
+
+
+def test_armed_interventions_removes_the_write_when_the_cell_raises(
+    monkeypatch: pytest.MonkeyPatch, bank: Path
+) -> None:
+    """The load-bearing case: a roster's next cell must not inherit this one's dose."""
+    _, write, perturb = _arming(monkeypatch)
+    spec = InjectionSpec(npz=bank, key="V3", layer=3, alpha=2.0)
+    with pytest.raises(RuntimeError, match="one generation"):
+        with armed_interventions(
+            "model", "inner", injection=spec, perturbation={"mode": "topk"}, label="w0"
+        ):
+            raise RuntimeError("one generation blew up")
+    assert write.removed == 1 and perturb.removed == 1
+
+
+def test_an_unsteered_cell_arms_nothing_and_removes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, write, perturb = _arming(monkeypatch)
+    with armed_interventions(
+        "model", "inner", injection=None, perturbation=None, label="w0"
+    ) as handle:
+        assert handle is None
+    assert write.removed == 0 and perturb.removed == 0

@@ -54,9 +54,22 @@ def test_the_script_defines_no_capability_another_module_would_import() -> None:
         and getattr(getattr(steer_vectors, name), "__module__", "") == steer_vectors.__name__
     }
     assert public == {
-        "parser", "main", "load_model", "write_json",
+        "parser", "main", "capture_model",
         "run_sweep", "run_build", "run_screen", "run_gate", "run_null", "run_lever",
     }
+
+
+def test_the_json_writer_is_the_packages_and_not_a_second_copy() -> None:
+    """One writer, so a readout and a screen land in the same format.
+
+    Two copies of "write this dict as JSON" is how two artifacts of one pass come to
+    differ in indentation, key order or whether the directory is created — cosmetic
+    until something diffs them.
+    """
+    from anamnesis.steering import readouts
+
+    assert "write_json" not in vars(steer_vectors)
+    assert callable(readouts.write_json)
 
 
 def test_sweep_runs_end_to_end_and_names_the_planted_site(tmp_path) -> None:

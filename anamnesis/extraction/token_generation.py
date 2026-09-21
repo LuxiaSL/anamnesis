@@ -25,6 +25,12 @@ The sampler is called with its defaults unless a cell asks otherwise: a
 repetition penalty of one is not passed at all, so the default path's sampling
 stream is the one the record was banked under.
 
+A pass's configuration and the record of that configuration live here beside the
+loop: :class:`DecodePolicy` is how it sampled, :func:`load_sampling_runtime` is
+what it sampled through, and :func:`generation_passthrough` is what the run's
+metadata says about both. A corpus is read years later and every number over it is
+conditioned on those, so they are written down next to the code that used them.
+
 A spec that raises is named in the result and the loop continues, because one
 unsamplable prompt is not a reason to abandon the other three hundred. What the
 result must not permit is a caller reporting success over the short corpus, so
@@ -39,11 +45,16 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self, Sequence
+from typing import Any, Mapping, Self, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from anamnesis.extraction.interventions import InjectionSpec, check_injection_gating
+from anamnesis.config import ModelPreset
+from anamnesis.extraction.interventions import (
+    INJECTION_METADATA_KEY,
+    InjectionSpec,
+    check_injection_gating,
+)
 from anamnesis.shortfall import Shortfall, ids_present
 
 logger = logging.getLogger(__name__)
@@ -52,6 +63,24 @@ NEUTRAL_REPETITION_PENALTY = 1.0
 """The value at which the penalty is not a penalty. At exactly this value the
 argument is withheld from the sampler rather than passed, so the default path's
 logits processors are the ones the banked corpus was produced under."""
+
+
+def record_path(out_dir: Path, gen_id: int) -> Path:
+    """Where one generation's banked record lands inside a cell's records directory.
+
+    Zero-padded to three digits so a directory listing sorts in generation order,
+    and defined once because four callers have to agree on it: the loop that writes
+    the record, the resume filter that skips a written one, the fan-out that decides
+    which specs are left, and :func:`generation_shortfall`'s reading of what landed.
+    A fan-out counting differently from its workers spawns one with nothing to do, or
+    skips work no worker did.
+    """
+    return Path(out_dir) / f"gen_{int(gen_id):03d}.json"
+
+
+def record_on_disk(out_dir: Path, gen_id: int) -> bool:
+    """True when this generation's record is already banked."""
+    return record_path(out_dir, gen_id).exists()
 
 
 class DecodePolicy(BaseModel):
@@ -80,6 +109,35 @@ class DecodePolicy(BaseModel):
         default=None, description="Pinned chat-template date; unset leaves the template's own"
     )
 
+    @classmethod
+    def from_preset(
+        cls,
+        preset: ModelPreset,
+        *,
+        top_p: float,
+        max_new_tokens: int,
+        temperature: float | None = None,
+        repetition_penalty: float = NEUTRAL_REPETITION_PENALTY,
+        date_string: str | None = None,
+    ) -> DecodePolicy:
+        """A policy over one model row, with the caller's settings on top.
+
+        The stop tokens come from the row and are never an argument: they are
+        model-specific, and a pass that assumed the wrong ones banks generations that
+        run past their own end. ``temperature`` unset takes the row's, because the
+        temperature a corpus was banked at is a property of the model's own decode
+        policy. ``top_p`` and the token budget have no fallback here — a caller that
+        means the row's passes the row's, and nothing is filled in behind its back.
+        """
+        return cls(
+            temperature=preset.temperature if temperature is None else temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            eos_token_ids=tuple(preset.eos_token_ids),
+            repetition_penalty=repetition_penalty,
+            date_string=date_string,
+        )
+
     def sampler_extras(self) -> dict[str, Any]:
         """Sampler arguments beyond the defaults, which is usually nothing."""
         if self.repetition_penalty == NEUTRAL_REPETITION_PENALTY:
@@ -97,6 +155,90 @@ class DecodePolicy(BaseModel):
         if self.date_string is not None and not self.date_string.strip():
             raise ValueError("date_string is present but blank; omit it to use the template's own")
         return self
+
+
+def generation_passthrough(
+    preset: ModelPreset,
+    policy: DecodePolicy,
+    *,
+    injection: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """What a run's ``metadata.json`` records about how its generations were produced.
+
+    A banked corpus is read years after the pass that made it, and every number
+    computed over it is conditioned on how the text was sampled. So the block names
+    the model as the preset row describes it and the policy as the pass actually ran
+    it, rather than as a command line happened to be typed — a flag that fell back to
+    a default is recorded at the value it resolved to.
+
+    ``injection`` is the five ``inject_*`` fields
+    (:func:`anamnesis.extraction.interventions.injection_fields`). It is recorded
+    only when a vector bank is named, so an unsteered run carries no intervention
+    block at all and a reader never has to decide whether an empty one means
+    unsteered or unrecorded.
+    """
+    block: dict[str, Any] = {
+        "model": {
+            "model_id": preset.model_id,
+            "torch_dtype": preset.torch_dtype,
+            "num_layers": preset.num_layers,
+            "hidden_dim": preset.hidden_dim,
+        },
+        "generation_config": {
+            "max_new_tokens": policy.max_new_tokens,
+            "temperature": policy.temperature,
+            "top_p": policy.top_p,
+            "repetition_penalty": policy.repetition_penalty,
+            "do_sample": True,
+            "eos_token_ids": list(policy.eos_token_ids),
+        },
+    }
+    if policy.date_string:
+        block["template_date_string"] = policy.date_string
+    if injection is not None and injection.get("inject_npz") is not None:
+        block[INJECTION_METADATA_KEY] = dict(injection)
+    return block
+
+
+@dataclass(frozen=True)
+class SamplingRuntime:
+    """The three things a banking pass samples through, loaded once for a whole pass."""
+
+    model: Any
+    tokenizer: Any
+    pad_token_id: int
+
+
+def load_sampling_runtime(
+    model_path: str,
+    preset: ModelPreset,
+    policy: DecodePolicy,
+    *,
+    attn_implementation: str = "eager",
+) -> SamplingRuntime:
+    """Load the model and tokenizer a pass banks tokens through, and resolve padding.
+
+    No capture hooks are placed: a pass here produces token ids, and the signatures
+    come from a replay over them. The padding token falls back to the policy's first
+    stop token, because a checkpoint without one would otherwise pad with whatever
+    ``generate`` picks and the banked sequence would carry it.
+    """
+    from transformers import AutoTokenizer
+
+    from anamnesis.extraction.model_loader import load_unhooked_model
+
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    model = load_unhooked_model(
+        model_path, preset.torch_dtype, attn_implementation=attn_implementation
+    )
+    pad_token_id = (
+        tokenizer.pad_token_id
+        if tokenizer.pad_token_id is not None
+        else policy.eos_token_ids[0]
+    )
+    return SamplingRuntime(
+        model=model, tokenizer=tokenizer, pad_token_id=int(pad_token_id)
+    )
 
 
 @dataclass
@@ -141,8 +283,7 @@ def generation_shortfall(
         target=result.out_dir,
         requested=requested,
         produced=ids_present(
-            requested,
-            lambda name: (result.out_dir / f"gen_{int(name):03d}.json").exists(),
+            requested, lambda name: record_on_disk(result.out_dir, int(name))
         ),
         failures={str(gen_id): reason for gen_id, reason in result.failed.items()},
         label=label,
@@ -214,10 +355,7 @@ def generate_specs(
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    todo = [
-        s for s in specs
-        if not (out_dir / f"gen_{s['generation_id']:03d}.json").exists()
-    ]
+    todo = [s for s in specs if not record_on_disk(out_dir, s["generation_id"])]
     logger.info(f"[{label}] {len(todo)}/{len(specs)} specs to generate -> {out_dir}")
 
     extras = policy.sampler_extras()
@@ -286,7 +424,7 @@ def generate_specs(
                 }
             if perturbation is not None:
                 record["perturbation"] = perturbation
-            (out_dir / f"gen_{gen_id:03d}.json").write_text(json.dumps(record))
+            record_path(out_dir, gen_id).write_text(json.dumps(record))
             n_done += 1
             if (index + 1) % 20 == 0 or index == 0:
                 elapsed = time.time() - started

@@ -381,3 +381,54 @@ def test_the_loader_reads_the_attention_implementation_off_the_config() -> None:
     source = inspect.getsource(model_loader.load_model)
     assert "attn_implementation=config.attn_implementation" in source
     assert '"eager"' not in source and "'eager'" not in source
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("float16", torch.float16),
+        ("bfloat16", torch.bfloat16),
+        ("float32", torch.float32),
+        ("float8_e4m3fn", torch.float16),
+    ],
+    ids=["fp16", "bf16", "fp32", "unlisted"],
+)
+def test_a_presets_dtype_name_resolves_through_one_table(
+    name: str, expected: torch.dtype
+) -> None:
+    """One table, so a hooked load and a bare one cannot disagree about a row's precision.
+
+    A name outside the table resolves to float16 rather than raising: the names are
+    fixed by the preset rows, and a load is not where a typo in one should first be
+    discovered.
+    """
+    from anamnesis.extraction.model_loader import resolve_dtype
+
+    assert resolve_dtype(name) is expected
+
+
+def test_the_hooked_loader_reads_the_dtype_through_that_table() -> None:
+    """A second copy of the mapping is how two loads of one checkpoint come to differ."""
+    import inspect
+
+    from anamnesis.extraction import model_loader
+
+    source = inspect.getsource(model_loader.load_model)
+    assert "resolve_dtype(config.torch_dtype)" in source
+    assert "torch.bfloat16" not in source
+
+
+def test_the_bare_loader_defaults_to_the_kernel_that_returns_attention_weights() -> None:
+    """Its callers bank tokens or hook their own sites; only one of them may fuse.
+
+    A featurising pass must have the weights, so the eager kernel is the default and a
+    caller has to ask for anything else in as many words.
+    """
+    import inspect
+
+    from anamnesis.extraction.model_loader import load_unhooked_model
+
+    signature = inspect.signature(load_unhooked_model)
+    assert signature.parameters["attn_implementation"].default == EAGER_ATTENTION
+    source = inspect.getsource(load_unhooked_model)
+    assert "register_forward_hook" not in source, "a bare load places no capture hooks"

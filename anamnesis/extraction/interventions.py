@@ -17,6 +17,11 @@ sides of the instrument:
 * **A routing perturbation** disturbs expert selection on a mixture-of-experts
   checkpoint, model-wide for the duration of a cell.
 
+A handle's lifetime is a cell's, which is what :func:`armed_interventions` makes
+structural: it arms both kinds for the duration of one cell and removes them
+however the cell ends, so a cell that raised cannot leave its write on the model
+that the next cell of the same roster is about to be dosed through.
+
 Magnitude is absolute here. A dose expressed as a fraction of the median
 residual norm at a site is resolved before it reaches this module, and the
 fraction rides along as bookkeeping so a recorded absolute alpha stays
@@ -32,8 +37,9 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Iterator, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -294,3 +300,38 @@ def attach_perturbation(model: Any, fields: dict[str, Any] | None, label: str) -
             seed=int(spec.seed),
         ),
     )
+
+
+@contextmanager
+def armed_interventions(
+    write_target: Any,
+    perturb_target: Any,
+    *,
+    injection: InjectionSpec | None,
+    perturbation: dict[str, Any] | None,
+    label: str,
+) -> Iterator[Any | None]:
+    """Arm one cell's interventions for the body, and remove them however it ends.
+
+    Yields the residual write's handle — what a generation or a replay passes on as
+    its ``write_handle`` — or ``None`` when the cell is unsteered.
+
+    Removal in a ``finally`` is the load-bearing part. Both passes walk a roster
+    under one model load, so the next cell attaches its write to the same model: a
+    handle left behind by a cell that raised stacks a second write on the next one,
+    and every cell after that runs at a dose nobody asked for. That failure is
+    invisible in the output — the cells look like doses and are sums of doses.
+
+    The two targets are named separately because the two hooks attach at different
+    depths: a residual write goes on one decoder layer, a routing perturbation goes
+    on the mixture-of-experts modules model-wide, and the two passes hold their model
+    at different levels of wrapping.
+    """
+    handle = attach_injection(write_target, injection, label)
+    perturb_handle = attach_perturbation(perturb_target, perturbation, label)
+    try:
+        yield handle
+    finally:
+        for armed in (handle, perturb_handle):
+            if armed is not None:
+                armed.remove()

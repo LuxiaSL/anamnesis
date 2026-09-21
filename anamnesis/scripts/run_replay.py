@@ -159,7 +159,7 @@ def fan_out_replay(args: argparse.Namespace) -> None:
     """
     from anamnesis.extraction.replay.cell import signature_on_disk
     from anamnesis.orchestration.gpu import enforce_single_cell_guard
-    from anamnesis.orchestration.launch import Cell, LaunchPlan, launch, plan_multicell, write_worker_inputs
+    from anamnesis.orchestration.launch import LaunchPlan, fan_out_roster, launch
 
     log_dir = args.log_dir or (
         (args.cells_json.parent if args.cells_json else args.run_dir) / "replay_logs"
@@ -167,34 +167,21 @@ def fan_out_replay(args: argparse.Namespace) -> None:
     plan = LaunchPlan.resolve(args.gpus, args.workers_per_gpu, log_dir)
 
     if args.cells_json is not None:
-        roster = json.loads(args.cells_json.read_text())["cells"]
-        cells = [
-            Cell(
-                target={k: str(v) for k, v in cell.items() if k in ("run_dir", "manifest")},
-                payload={
-                    k: v for k, v in cell.items()
-                    if k not in ("run_dir", "manifest", "gen_ids")
-                },
-            )
-            for cell in roster
-        ]
-        ids_per_cell = {id(cell): _manifest_ids(row) for cell, row in zip(cells, roster)}
-        jobs = plan_multicell(
-            cells, lambda cell: ids_per_cell[id(cell)], plan.n_workers, items_key="gen_ids"
-        )
-        if args.dry_run:
-            for worker in sorted(jobs):
-                print(f"worker {worker} ({plan.device_for(worker)}): {len(jobs[worker])} cells")
-            return
-        files = write_worker_inputs(log_dir / "jobs", "jobs", jobs)
-        result = launch(
+        fan_out_roster(
             plan,
-            lambda w: _replay_worker_command(args, label=f"w{w}g{plan.device_for(w)}",
-                                      **{"--jobs-file": files[w]}),
+            json.loads(args.cells_json.read_text())["cells"],
+            _manifest_ids,
+            target_fields=("run_dir", "manifest"),
+            item_fields=("gen_ids",),
+            items_key="gen_ids",
+            jobs_dir=log_dir / "jobs",
+            command_for=lambda worker, jobs_file: _replay_worker_command(
+                args, label=f"w{worker}g{plan.device_for(worker)}",
+                **{"--jobs-file": jobs_file},
+            ),
             stem="replay",
-            workers=sorted(files),
+            dry_run=args.dry_run,
         )
-        result.raise_on_failure()
         return
 
     if args.run_dir is None or args.manifest is None:
@@ -249,11 +236,7 @@ def replay(args: argparse.Namespace) -> None:
     """
     from anamnesis.config import resolve_preset
     from anamnesis.extraction.calibration import load_calibration
-    from anamnesis.extraction.interventions import (
-        attach_injection,
-        attach_perturbation,
-        resolve_injection,
-    )
+    from anamnesis.extraction.interventions import armed_interventions, resolve_injection
     from anamnesis.extraction.replay.cell import cell_shortfall, load_replay_model, replay_cell
     from anamnesis.shortfall import Shortfall, refuse_unless_complete
 
@@ -275,9 +258,10 @@ def replay(args: argparse.Namespace) -> None:
         label: str,
     ) -> Shortfall:
         injection = resolve_injection(run_dir, from_metadata=from_metadata, fields=fields)
-        handle = attach_injection(surface.loaded, injection, label)
-        perturb_handle = attach_perturbation(surface.loaded.model, perturb, label)
-        try:
+        with armed_interventions(
+            surface.loaded, surface.loaded.model,
+            injection=injection, perturbation=perturb, label=label,
+        ) as handle:
             result = replay_cell(
                 surface, calibration, run_dir, manifest,
                 gen_ids=gen_ids,
@@ -291,10 +275,6 @@ def replay(args: argparse.Namespace) -> None:
                 injection=injection,
                 label=label,
             )
-        finally:
-            for armed in (handle, perturb_handle):
-                if armed is not None:
-                    armed.remove()
         return cell_shortfall(result, manifest, command=MODULE, label=label)
 
     if args.jobs_file is not None:
