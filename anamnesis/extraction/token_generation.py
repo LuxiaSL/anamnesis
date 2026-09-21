@@ -24,6 +24,12 @@ cell-per-process fan-out would have.
 The sampler is called with its defaults unless a cell asks otherwise: a
 repetition penalty of one is not passed at all, so the default path's sampling
 stream is the one the record was banked under.
+
+A spec that raises is named in the result and the loop continues, because one
+unsamplable prompt is not a reason to abandon the other three hundred. What the
+result must not permit is a caller reporting success over the short corpus, so
+:func:`generation_shortfall` states the pass as expected-versus-produced and the
+command layer refuses on it.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from typing import Any, Self, Sequence
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from anamnesis.extraction.interventions import InjectionSpec, check_injection_gating
+from anamnesis.shortfall import Shortfall, ids_present
 
 logger = logging.getLogger(__name__)
 
@@ -94,16 +101,52 @@ class DecodePolicy(BaseModel):
 
 @dataclass
 class GenerationCount:
-    """How a cell's generation went."""
+    """How a cell's generation went: the specs asked for, and which of them raised.
+
+    ``requested`` is every spec the call was handed, including the ones whose
+    record already existed — the asked-for corpus, not the work this pass did, so
+    a resumed pass is complete rather than short. ``failed`` maps a generation id
+    to the message its exception carried, which is what lets a refusal name the
+    spec rather than only count it.
+    """
 
     n_done: int
-    n_failed: int
+    failed: dict[int, str]
+    requested: tuple[int, ...]
     out_dir: Path
     seconds: float
 
     @property
+    def n_failed(self) -> int:
+        return len(self.failed)
+
+    @property
     def ok(self) -> bool:
         return self.n_failed == 0
+
+
+def generation_shortfall(
+    result: GenerationCount, *, command: str, label: str = ""
+) -> Shortfall:
+    """State a generated cell as expected-versus-produced, for a command to refuse on.
+
+    Produced means a banked record on disk for a requested generation id, which is
+    the same predicate the loop resumes on: a pass that generated three records
+    because seventeen were already there has produced twenty and is complete.
+    """
+    requested = tuple(str(gen_id) for gen_id in result.requested)
+    return Shortfall(
+        command=command,
+        unit="spec",
+        target=result.out_dir,
+        requested=requested,
+        produced=ids_present(
+            requested,
+            lambda name: (result.out_dir / f"gen_{int(name):03d}.json").exists(),
+        ),
+        failures={str(gen_id): reason for gen_id, reason in result.failed.items()},
+        label=label,
+    )
 
 
 def _prompt_ids(tokenizer: Any, spec: dict[str, Any], policy: DecodePolicy) -> Any:
@@ -158,6 +201,13 @@ def generate_specs(
     length, and its gating is checked afterwards against the generated span
     unless the magnitude is zero. ``perturbation`` is recorded on each record as
     provenance; arming it is the caller's, since it is model-wide.
+
+    Returns
+    -------
+    GenerationCount
+        Every spec handed in, the count that landed, and each id that raised with
+        the message its exception carried. A caller turns that into a refusal
+        through :func:`generation_shortfall`; nothing here decides the pass's fate.
     """
     import numpy as np
     import torch
@@ -171,7 +221,8 @@ def generate_specs(
     logger.info(f"[{label}] {len(todo)}/{len(specs)} specs to generate -> {out_dir}")
 
     extras = policy.sampler_extras()
-    n_done = n_failed = 0
+    n_done = 0
+    failed: dict[int, str] = {}
     started = time.time()
     for index, spec in enumerate(todo):
         try:
@@ -246,12 +297,16 @@ def generate_specs(
                     f"{len(generated_ids)} tokens, {elapsed:.0f}s ({rate:.2f}/s, ETA {eta:.0f}s)"
                 )
         except Exception as exc:  # noqa: BLE001 — one generation's failure is not the cell's
-            n_failed += 1
+            failed[int(spec["generation_id"])] = f"{type(exc).__name__}: {exc}"
             logger.error(
                 f"[{label}] spec {spec.get('generation_id')} FAILED: {exc}", exc_info=True
             )
     seconds = time.time() - started
-    logger.info(f"[{label}] cell done: {n_done} ok, {n_failed} failed in {seconds:.0f}s")
+    logger.info(f"[{label}] cell done: {n_done} ok, {len(failed)} failed in {seconds:.0f}s")
     return GenerationCount(
-        n_done=n_done, n_failed=n_failed, out_dir=out_dir, seconds=seconds
+        n_done=n_done,
+        failed=failed,
+        requested=tuple(int(s["generation_id"]) for s in specs),
+        out_dir=out_dir,
+        seconds=seconds,
     )
