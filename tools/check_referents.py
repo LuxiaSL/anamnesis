@@ -81,7 +81,7 @@ PATH_RULE = "unresolved-path"
 MODULE_RULE = "unresolved-module"
 DEFERRAL_RULE = "buried-deferral"
 
-#: Extensions that make a slash-bearing token a path rather than prose.
+#: Extensions that make a token a path rather than prose, with or without a slash.
 PATH_EXTENSIONS = frozenset(
     {
         "py", "md", "txt", "json", "jsonl", "yml", "yaml", "toml", "cfg", "ini",
@@ -101,7 +101,7 @@ ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.])/(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+"
 DOC_NAME_RE = re.compile(r"\b(?:[A-Z][A-Z0-9]+-){2,}[A-Z][A-Z0-9]+[A-Za-z0-9._-]*")
 #: Explicit planning-document prefixes, bracketed so this file does not match itself.
 DOC_KEYWORD_RE = re.compile(
-    r"\b(?:PORT-MANIFES[T]|ORIENTATIO[N]|HANDOFI?[F]|HANDOVE[R]|RULIN[G]|PREREG|SESSION)"
+    r"\b(?:PORT-MANIFES[T]|ORIENTATIO[N]|HANDOF[F]|HANDOVE[R]|RULIN[G]|PREREG|SESSION)"
     r"-[A-Za-z0-9][A-Za-z0-9._-]*"
 )
 MEMO_NAME_RE = re.compile(r"\b[A-Za-z0-9][A-Za-z0-9-]*-mem[o]\b")
