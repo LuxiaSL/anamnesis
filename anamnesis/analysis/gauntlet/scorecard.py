@@ -19,7 +19,11 @@ from .schemas import (
 def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
     """Evaluate 9 pre-registered predictions against computed results.
 
-    Predictions from research/notes/8b-predictions-preregistration.md
+    Each prediction was registered with its confidence and its importance before
+    the 8B results existed, and is restated at the branch that scores it: the
+    text, the threshold and the registered confidence travel together in the
+    `ScorecardPrediction` row, so the scorecard is readable without a second
+    document beside it.
     """
     predictions: list[ScorecardPrediction] = []
 

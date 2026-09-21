@@ -296,8 +296,10 @@ def _make_o_proj_hook(
 
 
 # ── MLA + MoE capture hooks (vmb arm A7, M6 DeepSeek-V2-Lite) ───────────────────
-# Wired against the VERIFIED native transformers deepseek_v2 module tree (audit
-# 2026-07-18, job b0713ba4d5d3). See HOOK-AUDIT-PLAN-M6-dsv2lite §3.
+# Wired against the VERIFIED native transformers deepseek_v2 module tree
+# (audit 2026-07-18, job b0713ba4d5d3). Each hook below names the module it attaches to and
+# what the capture means, because MLA and MoE both put the substrate somewhere a
+# dense-Llama reader would not look for it.
 
 def _make_ckv_hook(
     layer_idx: int,
@@ -333,8 +335,10 @@ def _make_moe_router_prehook(
     DeepseekV2Moe.forward computes `F.linear(h.float(), self.gate.weight.float())`
     directly and NEVER calls gate.forward, so a forward hook on `mlp.gate` never
     fires. We recompute the dense pre-topk softmax here from the module's own
-    gate.weight and the input hidden states (args[0]). Banked reading =
-    `pretopk_softmax_dense` (HOOK-AUDIT-PLAN §R).
+    gate.weight and the input hidden states (args[0]). The banked reading is
+    therefore the DENSE pre-topk softmax over all routed experts, not the sparse
+    post-topk weights: a different quantity, and the one the routing features are
+    defined on.
     """
 
     def pre_hook(module: nn.Module, args: tuple[Any, ...]) -> None:
@@ -578,7 +582,8 @@ def attach_residual_write(model: Any, spec: ResidualWriteSpec) -> ResidualWriteH
 # at init → patch the instance attr; router-noise + expert drops wrap route_tokens_to_experts;
 # shared ablation is a forward hook on shared_experts. All perturbations are seed-deterministic
 # (seed combined with layer idx) so a teacher-forced replay of a perturbed cell is itself
-# bitwise-reproducible — the A7 paired contrast stays clean (SPEC-A7-BLOCK §2c).
+# bitwise-reproducible, which is what keeps a perturbed-vs-unperturbed pair a contrast in
+# the perturbation alone.
 
 
 @dataclass
@@ -880,7 +885,7 @@ def load_model(
 
     if is_dsv2:
         # ── MLA + MoE capture (vmb arm A7, M6 DeepSeek-V2-Lite). No k_proj/v_proj (MLA); q_proj is
-        # 192-d/head (not wave-1) → keys via c_KV latent, values/queries skipped. HOOK-AUDIT-PLAN §5. ──
+        # 192-d/head (not wave-1) → keys via c_KV latent, values/queries skipped. ──
         first_k_dense = int(getattr(model.config, "first_k_dense_replace", 0))
         kv_lora_rank = int(getattr(model.config, "kv_lora_rank", 512))
         dl = decoder_layers(model)

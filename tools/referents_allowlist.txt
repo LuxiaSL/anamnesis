@@ -1,0 +1,117 @@
+# Pattern data for G3's referent rule (check_referents.py).
+#
+# Two sections, both one regex per line, `#` comments, blank lines ignored.
+# Lines before the first section header belong to [allow].
+#
+#   [allow]  Text that is a legitimate identifier rather than a pointer into
+#            this tree. Each pattern is BLANKED OUT of the line before referents
+#            are looked for, so a pattern wider than its reason hides real
+#            violations — keep each one anchored to the idiom it names.
+#
+#   [defer]  Prose that defers meaning to something a reader cannot open. These
+#            are matched, not masked: a hit is a violation.
+#
+# Both sets are maintained, not closed. A new identifier idiom earns an [allow]
+# line with the reason above it; a new way of burying meaning earns a [defer]
+# line.
+#
+# [allow] patterns are matched case-sensitively, because the capitalisation is
+# usually what distinguishes an identifier from the prose around it. [defer]
+# patterns are matched case-insensitively, because a phrase is a phrase whether
+# or not it begins a sentence.
+
+[allow]
+
+# Public URLs are reachable by definition: the rule asks for a reader who can
+# follow the name, and a link is the one pointer that always works. Includes the
+# lineage links in the README and the citations in module docstrings.
+https?://[^\s`'"<>)\]]+
+
+# A shebang is a kernel instruction, not prose, and the interpreter it names is
+# on the machine rather than in the repository. The tokenizer reports it as a
+# comment because that is what it lexically is.
+^#!\S+
+
+# The value after a flag in a usage example is an argument the operator supplies:
+# a directory on their machine, or a file the command is about to write. One value
+# per flag is masked, deliberately — masking a second would let a flag hide the
+# referent in the rest of the sentence.
+--[a-z0-9-][a-z0-9-]*[= ]\S+
+
+# An environment assignment in a usage example, same reason: the value is the
+# operator's, and the variable is what the reader needs.
+\b[A-Z][A-Z0-9_]*=\S+
+
+# Hugging Face model ids have exactly the shape of a repo path and are not one.
+# They are resolved by the hub, from the org prefix; the orgs whose models this
+# instrument has presets for are listed rather than matched generically, so a
+# genuine two-segment path cannot hide behind the pattern.
+\b(?:meta-llama|google|Qwen|allenai|deepseek-ai|mistralai|EleutherAI|microsoft|HuggingFaceTB|openai-community|nvidia|tiiuae)/[A-Za-z0-9._-]+
+
+# The on-disk data schema. These name the SHAPE of a run directory — what the
+# extractor writes and the analysis reads — not files that live in this
+# repository. Help text and docstrings illustrate the layout on purpose.
+\boutputs/[A-Za-z0-9_.<>/*=-]*
+\bruns/[A-Za-z0-9_.<>/*-]*
+\bsignatures(?:_v[0-9]+)?/[A-Za-z0-9_.<>/*-]*
+\braw(?:_tensors)?/[A-Za-z0-9_.<>/*-]*
+\bcalibration/[A-Za-z0-9_.<>/*-]*
+\bbattery/[A-Za-z0-9_.<>/*-]*
+\bgen_[0-9A-Za-z_<>*]*\.(?:npz|json)
+\bmetadata\.json
+\breplay_manifest\.json
+\breplay_index\.json
+\bresults\.json
+\bpca_model\.pkl
+\bpositional_means\.npz
+\bsignature\.npz
+\bfeatures\.npz
+
+# Files that live inside a model checkpoint directory. They belong to the
+# checkpoint the operator points at, and what they contain is the reason the
+# comment names them.
+\bconfig\.json
+\bgeneration_config\.json
+\btokenizer(?:_config)?\.json
+
+# Provenance: a line that says where code came from is an attribution, not a
+# pointer to follow. The names it carries resolve in the frozen record
+# (`anamnesis-pl`, linked from the README), which is what the frozen record is
+# for; the judge tables additionally carry the donor path as a typed field.
+(?:Verbatim|Ported|Vendored|Adapted|Generalizes) from [^\s,;]*[A-Za-z0-9_./]+\.py
+
+# Metasyntactic package names in the import-semantics illustration: `a.b.c`,
+# `mod.py` and their file forms stand for any module, the way `foo` does.
+\b[a-z]/(?:[a-z]/)*__init__\.py
+\bmod\.py
+
+# The named external trees. `anamnesis-pl` is the frozen record and
+# `anamnesis-phase0` the archived origin — both linked from the README, both
+# named deliberately when a historical citation has to resolve somewhere.
+# `phase_0` is the legacy data tree the ANAMNESIS_LEGACY_DATA hatch points at,
+# which is documented as external and is supposed to be.
+\banamnesis-pl\b
+\banamnesis-phase0\b
+\bphase_0\b
+
+# Sibling projects, named as ownership boundaries and as provenance for vendored
+# code: the comment says which repository owns a substrate this one borrows, and
+# the borrowed path is part of that statement. Following it is not the point —
+# the point is that the code was not invented here.
+\bkv-rotation[ `/]*`?[A-Za-z0-9_./{},<>*-]*
+\bkotodama[ `/_]*`?[A-Za-z0-9_./{},<>*-]*
+\bsubliminal_anamnesis\b
+
+[defer]
+
+# Meaning that lives in a conversation. Each of these leaves a reader holding
+# this repository with nothing to open.
+\bsee the (?:earlier|previous|prior|above)\b
+\bas discussed\b
+\bas decided elsewhere\b
+\bas (?:noted|described|agreed|ruled) elsewhere\b
+\bper the (?:earlier|previous|prior)\b
+\bthe previous discussion\b
+\bsee above in\b
+\bas (?:we )?(?:agreed|ruled) (?:earlier|above)\b
+\bfor the reasons? (?:discussed|given) (?:earlier|above|when)\b

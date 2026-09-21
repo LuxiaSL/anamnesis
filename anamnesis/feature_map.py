@@ -1,8 +1,18 @@
-"""Feature map — the (SOURCE x METHOD x DEPTH) taxonomy that replaces the T1/T2/T2.5/T3 tiers.
+"""Feature map — the (SOURCE x METHOD x DEPTH) taxonomy, the vocabulary of record for
+describing what a feature reads.
 
-The tiers were "diagonal smears" across three orthogonal axes (research/notes/tiers-vs-sources-reframe.md),
-so a tier's accuracy couldn't be read. This module tags every signature feature by the axes that ARE
-interpretable and were empirically validated on the merged v3 corpus (2026-06-14):
+The T1/T2/T2.5/T3 tier names remain a compatibility surface, and both halves of that
+sentence are load-bearing. A tier is a diagonal smear across three orthogonal axes — T2.5
+alone mixes attention-weight reads with key-vector geometry, two different substrates — so a
+tier's accuracy is not a reading of anything, and no new claim is stated in tier terms. But
+the names are frozen on disk: `extract_tier1`..`extract_tier3` in
+`anamnesis/extraction/state_extractor.py` build the vector, the `tier_slices` keys in a
+banked signature's metadata index into it, and
+`anamnesis/analysis/gauntlet/tier_ablation.py` runs as section 3 of the gauntlet off those
+slices. Describe a feature by its cell here; address a stored artifact by its tier name.
+
+This module tags every signature feature by the axes that ARE interpretable and were
+empirically validated on the merged v3 corpus (2026-06-14):
 
   SOURCE   = which substrate is read.   Ranked (LDA, model-stable): attention >> residual > gate > keys > output.
   METHOD   = the base operator (magnitude / distributional / geometry / spectral / learned /
@@ -18,8 +28,8 @@ This is the reusable substrate for the discover→decompose→distill workflow:
 
 Design: pure-numpy/pydantic (no torch/sklearn — importable anywhere, like state_extractor). Classification
 is name-based and TRANSPARENT — `FeatureMap.unclassified()` and `.summary()` expose every call so it can be
-audited/overridden. (Long-term ideal per the reframe note: tag at generation time; this is the pragmatic
-post-hoc parser over the frozen v3 names.)
+audited/overridden. (Long-term ideal: tag at generation time; this is the pragmatic post-hoc parser
+over the frozen v3 names.)
 
   >>> fm = FeatureMap(feature_names, n_layers=32)
   >>> X_attn_mid = X[:, fm.mask(source=Source.attention, band=Band.mid)]   # slice a cell

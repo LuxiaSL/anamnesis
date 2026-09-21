@@ -9,7 +9,8 @@ orthogonally to *what* it says, replaying banked generations bitwise-determinist
 building gated steering vectors from the same substrate the readouts measure.
 
 This repository is being refounded from the research codebase; the structure and code are
-landing in reviewed increments.
+landing in reviewed increments. [`CONTRIBUTING.md`](CONTRIBUTING.md) states how code and claims
+arrive, the documentation rule both are held to, and the gates a change passes.
 
 ## Lineage
 

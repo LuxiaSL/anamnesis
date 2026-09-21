@@ -28,6 +28,13 @@ jobs:
           if [ -d anamnesis ]; then roots="anamnesis $roots"; fi
           python tools/check_timelessness.py --root $roots --json receipts/g3.json
 
+      - name: G3 referent reachability
+        run: |
+          mkdir -p receipts
+          roots="tools tests"
+          if [ -d anamnesis ]; then roots="anamnesis $roots"; fi
+          python tools/check_referents.py --root $roots --json receipts/g3-referents.json
+
       - name: G4 import closure
         run: |
           mkdir -p receipts
