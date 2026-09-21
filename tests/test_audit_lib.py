@@ -14,7 +14,11 @@ number it happens to produce:
   * a sampled position set is the same size whatever the generation length, which
     is what makes per-generation surface vectors stackable;
   * the Gram reduction preserves inner products up to the global scale, which is
-    the claim that makes it lossless for a linear readout.
+    the claim that makes it lossless for a linear readout;
+  * the readout pair is two architectures and nothing between them: the linear one
+    is fitted by a convex solver, so it is a floor rather than one fit's opinion,
+    and the training accuracy comes back beside the test accuracy because a floor
+    at chance means one thing when the fit converged and another when it did not.
 
 CPU only. ``preprocess_fold_gpu`` runs on the CPU device here — the reduction is
 device-agnostic and the name records why the path exists, not a requirement.
@@ -31,8 +35,11 @@ import pytest
 from anamnesis.analysis.audit_lib import (
     ALL_SURFACES,
     ATTN_BINS,
+    DEEP,
+    DEEP_HIDDEN,
     GEN_BINS,
     HARD,
+    LOGIT,
     N_POS,
     PROMPT_BINS,
     SIMPLE,
@@ -42,11 +49,13 @@ from anamnesis.analysis.audit_lib import (
     leak_free_folds,
     load_signature_matrix,
     preprocess_fold_gpu,
+    make_encoder,
     residualize,
     residualize_all,
     sample_positions,
     subsample_topics,
     surface_vector,
+    train_eval,
     unwrap_generations,
 )
 
@@ -300,3 +309,51 @@ def test_the_gram_reduction_preserves_the_geometry_it_claims_to() -> None:
     Rtr, _ = preprocess_fold_gpu(Xtr, Xte, Ctr, Cte, resid=True, device="cpu")
     assert Rtr.shape[0] == n_tr
     assert not np.allclose(Rtr[:, :1], Ztr[:, :1])
+
+
+# ── The readout pair ──────────────────────────────────────────────────────────
+def test_the_two_architectures_are_the_only_two_and_a_third_is_refused() -> None:
+    linear = make_encoder(6, LOGIT, nclass=3)
+    assert linear.in_features == 6 and linear.out_features == 3
+    deep = make_encoder(6, DEEP, nclass=3, k=8)
+    widths = [module.out_features for module in deep if hasattr(module, "out_features")]
+    assert widths == [DEEP_HIDDEN, 8, 3], "the nonlinear readout narrows through its bottleneck"
+    with pytest.raises(ValueError, match="unknown arch"):
+        make_encoder(6, "svm")
+
+
+def test_a_separable_problem_is_solved_by_the_floor_alone() -> None:
+    """A linearly separable planted signal needs no nonlinearity, and says so."""
+    rng = np.random.default_rng(0)
+    X = rng.standard_normal((60, 4))
+    y = (X[:, 0] > 0).astype(np.int64)
+    X[:, 0] += 4.0 * y
+    train, test = np.arange(40), np.arange(40, 60)
+    floor_test, floor_train = train_eval(
+        X[train], y[train], X[test], y[test], LOGIT, 0, "cpu", nclass=2
+    )
+    assert floor_test > 0.9, "the convex solver reaches the separating hyperplane"
+    assert floor_train > 0.9
+
+
+def test_the_readout_is_deterministic_under_its_seed() -> None:
+    rng = np.random.default_rng(1)
+    X = rng.standard_normal((40, 5))
+    y = (X[:, 1] > 0).astype(np.int64)
+    args = (X[:30], y[:30], X[30:], y[30:], DEEP, 7, "cpu")
+    first = train_eval(*args, deep_epochs=30, nclass=2, k=4)
+    again = train_eval(*args, deep_epochs=30, nclass=2, k=4)
+    assert first == again, "same seed, same fold, same numbers"
+
+
+def test_a_fit_that_did_not_converge_is_visible_in_the_training_accuracy() -> None:
+    """Chance on the test rows is read differently depending on the train rows."""
+    rng = np.random.default_rng(2)
+    X = rng.standard_normal((40, 5))
+    y = rng.integers(0, 2, size=40)
+    test_acc, train_acc = train_eval(
+        X[:30], y[:30], X[30:], y[30:], DEEP, 3, "cpu", deep_epochs=1, nclass=2, k=4
+    )
+    assert 0.0 <= test_acc <= 1.0
+    assert 0.0 <= train_acc <= 1.0
+    assert train_acc < 1.0, "one epoch has not fitted the training rows either"

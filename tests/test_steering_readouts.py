@@ -3,6 +3,12 @@
 The lever and the contrast frames run over banked signature directories, so the
 directory-level readouts are exercised through synthetic banks written to a
 temporary path; the arithmetic is checked directly where it can be.
+
+The qualitative readout is here too, because it is the same vocabulary read by eye
+instead of by arithmetic: its cell names have to be the banked spellings, a dose the
+ladder did not collect has to be a gap rather than an error, and the document has to
+say the two things a reader could otherwise get wrong — that the match is by prompt
+rather than by token, and that the strongest dose collected is below the peak.
 """
 
 from __future__ import annotations
@@ -308,3 +314,80 @@ def test_expert_usage_histogram_refuses_a_bank_with_no_routing(tmp_path) -> None
 def test_write_json_creates_its_directory(tmp_path) -> None:
     out = readouts.write_json(tmp_path / "nested" / "readout.json", {"a": 1})
     assert json.loads(out.read_text()) == {"a": 1}
+
+
+# ── The qualitative readout ───────────────────────────────────────────────────
+def test_the_ladder_uses_the_banked_cell_spellings() -> None:
+    ladder = readouts.cell_ladder(18)
+    directories = [directory for _label, directory in ladder]
+    assert directories == [
+        "V3_L18_L18_a0.0",
+        "V3_L18_L18_a0.03",
+        "V3_L18_L18_a0.1",
+        "V3_L18_L18_a0.3",
+        "V1_L18_L18_a0.3",
+        "R1_L18_a0.3",
+    ]
+    for directory in directories:
+        parsed = readouts.parse_cell_name(directory, 18)
+        assert parsed is not None and parsed["site"] == 18, (
+            "a ladder name has to parse through the same cell grammar as a banked cell"
+        )
+    assert "baseline" in ladder[0][0], "the zero-dose rung says what it is"
+
+
+def write_cell_texts(cell_dir, texts, *, topic: str = "photosynthesis") -> None:
+    """A steered cell's metadata, in the shape a generation pass banks it."""
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    (cell_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "generations": [
+                    {
+                        "generation_id": index,
+                        "generated_text": text,
+                        "num_generated_tokens": len(text.split()),
+                        "topic": topic,
+                        "mode": "linear",
+                    }
+                    for index, text in enumerate(texts)
+                ]
+            }
+        )
+    )
+
+
+def test_a_cell_with_no_metadata_reads_as_an_empty_cell(tmp_path) -> None:
+    assert readouts.matched_generations(tmp_path / "absent") == {}
+    write_cell_texts(tmp_path / "cell", ["one", "two"])
+    generations = readouts.matched_generations(tmp_path / "cell")
+    assert sorted(generations) == [0, 1]
+    assert generations[1]["generated_text"] == "two"
+
+
+def test_the_document_matches_by_prompt_and_names_its_two_caveats(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    for directory in ("V3_L18_L18_a0.0", "V3_L18_L18_a0.3", "R1_L18_a0.3"):
+        write_cell_texts(
+            run_dir / directory,
+            [f"{directory} text for prompt {index} " * 4 for index in range(3)],
+        )
+    document = readouts.qualitative_markdown(
+        run_dir, model="qwen-7b", site=18, gen_ids=[0, 2], chars=20
+    )
+    assert "# Qualitative steering readout — qwen-7b (site L18)" in document
+    assert "Dose caveat" in document, "the ladder stops below the peak, and the reader is told"
+    assert "style-and-mode comparison" in document, "seeds differ per cell, so it is not matched"
+    assert document.count("## generation") == 2
+    assert "V3 alpha=0.3" in document and "random-vector control" in document
+    assert "V1 alpha=0.3" not in document, "a cell that was not collected is a gap, not an error"
+    assert "…" in document, "a text longer than the budget is elided rather than truncated silently"
+
+
+def test_a_generation_absent_from_every_cell_is_left_out(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    write_cell_texts(run_dir / "V3_L18_L18_a0.3", ["only one generation"])
+    document = readouts.qualitative_markdown(
+        run_dir, model="m", site=18, gen_ids=[0, 41], chars=50
+    )
+    assert document.count("## generation") == 1
