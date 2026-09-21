@@ -46,7 +46,17 @@ from anamnesis.analysis.gauntlet.schemas import (
     IntegrityResult,
     ScorecardResult,
 )
-from anamnesis.analysis.gauntlet.signature_io import load_analysis_data
+from anamnesis.analysis.gauntlet.signature_io import (
+    ALL_CORE,
+    ATTENTION_AND_DELTAS,
+    BLOCK_NPZ_KEYS,
+    BLOCK_STORED_NAMES,
+    CACHE_AND_KEYS,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+    load_analysis_data,
+)
+from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
 from anamnesis.analysis.gauntlet.utils import (
     clean_for_json,
     get_available_blocks,
@@ -70,7 +80,10 @@ def synthetic_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """
     folder = tmp_path_factory.mktemp("synthetic_signatures")
     rng = np.random.default_rng(20260920)
-    width = {"T1": 6, "T2": 8, "T2.5": 8, "T3": 4}
+    width = {
+        NORMS_AND_OUTPUT_STATS: 6, ATTENTION_AND_DELTAS: 8,
+        CACHE_AND_KEYS: 8, RESIDUAL_PCA: 4,
+    }
     index = 0
     for mode_idx, mode in enumerate(MODES):
         for topic_idx in range(N_TOPICS):
@@ -79,11 +92,9 @@ def synthetic_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
             slices: dict[str, list[int]] = {}
             cursor = 0
             for block, w in width.items():
-                key = {"T1": "features_tier1", "T2": "features_tier2",
-                       "T2.5": "features_tier2_5", "T3": "features_tier3"}[block]
                 signal = float(mode_idx) + 0.15 * rng.standard_normal(w)
-                arrays[key] = signal.astype(np.float32)
-                slices[key.replace("features_", "")] = [cursor, cursor + w]
+                arrays[BLOCK_NPZ_KEYS[block]] = signal.astype(np.float32)
+                slices[BLOCK_STORED_NAMES[block]] = [cursor, cursor + w]
                 names.extend(f"{block}_feat_{i}" for i in range(w))
                 cursor += w
             np.savez(
@@ -102,7 +113,7 @@ def synthetic_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
                 "generated_text": f"{mode} text about topic {topic_idx} " * 8,
                 "system_prompt": f"system prompt for {mode}",
                 "user_prompt": f"user prompt for topic {topic_idx}",
-                "tier_slices": slices,
+                STORED_BLOCK_SLICES_KEY: slices,
             }))
             index += 1
     return folder
@@ -201,10 +212,15 @@ def test_available_blocks_separates_the_expensive_composites(synthetic_run: Path
     data = load_analysis_data(synthetic_run, run_name="synthetic", core_only=True,
                               load_text=False)
     all_blocks, key_blocks = get_available_blocks(data)
-    assert set(all_blocks) >= {"T1", "T2", "T2.5", "T3", "combined"}
+    assert set(all_blocks) >= {
+        NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS,
+        RESIDUAL_PCA, ALL_CORE,
+    }
     assert set(key_blocks) <= set(all_blocks)
-    assert "T1" not in key_blocks, "a single block never pays for the expensive sweep"
-    assert "combined" in key_blocks
+    assert NORMS_AND_OUTPUT_STATS not in key_blocks, (
+        "a single block never pays for the expensive sweep"
+    )
+    assert ALL_CORE in key_blocks
 
 
 def test_the_timer_reports_the_elapsed_time_it_measured() -> None:

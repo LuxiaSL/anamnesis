@@ -272,11 +272,11 @@ lane guard runs inside it, and the merged module is smaller than its two donors
 | old path | new home | notes |
 |---|---|---|
 | `anamnesis/analysis/unified_runner/__init__.py` | `anamnesis/analysis/gauntlet/__init__.py` | The eleven-section registry, the `importlib` dispatch, the checkpoint and the resume, logic-identical. Three adaptations: the default output directory is `outputs_root()` from the configuration package rather than a path computed from `__file__`, the module docstring says what the gauntlet is for rather than listing its features, and the printed banner names the gauntlet rather than the runner it used to be filed as. `run_full_analysis`, `SECTIONS`, `SECTION_KEYS`, `SECTION_NAMES` and `SECTION_MODELS` keep their names. |
-| `anamnesis/analysis/geometric_trio/data_loader.py` + `anamnesis/analysis/unified_runner/data_loading.py` | `anamnesis/analysis/gauntlet/signature_io.py` | **Merged, the F7 resolution.** Every name both donors exported survives: `Run4Data`, `SampleMeta`, `AnalysisData`, `load_run4`, `load_analysis_data`, `check_data_quality`, `TIER_KEYS`, `TIER_GROUPS`, `BASELINE_TIERS`, `ENGINEERED_TIERS`. The `SIGNATURE_DIR` module constant becomes `default_signature_dir()`, so the Phase-0 root is read when asked rather than frozen at import — the same call-time rule the configuration package holds to, and what lets a test redirect the root. `load_run4`'s first argument defaults to `None` and resolves to that function. The lane-guard import moves from inside the function to the module header, unchanged in effect. |
+| `anamnesis/analysis/geometric_trio/data_loader.py` + `anamnesis/analysis/unified_runner/data_loading.py` | `anamnesis/analysis/gauntlet/signature_io.py` | **Merged, the F7 resolution.** Every name both donors exported survives: `Run4Data`, `SampleMeta`, `AnalysisData`, `load_run4`, `load_analysis_data`, `check_data_quality`, `TIER_KEYS`, `TIER_GROUPS`, `BASELINE_TIERS`, `ENGINEERED_TIERS`. The `SIGNATURE_DIR` module constant becomes `default_signature_dir()`, so the Phase-0 root is read when asked rather than frozen at import — the same call-time rule the configuration package holds to, and what lets a test redirect the root. `load_run4`'s first argument defaults to `None` and resolves to that function. The lane-guard import moves from inside the function to the module header, unchanged in effect. One behavioural change, stated because it is visible in a results file: **a union is built only when every block it names is present**, where the donor concatenated whichever members it found. A union built short is a different feature set reported under a label that names more — on a corpus of the four core blocks, `every_block` and `attention_and_cache+engineered` came back identical to `combined` and `attention_and_cache`, and on a corpus of the four families both came back identical to `engineered`. No banked number moves: the six banked analysis directories carry neither of those two keys, which is the width the donor's own loader produced when it wrote them. Sections that then find a union absent say so rather than raising — `absence_reason` in `gauntlet/utils.py` states it and the section carries it in its own `error` field. |
 | `anamnesis/analysis/geometric_trio/__init__.py` | *record* | The directory dissolves: an empty `__init__` for a package whose mathematics went elsewhere. |
 | `anamnesis/analysis/unified_runner/results_schema.py` | `anamnesis/analysis/gauntlet/schemas/` | **Split per section**, one module each for the eleven sections plus the composite, class bodies unchanged. `base.py` holds the one shared `model_config` and the two rules that follow from `extra="forbid"`; the package `__init__` re-exports all 81 models, so `from ...schemas import X` reaches every name the flat module exported. The split costs lines against a single file (1,731 across fourteen files, against 1,409) and buys the property the section layout already had everywhere else: a section's schema, its runner and its `--skip` number move together. |
 | `anamnesis/analysis/unified_runner/classification.py` | `anamnesis/analysis/gauntlet/classification.py` | Import paths only, plus one comment that carried the date of a decision rather than of evidence. |
-| `anamnesis/analysis/unified_runner/tier_ablation.py` | `anamnesis/analysis/gauntlet/tier_ablation.py` | Import paths, plus one necessary adaptation: `LogisticRegression(multi_class="multinomial")` no longer constructs under scikit-learn 1.7 and later, which removed the argument after making multinomial the only multiclass fit its solvers perform. The argument is dropped and the behaviour stated in a comment; the fit is the same fit. The module and its result model are renamed; **The vocabulary sweep** at the end of this map is where the old names map to the new ones. |
+| `anamnesis/analysis/unified_runner/tier_ablation.py` | `anamnesis/analysis/gauntlet/legacy_bin_readout.py` | Import paths, plus one necessary adaptation: `LogisticRegression(multi_class="multinomial")` no longer constructs under scikit-learn 1.7 and later, which removed the argument after making multinomial the only multiclass fit its solvers perform. The argument is dropped and the behaviour stated in a comment; the fit is the same fit. The module and its result model are renamed; **The vocabulary sweep** at the end of this map is where the old names map to the new ones. |
 | `anamnesis/analysis/unified_runner/{geometry,clustering,contrastive,semantic,integrity,scorecard,utils}.py` | `anamnesis/analysis/gauntlet/` | Import paths only. |
 | — | `anamnesis/analysis/gauntlet/schemas/base.py` | New. The shared `_FORBID`, and the two backward-compatibility rules that follow from it, stated once where every section module reads them. |
 
@@ -385,10 +385,10 @@ that spawns it.
 | old path | new home | notes |
 |---|---|---|
 | `tests/test_lane_guard.py` | `tests/test_lane_guard.py` | **The four deferred cases land**, now driving `signature_io.load_run4`: a lane preserved and a conflicting one refused, an untagged addon refused against a tagged lane, the legacy all-untagged read still available, and a tagged directory that cannot silently skip a file with no metadata. |
-| — | `tests/test_signature_io.py` | New. The join rules rather than the arithmetic: tier discovery, the core-only filter and its exclusion of swap modes, addon merging and the two ways it must refuse, the text half, and a read of the banked `8b_fat_01` signatures that skips with a named reason where that bank is absent. |
+| — | `tests/test_signature_io.py` | New. The join rules rather than the arithmetic: block discovery, the union rule, the core-only filter and its exclusion of swap modes, addon merging and the two ways it must refuse, the text half, and a read of the banked `8b_fat_01` signatures that skips with a named reason where that bank is absent. |
 | — | `tests/test_gauntlet_schemas.py` | New. That the split did not lose a name: every section module's models are re-exported, `__all__` and the modules agree both ways, the composite's field types are the sections' own models, `extra="forbid"` is live everywhere, and the two reshaping models round-trip their on-disk spelling. |
 | — | `tests/test_gauntlet_run.py` | New. A real pass over a synthetic corpus with six of eleven sections running: dispatch, text loaded only when a section needs it, checkpoint, resume with rehydration, an error stub not counting as completed, and the composite validating. |
-| — | `tests/test_gauntlet_classification.py` | New. Section 2's parts at small parameters, because its key-tier sweep is minutes of CPU per tier: the grouped-CV default, the permutation p-value's `1/(N+1)` floor, BH-FDR's monotonicity, and the readouts that name their own conditions. |
+| — | `tests/test_gauntlet_classification.py` | New. Section 2's parts at small parameters, because its key-block sweep is minutes of CPU per block: the grouped-CV default, the permutation p-value's `1/(N+1)` floor, BH-FDR's monotonicity, and the readouts that name their own conditions. |
 | — | `tests/test_battery.py` | New, and the battery's first tests in either repository. The stamp gate raising rather than warning, the law floored at permutation resolution, paired deltas drawn within a prompt class only, the cell masks, the channel split's two extremes, the manifest refusing a duplicate cell, and the Wave-1 stubs saying they are stubs. |
 | — | `tests/test_audit_lib.py` | New. Each control against the property it exists for: what residualization removes and that the split version fits on train only, that folds hold out whole topics, that feature order is pinned and a missing feature fills with zero, that a surface vector's width does not depend on generation length, and that the Gram reduction preserves the inner products it claims to. |
 | — | `tests/test_text_stats.py` | New. That a looping generation scores as degenerate, that the lexicons are word-bounded, that the prompt group is the unit, that the placebo floor is reproducible, and that a ratio to a near-zero denominator is suppressed in favour of the band readout. |
@@ -561,9 +561,9 @@ testable without a corpus.
 | old path | new home | notes |
 |---|---|---|
 | `anamnesis/scripts/run_binary_prompt_swap.py` | `anamnesis/analysis/prompt_swap.py` + `anamnesis/scripts/run_binary_prompt_swap.py` | The confound test, logic-identical: per swap pair, a binary forest trained on the two pure modes, predicting the swap generations, counted by which axis they land on and pooled at the 1.5:1 bar. The results are typed (`PromptSwapResult` and its parts) where the donor built nested dictionaries, so the document's shape is declared rather than assembled. It is the one module in the analysis layer that reads signature files directly instead of through the loader, and the reason is stated in it: swap generations are exactly what `load_run4`'s core filter exists to leave out. Named beside `modes/prompt_swap.py`, which holds the prompts this reads the results of. |
-| `anamnesis/scripts/run_subfamily_decomp.py` | `anamnesis/analysis/subfamily.py` + `anamnesis/scripts/run_subfamily_decomp.py` | The four name classifiers, the nested operator groups and the coarse substrate cut, logic-identical; the accuracy is the same forest under the same stratified folds. Two adaptations. The donor's `get_feature_names` — a second reader of the signature npz and of its slice table — is gone: names come from `Run4Data.tier_feature_names`, which the loader already fills from that same table and which covers addon directories too, and a **length disagreement between the names and the matrix is now refused** rather than mapped through. That refusal is the one behavioural change, and it replaces the donor's fallback of handing a tier the *whole* vector's name list, which silently mis-assigned every column. `attention_flow`'s classifier also folds its two branches into one substring scan over the same nine signals in the same order — the donor's regex path and its fallback tested the same substrings against different haystacks, and the merged form agrees with both. |
+| `anamnesis/scripts/run_subfamily_decomp.py` | `anamnesis/analysis/subfamily.py` + `anamnesis/scripts/run_subfamily_decomp.py` | The four name classifiers, the nested operator groups and the coarse substrate cut, logic-identical; the accuracy is the same forest under the same stratified folds. Two adaptations. The donor's `get_feature_names` — a second reader of the signature npz and of its slice table — is gone: names come from `Run4Data.block_feature_names`, which the loader already fills from that same table and which covers addon directories too, and a **length disagreement between the names and the matrix is now refused** rather than mapped through. That refusal is the one behavioural change, and it replaces the donor's fallback of handing a block the *whole* vector's name list, which silently mis-assigned every column. `attention_flow`'s classifier also folds its two branches into one substring scan over the same nine signals in the same order — the donor's regex path and its fallback tested the same substrings against different haystacks, and the merged form agrees with both. |
 | `anamnesis/scripts/run_cross_run_transfer.py` | `anamnesis/analysis/cross_run.py` + `anamnesis/scripts/run_cross_run_transfer.py` | Both transfer directions, the wildcard count, the pre-registered maps and the LDA direction test, logic-identical, with the 3B comparison travelling inside the result rather than printed after it. The MLP the donor inlined is now `analysis/contrastive_mlp.py` (below); the seed layout, the median-of-similarity and mean-of-assignment pooling, and the scoring that excludes the wildcard from both numerator and denominator are unchanged. The outputs root comes from the configuration package instead of three `parent` hops from `__file__`. |
-| `anamnesis/scripts/analyze_complementarity.py` | `anamnesis/analysis/complementarity.py` + `anamnesis/scripts/analyze_complementarity.py` | All seven readings, logic-identical in their arithmetic: cross-run consistency at the five-point bar, resolution by pair difficulty, the hard-pair profile correlation with its zero-variance drop, importance by family and sub-family, the hardest confusion per tier, the ordering check, and value-add against the baseline composites. Three changes. The run table is an argument rather than a module constant, so a report can be taken over any analysis directory. The `--include-5way` flag is gone: the donor's two paths were the same path — a subset pass was read whenever it existed — so an inert switch is not kept. And the hardest-confusion table now reads its labels from `rf_5way.labels`, which is where a banked confusion matrix carries them; see the defect note below. |
+| `anamnesis/scripts/analyze_complementarity.py` | `anamnesis/analysis/complementarity.py` + `anamnesis/scripts/analyze_complementarity.py` | All seven readings, logic-identical in their arithmetic: cross-run consistency at the five-point bar, resolution by pair difficulty, the hard-pair profile correlation with its zero-variance drop, importance by family and sub-family, the hardest confusion per block, the ordering check, and value-add against the baseline composites. Three changes. The run table is an argument rather than a module constant, so a report can be taken over any analysis directory. The `--include-5way` flag is gone: the donor's two paths were the same path — a subset pass was read whenever it existed — so an inert switch is not kept. And the hardest-confusion table now reads its labels from `rf_5way.labels`, which is where a banked confusion matrix carries them; see the defect note below. |
 | `anamnesis/scripts/train_contrastive_projection.py` · `run_cross_run_transfer.ProjectionNet`/`mine_triplets`/`train_full_data_mlp`/`embed_with_model` | `anamnesis/analysis/contrastive_mlp.py` + `anamnesis/scripts/train_contrastive_projection.py` | **Two donors, one network, two laws named separately.** The banked fit (grouped holdout by generation, kNN validation, early stopping, numpy weights out) and the analysis fit (full data, fixed epochs, several seeds, no holdout) trained the same architecture in both donors and differed in every rule around it, so both laws are callable and neither is the other's default — the same treatment C1 gave two mean-difference laws. Mining is likewise two functions: class-first for the banked fit, anchor-uniform for the analysis one. The training corpus is here as well (`load_hidden_state_samples`): the sampled layers now come from the preset's `contrastive_layers` rather than a hand-copied table, the group is the generation, and the positional correction is applied at the absolute position of each sampled step. It lives in `analysis/` because fitting is learned-probe machinery and because the family that *applies* these weights is pure numpy — a torch import in its closure would fail the anchor's purity guard. |
 | `anamnesis/scripts/vmb_routing_cka_gate.py` | `anamnesis/analysis/leak_gate.py` + `anamnesis/scripts/leak_gate.py` | **Generalized, as the manifest's "instrument-grade, arm-independent" classification asks.** The law is the donor's exactly: length-residualize, LDA under GroupKFold-by-topic against the same folds' label-permutation null, the naive accuracy reported only as the other end of the leak gap, a topic-decode readout beside it, and the three-way verdict. What changed is what it is pointed at. The donor hard-coded a directory pattern (`vmb_a2_<model>_pure_<mode>`) and a feature-count assertion for one arm's six routing-CKA features; here the cells are named by the caller and the feature sets are selected by prefix or substring, with `--expect` available for a caller that wants the count pinned. The arm protocol that built those cells stays in the record, which is the same rule the launchers' spec builders were ported under. The length regression is `audit_lib.residualize_all` rather than a second implementation. |
 | `anamnesis/scripts/vmb_s51_encoder_on_raw.py` | `anamnesis/analysis/encoder_ladder.py` + `anamnesis/scripts/encoder_on_raw.py` | The three-rung ladder — hand features, raw linear, raw encoder — on one GroupKFold-by-topic split with the fold preprocessing computed once for both architectures, logic-identical. **This is C5's first package consumer**, which closes the note that the audit library landed serving only its own test: the surface sampling, the Gram reduction and the readout pair are all read from `audit_lib` here. Two adaptations: the arms are typed (`Arm`) instead of six parallel lists, and the reading is a named function over the two pairs rather than a chained conditional, so the catch margin and the floor bar are constants a reader can see. The donor's module-level `RAW_SURFACES` global, rebound from `main`, is an argument. |
@@ -645,7 +645,7 @@ table, which says where the command went and what else moved with it.
 |---|---|---|
 | — | `tests/test_battery_stage0.py` | New. The protocol, which is where a floor gets attributed to the wrong thing: the gid layout by value, the four-pinned-six-spread plan with its device and component per replay, the two refusals, the synthetic manifest repeating one continuation's own tokens, the law table's conservative PLAN column and its exactly-zero row, and a law pass over a synthetic corpus where the faithfulness floor comes out below the stochastic one. |
 | — | `tests/test_census.py` | New. The bars at their own boundaries, the maximum that makes membership conservative, the judge asymmetry in all three of its states (voided, surviving, pending), the class object's empty entry as a reading, and the command's refusal of a root with no records. |
-| — | `tests/test_prompt_swap.py` | New. The corpus is planted twice — swap generations carrying the execution mode's value, then the prompt mode's — so the verdict has to flip; plus the label grammar, the complete-coverage filter on tiers, and the 1.5:1 bar at its boundary. |
+| — | `tests/test_prompt_swap.py` | New. The corpus is planted twice — swap generations carrying the execution mode's value, then the prompt mode's — so the verdict has to flip; plus the label grammar, the complete-coverage filter on blocks, and the 1.5:1 bar at its boundary. |
 | — | `tests/test_subfamily.py` | New. Every classifier against its family's naming convention, the unknown bucket as the honest answer, the names-versus-columns refusal, the empty subset that returns a reason, the nested operator groups' growing widths, and the whole family scored beside its parts. |
 | — | `tests/test_cross_run.py` | New. Scoring against a pre-registered map with the wildcard excluded from both numerator and denominator, the nearest-centroid assignment, the cosine similarity's scale-freeness, the layer filter's two spellings, the refusals on a missing key and a width mismatch, the LDA leg on a shared and an unshared corpus, and one end-to-end pass at two seeds. |
 | — | `tests/test_contrastive_mlp.py` | New. The banked fit's four arrays plus its standardization, the grouped split and its degenerate fallback, the two mining laws' different properties, the single-class refusal, the unit-sphere embedding, and the corpus loader's three rules: swaps excluded, group is the generation, correction applied at the absolute position. The raw captures are written through the real saver, so the layer-offset assertion is about the reconstruction the instrument performs. |
@@ -668,7 +668,7 @@ Four, all recorded rather than silently fixed, and two of them fixed here with t
 reason stated because no banked number moves:
 
 1. **`analyze_complementarity`'s hardest-confusion table never printed.** The donor
-   read `class_labels` off the per-tier classification result; the field is `labels`
+   read `class_labels` off the per-block classification result; the field is `labels`
    and it lives on `rf_5way`, so the lookup always returned empty and the table was
    skipped in every run. A comment in the donor recorded the mismatch and kept the
    broken lookup. Fixed here, because the section's only output was a printed table
@@ -680,8 +680,8 @@ reason stated because no banked number moves:
    banked census markdown has a malformed header row. Fixed here by escaping the
    delimiter; the JSON census was never affected.
 3. **`run_subfamily_decomp`'s feature-name fallback mis-assigned columns.** Where a
-   bank's metadata carried no slice table, the donor handed a tier the *whole*
-   vector's name list and then indexed it as if it were the tier's, so a
+   bank's metadata carried no slice table, the donor handed a block the *whole*
+   vector's name list and then indexed it as if it were the block's, so a
    decomposition could report sub-families over the wrong features. Refused here
    rather than fixed, because there is no correct mapping to fall back to.
 4. **The sub-family classifier's `attention_flow` vocabulary has drifted from the
@@ -791,14 +791,43 @@ each block by what it reads, and what a feature reads is answered by
 
 Three layers, treated differently, because they are not the same kind of thing.
 
-**On disk: unchanged.** The npz array keys `features_tier1`, `features_tier2`,
-`features_tier2_5` and `features_tier3`, the `tier_slices` key of a signature's JSON
-sidecar and the block labels inside it, and the block labels banked analysis JSON
-keys its per-block numbers by, are a wire format. Every signature and every analysis
-result ever banked indexes into itself with them, so none of them moved. They are
-declared in exactly two places: `STORED_*` in
-`anamnesis/extraction/state_extractor.py` for the write side, and the label constants
-at the top of `anamnesis/analysis/gauntlet/signature_io.py` for the read side.
+**A signature on disk: unchanged.** The npz array keys `features_tier1`,
+`features_tier2`, `features_tier2_5` and `features_tier3`, and the `tier_slices` key of
+a signature's JSON sidecar together with the block names inside it, are a wire format.
+Every signature ever banked indexes into itself with them, so none of them moved. They
+are declared once, as `STORED_*` in `anamnesis/extraction/state_extractor.py`;
+`BLOCK_STORED_NAMES` in `anamnesis/analysis/gauntlet/signature_io.py` maps a label onto
+one of them and `BLOCK_NPZ_KEYS` is built from that, so the read side holds no second
+copy of the strings.
+
+**The label a result is reported under: renamed, with a reader.** That label is printed
+in log lines and keys the per-block numbers of an analysis result, which makes it the
+most reader-facing string in the instrument — `Classification: T2.5` and a results key
+of `T2+T2.5` were teaching the retired vocabulary to anyone who ran a pass. The labels
+now say what their block reads, and the retired spellings live only in
+`anamnesis/analysis/gauntlet/schemas/compat.py`, which reads a banked results file
+forward. A written result carries the current labels only.
+
+| retired label | label now | what the block reads |
+|---|---|---|
+| `T1` | `norms_and_output_stats` | residual activation norms with output statistics |
+| `T2` | `attention_and_deltas` | attention distributions with cross-layer residual deltas |
+| `T2.5` | `cache_and_keys` | cache-read profiles with pre-RoPE key geometry |
+| `T3` | `residual_pca` | residual-stream PCA |
+| `T2+T2.5` | `attention_and_cache` | the union of the two above |
+| `T2+T2.5+engineered` | `attention_and_cache+engineered` | that union plus the engineered families |
+| `combined_v2` | `every_block` | every block present, core and family alike |
+
+`combined` (the four core blocks) and `engineered` (the four families the union names)
+are unchanged: they carry no retired vocabulary. `combined_v2` was renamed for a second
+reason — a version number standing in for "every block there is" says nothing about what
+is in it.
+
+A combination key is read component by component, so the pair
+(`attention_and_deltas`, `cache_and_keys`) in a combinations table stays spelled as its
+two members and does not collapse onto the union's own label; `cross_group_ablation`,
+whose keys lead with a union, is read union-first. Both readings are declared in
+`COMPOUND_LABEL_FIELDS` beside the table.
 
 **Code: renamed.** Function signatures, module paths and internal call graphs are
 outside data compatibility, so they now say what they mean.
@@ -856,11 +885,13 @@ names. The table is the authority; this is a reading of it.
 
 `ClassificationResult.by_tier` is not in that table: it became `by_block`, but the
 name was never on the wire — a classification result carries one top-level key per
-block and the validator gathers them, so nothing needs mapping. Two schema families
-translate their own key spelling in their own validators for the same reason, their
-labels never having been legal Python identifiers: `ContrastiveSuperAdditivity` and
-`ContrastiveBlockAblation` in
-`anamnesis/analysis/gauntlet/schemas/contrastive.py`.
+block and the validator gathers them, so nothing needs mapping. Section 8's keys are
+in the table instead of in its own models: `ContrastiveSuperAdditivity` and
+`ContrastiveBlockAblation` in `anamnesis/analysis/gauntlet/schemas/contrastive.py`
+carried the spellings `T2_alone`, `T2+T2.5_pair`, `T2+T2.5_beats_combined` and
+`tier_ablation` in a validator-and-serializer pair each, which also wrote them back
+out; the fields are now named for what they hold, the retired spellings are entries
+under `contrastive` in the one table, and three custom serializers are gone with them.
 
 One write-only report is renamed without a reader, because nothing reads it back.
 `complementarity_report.json` now carries `block_ordering`, `blocks`,

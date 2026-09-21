@@ -42,14 +42,18 @@ class TopologyResult(BaseModel):
 
     ``hierarchical_clustering`` values are Newick-string trees on success
     or ``"ERROR: ..."`` strings on failure.
+
+    Every field is optional so a section that could not run — the union it
+    reads is not in this corpus — round-trips as a stub carrying its reason.
     """
 
     model_config = _FORBID
 
-    block: str
-    euclidean_centroid_distances: dict[str, float]
-    cosine_centroid_distances: dict[str, float]
-    manhattan_centroid_distances: dict[str, float]
-    hierarchical_clustering: dict[str, str]
-    topology_summary: dict[str, TopologyMetricSummary]
-    gromov_delta_euclidean: GromovDeltaResult
+    block: str | None = None
+    euclidean_centroid_distances: dict[str, float] | None = None
+    cosine_centroid_distances: dict[str, float] | None = None
+    manhattan_centroid_distances: dict[str, float] | None = None
+    hierarchical_clustering: dict[str, str] | None = None
+    topology_summary: dict[str, TopologyMetricSummary] | None = None
+    gromov_delta_euclidean: GromovDeltaResult | None = None
+    error: str | None = None

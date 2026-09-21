@@ -56,6 +56,7 @@ from .schemas import (
     ShuffleControlsResult,
     TextToComputeR2,
 )
+from .utils import absence_reason
 
 logger = logging.getLogger(__name__)
 
@@ -497,14 +498,16 @@ def _run_prompt_swap_confound(
         t: arrays for t, arrays in swap_block_features.items() if t in complete_blocks
     }
 
+    # A union over the swap samples is built on the same rule as one over the
+    # corpus: every member it names, or not at all. Built from a subset it would
+    # be compared against a training matrix of a different width under one label.
     for group in [ATTENTION_AND_CACHE, EVERYTHING]:
         if group in test_blocks and group not in swap_block_features:
             from .signature_io import BLOCK_UNIONS
             members = BLOCK_UNIONS.get(group, [])
-            available_members = [m for m in members if m in complete_blocks]
-            if available_members:
+            if members and all(m in complete_blocks for m in members):
                 swap_block_features[group] = [
-                    np.concatenate([swap_block_features[m][j] for m in available_members])
+                    np.concatenate([swap_block_features[m][j] for m in members])
                     for j in range(len(swap_npz_paths))
                 ]
 
@@ -682,6 +685,17 @@ def run_semantic(
         )
 
     # ── Top-level keys carrying the attention-and-cache union, as banked files hold them ──
+    # Every reading below is taken on that union, so a corpus without it gets the
+    # per-block battery above and a stated reason in place of the rest.
+    union_absent = absence_reason(data, ATTENTION_AND_CACHE)
+    if union_absent is not None:
+        return SemanticResult(
+            tfidf_classification=tfidf_classification,
+            sbert_classification=sbert_classification,
+            per_block_semantic=per_block_semantic,
+            error=f"the compute-versus-text readings are taken on {union_absent}",
+        )
+
     attention_and_cache_results = per_block_semantic.get(ATTENTION_AND_CACHE)
     X_compute_main = data.get_block(ATTENTION_AND_CACHE)
     compute_classification = attention_and_cache_results.classification if attention_and_cache_results is not None else None

@@ -8,9 +8,9 @@ the composite. These tests close that off:
     ``__all__`` and the modules agree in both directions;
   * the composite declares one field per section and its types are the sections'
     own result models, so a section renamed in one place fails here;
-  * the two reshaping models — classification's block-keys-at-top-level and
-    contrastive's on-disk key vocabulary — round-trip, because those are the
-    places where the model's shape and the file's shape are not the same shape;
+  * the one reshaping model — classification's block-keys-at-top-level —
+    round-trips, because that is the place where the model's shape and the
+    file's shape are not the same shape;
   * ``extra="forbid"`` is live on every model, which is the whole reason a
     checkpoint can be trusted after validation — and the read-side rename table is
     the reason a checkpoint written under older field names still gets that far.
@@ -28,6 +28,11 @@ from pydantic import BaseModel, ValidationError
 from anamnesis.analysis.gauntlet import SECTION_MODELS, SECTIONS
 from anamnesis.analysis.gauntlet import schemas
 from anamnesis.analysis.gauntlet.schemas.base import _FORBID
+from anamnesis.analysis.gauntlet.signature_io import (
+    ALL_CORE,
+    ATTENTION_AND_CACHE,
+    NORMS_AND_OUTPUT_STATS,
+)
 
 SECTION_MODULES = (
     "ccgp",
@@ -126,39 +131,44 @@ def block_classification_payload() -> dict[str, object]:
 
 def test_classification_reshapes_block_keys_both_ways() -> None:
     wire = {
-        "T2+T2.5": block_classification_payload(),
-        "combined": block_classification_payload(),
+        ATTENTION_AND_CACHE: block_classification_payload(),
+        ALL_CORE: block_classification_payload(),
         "length_only": {"accuracy": None, "error": "no length metadata"},
     }
     parsed = schemas.ClassificationResult.model_validate(wire)
-    assert set(parsed.by_block) == {"T2+T2.5", "combined"}
-    assert parsed.by_block["combined"].rf_5way.accuracy == 0.8
+    assert set(parsed.by_block) == {ATTENTION_AND_CACHE, ALL_CORE}
+    assert parsed.by_block[ALL_CORE].rf_5way.accuracy == 0.8
     assert parsed.length_only is not None
     out = parsed.model_dump(mode="json")
     assert set(out) == set(wire)
-    assert out["T2+T2.5"]["topic_heldout"]["n_groups"] == 2
+    assert out[ATTENTION_AND_CACHE]["topic_heldout"]["n_groups"] == 2
     # Round-tripping twice is what a resumed run does, so it must be a fixed point.
     assert schemas.ClassificationResult.model_validate(out).model_dump(mode="json") == out
 
 
 def test_a_classification_result_with_no_length_baseline_omits_the_key() -> None:
-    parsed = schemas.ClassificationResult.model_validate({"T1": block_classification_payload()})
+    parsed = schemas.ClassificationResult.model_validate(
+        {NORMS_AND_OUTPUT_STATS: block_classification_payload()}
+    )
     assert parsed.length_only is None
     assert "length_only" not in parsed.model_dump(mode="json")
 
 
-def test_contrastive_reads_the_frozen_on_disk_key_vocabulary() -> None:
-    """``T2.5_alone`` is not a Python identifier, so the key on disk and the
-    field in the model differ. The translation is the contract: a banked file
-    validates, and serializing gives that file's spelling back unchanged."""
+def test_contrastive_super_additivity_names_its_own_fields_on_disk() -> None:
+    """Section 8's keys are the field names, so validate and dump are the same shape.
+
+    The spellings a banked file carries for these numbers were never legal Python
+    identifiers; they are read forward by
+    `anamnesis/analysis/gauntlet/schemas/compat.py`, not by this model.
+    """
     on_disk = {
-        "T2_alone": 0.5,
-        "T2.5_alone": 0.6,
-        "T2+T2.5_pair": 0.75,
+        "attention_alone": 0.5,
+        "cache_alone": 0.6,
+        "attention_and_cache_pair": 0.75,
         "best_individual": 0.6,
         "gain": 0.15,
         "combined_knn": 0.7,
-        "T2+T2.5_beats_combined": True,
+        "attention_and_cache_beats_combined": True,
     }
     parsed = schemas.ContrastiveSuperAdditivity.model_validate(on_disk)
     assert parsed.attention_alone == 0.5
@@ -166,11 +176,3 @@ def test_contrastive_reads_the_frozen_on_disk_key_vocabulary() -> None:
     assert parsed.attention_and_cache_pair == 0.75
     assert parsed.attention_and_cache_beats_combined is True
     assert parsed.model_dump(mode="json") == on_disk
-    # The Python spelling also validates, so a freshly constructed result and a
-    # reloaded one are the same object.
-    python_spelling = {
-        "attention_alone": 0.5, "cache_alone": 0.6, "attention_and_cache_pair": 0.75,
-        "best_individual": 0.6, "gain": 0.15, "combined_knn": 0.7,
-        "attention_and_cache_beats_combined": True,
-    }
-    assert schemas.ContrastiveSuperAdditivity.model_validate(python_spelling) == parsed

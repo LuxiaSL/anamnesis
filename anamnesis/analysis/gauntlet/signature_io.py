@@ -38,19 +38,27 @@ from numpy.typing import NDArray
 
 from anamnesis.analysis.lane_guard import MixedLaneError, require_single_lane
 from anamnesis.config.paths import legacy_data_root
-from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
+from anamnesis.extraction.state_extractor import (
+    STORED_ATTENTION_AND_DELTAS,
+    STORED_BLOCK_SLICES_KEY,
+    STORED_CACHE_AND_KEYS,
+    STORED_NORMS_AND_OUTPUT_STATS,
+    STORED_RESIDUAL_PCA,
+)
 
 logger = logging.getLogger(__name__)
 
 
 # ── Block labels ──────────────────────────────────────────────────────────────
 # A feature vector is addressed in contiguous blocks, and every block has a label
-# it is stored and reported under. The four the numeric anchor builds carry short
-# historical labels; the families carry their own names. All of them are a wire
-# format — a banked npz keys its arrays with them, and banked analysis JSON keys
-# its per-block numbers with them — so the labels are fixed and the constants
-# below carry what each block reads. Read a block by the constant, never by the
-# string, and the string stays where it belongs: on disk.
+# it is reported under: printed in this module's log lines, and used as a key in
+# the per-block numbers of an analysis result. A label therefore says what its
+# block reads, because it is what a reader of a results file sees.
+#
+# A label is not the name the block is stored under. The stored names are frozen
+# in `anamnesis/extraction/state_extractor.py` and reach disk through
+# BLOCK_STORED_NAMES below; an older results file's labels reach the current ones
+# through `anamnesis/analysis/gauntlet/schemas/compat.py`.
 #
 # The four core blocks read, in order: residual activation norms with output
 # statistics; attention distributions with cross-layer residual deltas;
@@ -58,10 +66,10 @@ logger = logging.getLogger(__name__)
 # spans two substrates, which is why a block is an address and not a finding —
 # `anamnesis/feature_map.py` is what says which substrate a feature reads.
 
-NORMS_AND_OUTPUT_STATS = "T1"
-ATTENTION_AND_DELTAS = "T2"
-CACHE_AND_KEYS = "T2.5"
-RESIDUAL_PCA = "T3"
+NORMS_AND_OUTPUT_STATS = "norms_and_output_stats"
+ATTENTION_AND_DELTAS = "attention_and_deltas"
+CACHE_AND_KEYS = "cache_and_keys"
+RESIDUAL_PCA = "residual_pca"
 
 RESIDUAL_TRAJECTORY = "residual_trajectory"
 ATTENTION_FLOW = "attention_flow"
@@ -70,23 +78,37 @@ TEMPORAL_DYNAMICS = "temporal_dynamics"
 CONTRASTIVE_PROJECTION = "contrastive_projection"
 
 # Union labels: a block built by concatenating others, addressed as one.
-ATTENTION_AND_CACHE = "T2+T2.5"
+ATTENTION_AND_CACHE = "attention_and_cache"
 ALL_CORE = "combined"
 ALL_FAMILIES = "engineered"
-EVERYTHING = "combined_v2"
-ATTENTION_AND_CACHE_WITH_FAMILIES = "T2+T2.5+engineered"
+EVERYTHING = "every_block"
+ATTENTION_AND_CACHE_WITH_FAMILIES = "attention_and_cache+engineered"
+
+# Label → the name the block is stored under. The four core blocks were banked
+# under names that say nothing about what they read, and every signature ever
+# written indexes into its vector with exactly those names, so they are held as
+# constants in `anamnesis/extraction/state_extractor.py` and read from there:
+# this table is the only place a label meets a stored name. A family is stored
+# under its own label.
+BLOCK_STORED_NAMES: dict[str, str] = {
+    NORMS_AND_OUTPUT_STATS: STORED_NORMS_AND_OUTPUT_STATS,
+    ATTENTION_AND_DELTAS: STORED_ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS: STORED_CACHE_AND_KEYS,
+    RESIDUAL_PCA: STORED_RESIDUAL_PCA,
+    RESIDUAL_TRAJECTORY: RESIDUAL_TRAJECTORY,
+    ATTENTION_FLOW: ATTENTION_FLOW,
+    GATE_FEATURES: GATE_FEATURES,
+    TEMPORAL_DYNAMICS: TEMPORAL_DYNAMICS,
+    CONTRASTIVE_PROJECTION: CONTRASTIVE_PROJECTION,
+}
+
+# An npz holds a block's columns under `features_<stored name>`, and the JSON
+# sidecar holds its bounds under the stored name alone.
+NPZ_KEY_PREFIX = "features_"
 
 # Label → npz array key. The loader skips any block absent from the data.
 BLOCK_NPZ_KEYS: dict[str, str] = {
-    NORMS_AND_OUTPUT_STATS: "features_tier1",
-    ATTENTION_AND_DELTAS: "features_tier2",
-    CACHE_AND_KEYS: "features_tier2_5",
-    RESIDUAL_PCA: "features_tier3",
-    RESIDUAL_TRAJECTORY: "features_residual_trajectory",
-    ATTENTION_FLOW: "features_attention_flow",
-    GATE_FEATURES: "features_gate_features",
-    TEMPORAL_DYNAMICS: "features_temporal_dynamics",
-    CONTRASTIVE_PROJECTION: "features_contrastive_projection",
+    label: NPZ_KEY_PREFIX + stored for label, stored in BLOCK_STORED_NAMES.items()
 }
 
 # The blocks the numeric anchor builds, in vector order, and the families beside them.
@@ -96,9 +118,12 @@ FAMILY_BLOCKS = [
     TEMPORAL_DYNAMICS, CONTRASTIVE_PROJECTION,
 ]
 
-# Each union is built from whichever of its members are present; a union missing a
+# A union is built only when every member it names is present; a union missing a
 # member is omitted rather than built short, because a short union would be a
-# different feature set reported under the same label.
+# different feature set reported under the same label. A corpus of the four
+# engineered families alone would otherwise report `every_block` and
+# `attention_and_cache+engineered` at the width of `engineered`, naming four
+# blocks it does not contain and three it does not.
 BLOCK_UNIONS: dict[str, list[str]] = {
     ATTENTION_AND_CACHE: [ATTENTION_AND_DELTAS, CACHE_AND_KEYS],
     ALL_CORE: list(CORE_BLOCKS),
@@ -111,6 +136,12 @@ BLOCK_UNIONS: dict[str, list[str]] = {
         RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, TEMPORAL_DYNAMICS,
     ],
 }
+
+# Every label a block or a union can be reported under. Derived rather than
+# listed, so a label added to either table is covered by whatever reads this —
+# the compatibility table's completeness check among them.
+ALL_LABELS: frozenset[str] = frozenset(BLOCK_NPZ_KEYS) | frozenset(BLOCK_UNIONS)
+
 
 def default_signature_dir() -> Path:
     """The Phase-0 run-4 signature directory, resolved when asked.
@@ -141,7 +172,7 @@ class Run4Data:
     block_features: dict[str, NDArray[np.float32]]
     # Composite group matrices: {group_name: (N, D_group)}
     group_features: dict[str, NDArray[np.float32]]
-    # Full combined matrix (N, 1837)
+    # Every present block concatenated, in block order: (N, sum of block widths)
     all_features: NDArray[np.float32]
     # Feature names per block
     block_feature_names: dict[str, NDArray]
@@ -174,8 +205,26 @@ class Run4Data:
         """Boolean mask for samples of a given topic."""
         return self.topics == topic
 
+    def has_block(self, block_or_group: str) -> bool:
+        """Whether this corpus holds that block or union.
+
+        What a caller asks before reading one: a union is absent whenever any
+        member it names is absent, so a corpus narrower than the suite that
+        wrote it has fewer of them, and asking is how a section reports that
+        rather than dying on it.
+        """
+        return block_or_group in self.block_features or block_or_group in self.group_features
+
     def get_block(self, block_or_group: str) -> NDArray[np.float32]:
-        """Get feature matrix for a block name or group name."""
+        """Get feature matrix for a block name or group name.
+
+        Raises
+        ------
+        KeyError
+            When this corpus holds no such block or union. Callers that can
+            proceed without it test :meth:`has_block` first and report the
+            absence; this refusal is for the ones that cannot.
+        """
         if block_or_group in self.block_features:
             return self.block_features[block_or_group]
         if block_or_group in self.group_features:
@@ -325,8 +374,7 @@ def load_run4(
             all_feature_names = {}
             if names is not None and slices:
                 for block_name in present_blocks:
-                    # Map block display name to slice key
-                    slice_key = BLOCK_NPZ_KEYS[block_name].replace("features_", "")
+                    slice_key = BLOCK_STORED_NAMES[block_name]
                     if slice_key in slices:
                         start, end = slices[slice_key]
                         all_feature_names[block_name] = names[start:end]
@@ -405,7 +453,7 @@ def load_run4(
                             addon_slices = addon_meta.get(STORED_BLOCK_SLICES_KEY, {})
                             for tn in addon_blocks:
                                 if tn not in all_feature_names:
-                                    sk = BLOCK_NPZ_KEYS[tn].replace("features_", "")
+                                    sk = BLOCK_STORED_NAMES[tn]
                                     if sk in addon_slices:
                                         s, e = addon_slices[sk]
                                         all_feature_names[tn] = addon_names[s:e]
@@ -426,20 +474,18 @@ def load_run4(
                     continue
                 block_features[block_name] = np.stack(arrays, axis=0)
 
-    # Build composite groups — only include groups where all members are present
+    # Build the unions — a union whose every member is present, and no other.
     group_features: dict[str, NDArray[np.float32]] = {}
     for group_name, block_list in BLOCK_UNIONS.items():
-        available_members = [t for t in block_list if t in block_features]
-        if not available_members:
-            continue
-        if len(available_members) < len(block_list):
-            # Partial group — still useful, note which members are present
-            logger.debug(
-                f"  Group '{group_name}': {len(available_members)}/{len(block_list)} "
-                f"members present ({available_members})"
+        missing = [t for t in block_list if t not in block_features]
+        if missing:
+            logger.info(
+                f"  Union '{group_name}' not built: {sorted(missing)} absent from this "
+                f"corpus, and a union built short would name blocks it does not hold"
             )
+            continue
         group_features[group_name] = np.concatenate(
-            [block_features[t] for t in available_members], axis=1
+            [block_features[t] for t in block_list], axis=1
         )
 
     # Full combined — all present individual blocks
@@ -542,6 +588,9 @@ class AnalysisData:
     @property
     def unique_topics(self) -> list[str]:
         return self.run4.unique_topics
+
+    def has_block(self, name: str) -> bool:
+        return self.run4.has_block(name)
 
     def get_block(self, name: str) -> NDArray[np.float32]:
         return self.run4.get_block(name)

@@ -83,6 +83,26 @@ ALL_BLOCKS = [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESI
 KEY_BLOCKS = [ATTENTION_AND_CACHE, ALL_CORE]
 
 
+def absence_reason(data: object, *blocks: str) -> str | None:
+    """Why a reading over ``blocks`` cannot be taken here, or None when it can.
+
+    A union is built only when every member it names is present, so a corpus
+    narrower than the suite that defined it holds fewer blocks than a section
+    asks for. A section calls this before reading, and puts what comes back in
+    its own ``error`` field: an absence is a fact about the corpus, and a pass
+    that states it is worth more than one that dies on a missing key.
+    """
+    run4 = getattr(data, "run4", data)
+    missing = [b for b in blocks if not run4.has_block(b)]
+    if not missing:
+        return None
+    present = sorted(set(run4.block_features) | set(run4.group_features))
+    return (
+        f"{', '.join(missing)} not in this corpus "
+        f"(blocks and unions present: {', '.join(present) or 'none'})"
+    )
+
+
 def get_available_blocks(data: object) -> tuple[list[str], list[str]]:
     """Discover which blocks and groups are available in loaded data.
 

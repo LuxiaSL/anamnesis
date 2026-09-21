@@ -41,11 +41,18 @@ from anamnesis.analysis.prompt_swap import (
     signal_type,
     swap_report,
 )
+from anamnesis.analysis.gauntlet.signature_io import (
+    ATTENTION_FLOW,
+    BLOCK_NPZ_KEYS,
+    BLOCK_STORED_NAMES,
+    NORMS_AND_OUTPUT_STATS,
+)
+from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
 
-BLOCK_NPZ_KEY = "features_tier1"
-BLOCK_LABEL = "T1"
-ADDON_KEY = "features_attention_flow"
-ADDON_NAME = "attention_flow"
+BLOCK_LABEL = NORMS_AND_OUTPUT_STATS
+BLOCK_NPZ_KEY = BLOCK_NPZ_KEYS[BLOCK_LABEL]
+ADDON_NAME = ATTENTION_FLOW
+ADDON_KEY = BLOCK_NPZ_KEYS[ADDON_NAME]
 N_TOPICS = 6
 WIDTH = 3
 
@@ -71,7 +78,9 @@ def write_generation(
                 "topic": f"topic-{topic}",
                 "topic_idx": topic,
                 "num_generated_tokens": 80,
-                "tier_slices": {"tier1": [0, WIDTH]},
+                STORED_BLOCK_SLICES_KEY: {
+                    BLOCK_STORED_NAMES[BLOCK_LABEL]: [0, WIDTH]
+                },
             }
         )
     )

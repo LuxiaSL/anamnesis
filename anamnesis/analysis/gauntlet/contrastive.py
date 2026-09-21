@@ -36,6 +36,7 @@ from .signature_io import (
     FAMILY_BLOCKS,
     AnalysisData,
 )
+from .utils import absence_reason
 from .schemas import (
     CapacitySweepEntry,
     ContrastiveAblationEntry,
@@ -75,6 +76,10 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
     """Run contrastive projection analysis."""
     if not HAS_TORCH:
         return ContrastiveResult(error="PyTorch not installed — skipping contrastive projection")
+
+    absent = absence_reason(data, ATTENTION_AND_CACHE, ALL_CORE)
+    if absent is not None:
+        return ContrastiveResult(error=f"contrastive projection reads {absent}")
 
     block_results: dict[str, ContrastiveBlockResult] = {}
 
@@ -160,7 +165,7 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
         attention_and_cache=block_results[ATTENTION_AND_CACHE],
         combined=block_results[ALL_CORE],
         capacity_sweep=capacity_results,
-        legacy_bin_readout=ablation,
+        block_ablation=ablation,
         linear_baselines=baselines,
     )
 
@@ -294,7 +299,8 @@ def _run_contrastive_block_ablation(data: AnalysisData) -> ContrastiveBlockAblat
 
     attention_knn = individual[ATTENTION_AND_DELTAS].knn_accuracy
     cache_knn = individual[CACHE_AND_KEYS].knn_accuracy
-    attention_and_cache_knn = pairwise[ATTENTION_AND_CACHE].knn_accuracy
+    # The pair is keyed by its two members, which is not the union's own label.
+    attention_and_cache_knn = pairwise[f"{ATTENTION_AND_DELTAS}+{CACHE_AND_KEYS}"].knn_accuracy
     super_add = ContrastiveSuperAdditivity(
         attention_alone=attention_knn,
         cache_alone=cache_knn,

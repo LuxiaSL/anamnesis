@@ -30,12 +30,15 @@ so results are checkpointed after each section completes and ``resume`` reads
 the checkpoint back, validates each section against its schema, and skips what
 is already there. An error stub does not count as completed.
 
-A section that fails writes an error stub and the pass continues, because the
-other ten sections are still worth having and the results file is still worth
-reading. What must not happen is a command reporting a complete pass over that
-file: :func:`section_shortfall` states the pass as expected-versus-produced —
-sections asked for, sections that landed, sections carrying a stub and the reason
-— and the command layer refuses on it.
+A section that cannot deliver returns its result carrying the reason — an optional
+dependency absent, or a block the corpus does not hold — and the pass continues,
+because the other ten sections are still worth having and the results file is
+still worth reading. What must not happen is a command reporting a complete pass
+over that file: :func:`section_shortfall` states the pass as
+expected-versus-produced — sections asked for, sections that landed, sections
+carrying a stub and the reason — and the command layer refuses on it. An exception
+out of a section is not a stub and is not caught here: it ends the pass, which is
+why a section states an absence rather than reading a block that is not there.
 """
 
 from __future__ import annotations

@@ -48,6 +48,7 @@ from .schemas import (
     BlockRankingEntry,
     TripleBlockCombo,
 )
+from .utils import absence_reason
 
 _RF_KWARGS = dict(n_estimators=100, n_jobs=1)
 
@@ -317,6 +318,10 @@ def run_legacy_bin_readout(data: AnalysisData) -> LegacyBinReadoutResult:
 
 def _std_vs_mean_split(data: AnalysisData, y: NDArray) -> StdVsMeanResult:
     """Compare RF accuracy on *_std features vs *_mean features."""
+    absent = absence_reason(data, ATTENTION_AND_CACHE)
+    if absent is not None:
+        return StdVsMeanResult(error=absent)
+
     X = data.get_block(ATTENTION_AND_CACHE)
     names = list(data.run4.block_feature_names.get(ATTENTION_AND_DELTAS, [])) + \
             list(data.run4.block_feature_names.get(CACHE_AND_KEYS, []))
@@ -356,6 +361,13 @@ def _std_vs_mean_split(data: AnalysisData, y: NDArray) -> StdVsMeanResult:
 def _topic_controlled_effect_sizes(data: AnalysisData, y: NDArray) -> CohensDPerTopicResult:
     """Cohen's d per topic: within-mode vs between-mode distances on attention and cache."""
     from scipy.spatial.distance import pdist
+
+    absent = absence_reason(data, ATTENTION_AND_CACHE)
+    if absent is not None:
+        return CohensDPerTopicResult(
+            per_topic={}, mean_d=None, median_d=None, std_d=None, min_d=None,
+            max_d=None, all_positive=None, n_topics=0, error=absent,
+        )
 
     X = data.get_block(ATTENTION_AND_CACHE)
     scaler = StandardScaler()

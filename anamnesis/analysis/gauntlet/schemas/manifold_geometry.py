@@ -129,11 +129,16 @@ class PersistentHomologyResult(BaseModel):
 
 class ManifoldGeometryResult(BaseModel):
     """Section 11 result: tangent space, geodesic distortion,
-    curvature proxies, and persistent homology."""
+    curvature proxies, and persistent homology.
+
+    Every field is optional so a section that could not run — the union it
+    reads is not in this corpus — round-trips as a stub carrying its reason.
+    """
 
     model_config = _FORBID
 
-    tangent_space: TangentSpaceResult
-    geodesic_distortion: GeodesicDistortionResult
-    curvature: CurvatureResult
-    persistent_homology: PersistentHomologyResult
+    tangent_space: TangentSpaceResult | None = None
+    geodesic_distortion: GeodesicDistortionResult | None = None
+    curvature: CurvatureResult | None = None
+    persistent_homology: PersistentHomologyResult | None = None
+    error: str | None = None

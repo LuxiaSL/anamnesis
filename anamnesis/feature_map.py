@@ -144,14 +144,24 @@ class FeatureTag(BaseModel):
 
 # ---------------------------------------------------------------------------- classification rules
 
+# The family labels that follow the stored block layout rather than naming a family.
+# They are a wire vocabulary, not a description: `anamnesis/analysis/battery/floors.py`
+# keys its floor results by `family:<label>`, so a label that changed would stop lining
+# up with the numbers already banked under it. The constants carry what each one groups;
+# the strings stay where they belong, on disk.
+STORED_FAMILY_CACHE_AND_KEYS = "T2.5"
+STORED_FAMILY_ATTENTION_SPECTRAL = "T2_spectral"
+STORED_FAMILY_ATTENTION_OTHER = "T2_other"
+STORED_FAMILY_RESIDUAL_PCA = "T3"
+STORED_FAMILY_NORMS_AND_OUTPUT_STATS = "T1"
+
+
 def stored_family(n: str) -> str:
     """The family label a feature is grouped under in banked per-family results.
 
-    The labels are a wire vocabulary, not a description: `anamnesis/analysis/battery/floors.py`
-    keys its floor results by `family:<label>`, so a label that changed would silently stop
-    lining up with the numbers already banked under it. Five of them are short historical
-    strings that follow the stored block layout; the rest name their family directly. What a feature
-    reads is answered by `classify()` and its (source, method, depth) cell, never by this.
+    Five labels follow the stored block layout and are held as the STORED_FAMILY_*
+    constants above; the rest name their family directly. What a feature reads is
+    answered by `classify()` and its (source, method, depth) cell, never by this.
     """
     if n.startswith("value_"): return "value_geometry"
     if n.startswith(("qk_", "q_")): return "qk_geometry"
@@ -163,13 +173,13 @@ def stored_family(n: str) -> str:
     if n.startswith("out_sig"): return "path_signature_output"      # output-stats path source (2026-09-11 §1a)
     if n.startswith("attn_sig"): return "path_signature_attention"  # attention-region path source (2026-09-11 §1b)
     if n.startswith("res_traj"): return "residual_traj"
-    if n.startswith(("cache_", "kv_", "epoch_")): return "T2.5"
-    if n.startswith("spectral_"): return "T2_spectral"
-    if n.startswith(("attn_entropy_", "head_agreement_", "delta_")): return "T2_other"
+    if n.startswith(("cache_", "kv_", "epoch_")): return STORED_FAMILY_CACHE_AND_KEYS
+    if n.startswith("spectral_"): return STORED_FAMILY_ATTENTION_SPECTRAL
+    if n.startswith(("attn_entropy_", "head_agreement_", "delta_")): return STORED_FAMILY_ATTENTION_OTHER
     if n.startswith("attnres_"): return "attn_res"
     if n.startswith(("xrt_", "expert_routing_")): return "expert_routing"  # M6 MoE router (new; no legacy analog)
-    if n.startswith("pca_"): return "T3"
-    return "T1"
+    if n.startswith("pca_"): return STORED_FAMILY_RESIDUAL_PCA
+    return STORED_FAMILY_NORMS_AND_OUTPUT_STATS
 
 
 def _source(n: str) -> Source:

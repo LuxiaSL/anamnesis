@@ -49,7 +49,7 @@ from .schemas import (
     TopologyMetricSummary,
     TopologyResult,
 )
-from .utils import standardize, remove_constant, get_available_blocks
+from .utils import absence_reason, standardize, remove_constant, get_available_blocks
 
 
 # ──────────────────────────────────────────────────────────────
@@ -131,9 +131,25 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
             bootstrap_by_seed=boot_by_seed,
         )
 
+    # Per-mode ID and GRIDE both read the attention-and-cache union. The global
+    # per-block reading above stands without it, so an absent union costs those
+    # two readings and is reported in their place rather than ending the section.
+    union_absent = absence_reason(data, ATTENTION_AND_CACHE)
+    per_mode_result: dict[str, PerModeIDResult] | None = None
+    gride: GRIDEResult
+    if union_absent is not None:
+        print(f"    Per-mode ID and GRIDE skipped: {union_absent}")
+        gride = GRIDEResult(error=union_absent)
+        return IntrinsicDimensionResult(
+            global_=global_result,
+            per_mode=None,
+            gride=gride,
+            block_convergence=_block_convergence(global_result),
+        )
+
     # Per-mode ID (attention-and-cache union only)
     print("    Per-mode ID (attention and cache)...")
-    per_mode_result: dict[str, PerModeIDResult] = {}
+    per_mode_result = {}
     X_full = data.get_block(ATTENTION_AND_CACHE)
     for mode in data.unique_modes:
         mask = data.mode_mask(mode)
@@ -195,7 +211,6 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
 
     # GRIDE multiscale (attention-and-cache union)
     print("    GRIDE multiscale...")
-    gride: GRIDEResult
     try:
         X_full_std = standardize(data.get_block(ATTENTION_AND_CACHE))
         X_full_clean = remove_constant(X_full_std)
@@ -216,27 +231,35 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
     except Exception as e:
         gride = GRIDEResult(error=str(e))
 
-    # Block convergence metric
-    block_convergence: BlockConvergenceResult | None = None
-    global_ids: dict[str, float] = {}
-    for block in [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS]:
-        tid = global_result.get(block)
-        if tid is not None and isinstance(tid.dadapy_id, (int, float)):
-            global_ids[block] = float(tid.dadapy_id)
-
-    if len(global_ids) == 3:
-        vals = list(global_ids.values())
-        block_convergence = BlockConvergenceResult(
-            max_pairwise_diff=float(max(vals) - min(vals)),
-            converged_within_2=(max(vals) - min(vals)) < 4.0,
-            values=global_ids,
-        )
-
     return IntrinsicDimensionResult(
         global_=global_result,
         per_mode=per_mode_result,
         gride=gride,
-        block_convergence=block_convergence,
+        block_convergence=_block_convergence(global_result),
+    )
+
+
+def _block_convergence(
+    global_result: dict[str, GlobalBlockIDResult],
+) -> BlockConvergenceResult | None:
+    """How close the first three core blocks' intrinsic dimensions sit, when all three read.
+
+    None when any of the three is absent or did not estimate, because a spread
+    over two of them is a different quantity under the same name.
+    """
+    global_ids: dict[str, float] = {}
+    for block in [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS]:
+        entry = global_result.get(block)
+        if entry is not None and isinstance(entry.dadapy_id, (int, float)):
+            global_ids[block] = float(entry.dadapy_id)
+
+    if len(global_ids) != 3:
+        return None
+    vals = list(global_ids.values())
+    return BlockConvergenceResult(
+        max_pairwise_diff=float(max(vals) - min(vals)),
+        converged_within_2=(max(vals) - min(vals)) < 4.0,
+        values=global_ids,
     )
 
 
@@ -379,6 +402,12 @@ def _ccgp_variant(
 
 def run_ccgp(data: AnalysisData) -> CCGPResult:
     """Run CCGP with multiple variants."""
+    absent = absence_reason(
+        data, ATTENTION_AND_CACHE, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, ALL_CORE,
+    )
+    if absent is not None:
+        return CCGPResult(error=f"CCGP reads {absent}")
+
     variants: dict[str, CCGPVariant] = {}
     block = ATTENTION_AND_CACHE
     X = data.get_block(block)
@@ -476,6 +505,10 @@ def _hierarchical_clustering(
 
 def run_topology(data: AnalysisData) -> TopologyResult:
     """Run centroid topology and delta-hyperbolicity analysis."""
+    absent = absence_reason(data, ATTENTION_AND_CACHE)
+    if absent is not None:
+        return TopologyResult(error=f"centroid topology reads {absent}")
+
     block = ATTENTION_AND_CACHE
     X = data.get_block(block)
     modes_list = sorted(set(data.modes))
@@ -567,6 +600,10 @@ def run_topology(data: AnalysisData) -> TopologyResult:
 def run_manifold_geometry(data: AnalysisData) -> ManifoldGeometryResult:
     """Tangent-space alignment, geodesic-vs-euclidean distortion,
     curvature proxies, and persistent homology on the attention-and-cache union."""
+    absent = absence_reason(data, ATTENTION_AND_CACHE)
+    if absent is not None:
+        return ManifoldGeometryResult(error=f"manifold geometry reads {absent}")
+
     from scipy.linalg import subspace_angles
     from sklearn.decomposition import PCA
     from sklearn.manifold import Isomap
