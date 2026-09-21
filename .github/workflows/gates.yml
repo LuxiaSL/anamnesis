@@ -32,8 +32,10 @@ jobs:
         run: |
           mkdir -p receipts
           if [ -d anamnesis ]; then
-            roots="anamnesis/scripts"
-            if [ -d tests ]; then roots="$roots tests"; fi
+            roots=""
+            for candidate in anamnesis/scripts tests; do
+              if [ -d "$candidate" ]; then roots="$roots $candidate"; fi
+            done
             python tools/check_import_closure.py --package anamnesis --roots $roots --json receipts/g4.json
           else
             echo "::notice title=G4::the package directory 'anamnesis' is absent, so the closure runs over 'tools'; the gate tooling lands before the package it gates"
