@@ -37,8 +37,8 @@
     "C3": {
       "capability": "GPU fan-out launchers",
       "module": "anamnesis/orchestration/launch.py",
-      "justification": "consolidation",
-      "ported_consumers": 2,
+      "justification": "consolidation. The six consumers are anamnesis/scripts/run_replay.py, anamnesis/scripts/run_gen_tokens.py, anamnesis/scripts/run_replay_multickpt.py and anamnesis/scripts/stage0_floors.py \u2014 the last of which is the Stage-0 faithfulness donor's own fan-out, consuming the launcher rather than carrying a private copy, which is what its donor row directs \u2014 plus tests/test_launch.py and tests/test_stage0_floors.py. The seven donor scripts stay in the frozen record.",
+      "ported_consumers": 6,
       "donor_total": 1387,
       "donors": {
         "anamnesis/scripts/parallel_generate.py": 219,
@@ -65,8 +65,8 @@
     "C5": {
       "capability": "audit lib",
       "module": "anamnesis/analysis/audit_lib.py",
-      "justification": "consolidation. The one consumer is tests/test_audit_lib.py; the seven scripts that read the three donor modules stay in the frozen record, which is where their results were produced.",
-      "ported_consumers": 1,
+      "justification": "consolidation. The four consumers are anamnesis/analysis/encoder_ladder.py, anamnesis/analysis/leak_gate.py, anamnesis/scripts/encoder_on_raw.py and tests/test_audit_lib.py; the seven scripts that read the three donor modules stay in the frozen record, which is where their results were produced. The module is larger than its first extraction because the scope is now complete: the readout pair (make_encoder, train_eval) is extracted too, since the ladder that consumes the surface sampling reads the fold preprocessing and the readouts through the same protocol, and leaving one of the three in the record would have split one measurement discipline across two repositories.",
+      "ported_consumers": 4,
       "donor_total": 648,
       "donors": {
         "anamnesis/analysis/v3_audit/_common.py": 223,

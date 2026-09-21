@@ -598,3 +598,128 @@ def write_json(path: Path | str, payload: Mapping[str, Any]) -> Path:
     out.write_text(json.dumps(dict(payload), indent=1))
     logger.info(f"wrote {out}")
     return out
+
+
+# ── The qualitative readout ───────────────────────────────────────────────────
+DOSE_LADDER: tuple[float, ...] = (0.0, 0.03, 0.1, 0.3)
+"""The doses a free-generation ladder banks. It stops at 0.3, and a mode-induction
+peak sits higher (analogy markers peaked at 0.45 in the wave-1 adjudication), so the
+strongest collected cell is pre-peak: the ladder shows a trend, not a ceiling."""
+
+QUALITATIVE_CHARS = 600
+"""Characters shown per generation. Enough to read the register and the structure,
+short enough that a block of six cells fits on a screen."""
+
+
+def cell_ladder(
+    site: int,
+    *,
+    vector: str = "V3",
+    controls: Sequence[tuple[str, str]] = (("V1", "formality control"), ("R1", "random-vector control")),
+    doses: Sequence[float] = DOSE_LADDER,
+    control_dose: float = 0.3,
+) -> list[tuple[str, str]]:
+    """The cells a qualitative read lays out, in reading order: ``(label, directory)``.
+
+    The directory spelling is the banked one — ``<vector>_L<site>_L<site>_a<dose>``
+    with the dose written as a float, and a random control carrying one site rather
+    than two — because these names address directories that already exist on disk.
+
+    A dose ladder of one vector plus one control per axis at a matched dose. The
+    controls are what make the ladder readable: a formality vector says what a
+    *different* real direction does at the same dose, and a random one says what mere
+    magnitude does — so an effect that appears in all three is dose, not steering.
+    """
+    ladder = [
+        (
+            f"{vector} alpha={dose}" + (" (baseline)" if dose == 0.0 else ""),
+            f"{vector}_L{site}_L{site}_a{float(dose)}",
+        )
+        for dose in doses
+    ]
+    return ladder + [
+        (
+            f"{name} alpha={control_dose} ({description})",
+            f"{name}_L{site}_L{site}_a{float(control_dose)}" if name != "R1"
+            else f"{name}_L{site}_a{float(control_dose)}",
+        )
+        for name, description in controls
+    ]
+
+
+def matched_generations(cell_dir: Path | str) -> dict[int, dict[str, Any]]:
+    """One cell's banked generations, keyed by generation id.
+
+    Returns an empty mapping where the cell has no metadata, because a ladder read
+    over the cells that exist is the normal case — a dose that was not collected is a
+    gap in the ladder, and the readout says so by leaving it out.
+    """
+    path = Path(cell_dir) / "metadata.json"
+    if not path.exists():
+        return {}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    generations = (
+        document["generations"]
+        if isinstance(document, dict) and "generations" in document
+        else document
+    )
+    return {int(g["generation_id"]): g for g in generations}
+
+
+def qualitative_markdown(
+    run_dir: Path | str,
+    *,
+    model: str,
+    site: int,
+    gen_ids: Sequence[int],
+    ladder: Sequence[tuple[str, str]] | None = None,
+    chars: int = QUALITATIVE_CHARS,
+) -> str:
+    """Matched prompts across a dose ladder and its controls, as a readable document.
+
+    This is the eyeball channel beside the numbers, and what it is for is one
+    question: does the vector induce the *mode* while the random control merely
+    degrades? A lever ratio cannot answer that and a reader can.
+
+    Matching is by generation id, which is the prompt. Seeds differ per cell
+    namespace, so two cells' texts for one id are the same prompt written twice rather
+    than a token-level control — a style comparison, and the document says so where it
+    is read rather than in a note somewhere else.
+    """
+    cells = list(ladder) if ladder is not None else cell_ladder(site)
+    loaded = {directory: matched_generations(Path(run_dir) / directory) for _, directory in cells}
+    lines = [
+        f"# Qualitative steering readout — {model} (site L{site})",
+        "",
+        "**Dose caveat:** the ladder tops out at the strongest dose that was collected, "
+        "and the mode-induction peak sits above it. Read the trend, not the ceiling.",
+        "",
+        "Matched by prompt (generation id). Seeds differ per cell, so this is a "
+        "style-and-mode comparison rather than a token-level control. **For each block: "
+        "does the vector shift the mode with dose, while the random control only drifts?**",
+        "",
+    ]
+    for gen_id in gen_ids:
+        reference = next(
+            (loaded[d][gen_id] for _, d in cells if gen_id in loaded[d]), None
+        )
+        if reference is None:
+            continue
+        lines += [
+            "---",
+            f"## generation {gen_id} — topic: *{reference.get('topic', '?')}* | "
+            f"stratum: {reference.get('mode', '?')}",
+            "",
+        ]
+        for label, directory in cells:
+            generation = loaded[directory].get(gen_id)
+            if not generation:
+                continue
+            text = str(generation.get("generated_text", "")).strip().replace("\n", " ")
+            lines += [
+                f"**{label}**  ({generation.get('num_generated_tokens', '?')} tokens)",
+                "",
+                f"> {text[:chars]}{'…' if len(text) > chars else ''}",
+                "",
+            ]
+    return "\n".join(lines)

@@ -35,6 +35,15 @@ The model-facing side is three more modules and a subpackage:
   realized token sequence reproduces the states that produced it, which is what
   makes a signature an object about a span of text rather than about a generation.
 
+Two more are about a capture's edges rather than its middle:
+
+* :mod:`anamnesis.extraction.onboarding` — whether a new model's preset row is true
+  of the checkpoint it describes, checked before any calibration or floor pass is
+  spent on it. Its refusals are its output.
+* :mod:`anamnesis.extraction.path_banks` — banked trajectories to path-signature
+  design matrices, with a path too short for the level asked for dropped and
+  counted rather than imputed.
+
 This module imports none of them. A submodule is addressed by name, which keeps
 importing the package free of the heaviest dependency any one member happens to
 need, and keeps the anchor's purity a property a test can assert.

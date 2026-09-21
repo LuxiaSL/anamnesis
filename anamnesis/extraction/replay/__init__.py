@@ -7,7 +7,7 @@ signature an object about a *span of text* rather than about a generation: repla
 collects signatures over text the model never chose, and it reproduces the states
 of text it did choose bit-for-bit on the same box.
 
-Four modules, in the order a replay uses them:
+Four modules are the capability itself, in the order a replay uses them:
 
 * :mod:`~anamnesis.extraction.replay.manifest` — what a run can be replayed over:
   the realized token sequences and the prompt boundary that splits each one.
@@ -24,6 +24,16 @@ Four modules, in the order a replay uses them:
   against an injected, possibly surgered cache. The prompt boundary is the cache
   length, so the extractor's prompt/generated split lands exactly on the
   cache/continuation seam.
+
+Two more are how a replay is actually run over a corpus:
+
+* :mod:`~anamnesis.extraction.replay.cell` — the production loop and the capture
+  surface it runs against. Three callers must run *the same* loop, which is the
+  only basis on which the faster two are allowed to exist.
+* :mod:`~anamnesis.extraction.replay.checkpoint_series` — that loop walked through
+  a series of adapter checkpoints on one model load, with the pristine restore
+  that keeps merge arithmetic from drifting along the series. What it varies is
+  which weights the replay runs against, not how the replay works.
 
 This module imports none of them: the manifest is readable with no model runtime
 present, and addressing it should not pull one in.

@@ -1,6 +1,6 @@
 """The measurement discipline every signature audit runs under.
 
-An audit asks whether a signature carries some structure. The five blocks here
+An audit asks whether a signature carries some structure. The six blocks here
 are what stand between asking that and answering it wrongly, and they are one
 module because each of them was copy-pasted across a suite of analysis scripts
 until a fold split in one of them disagreed with the same fold split in another:
@@ -38,12 +38,20 @@ row space by the Gram trick. The reduction is lossless for a linear readout
 an ``n``-wide one, which is the difference between a floor that runs and a floor
 that does not. It runs on whichever device it is handed.
 
+**The readout pair.** Two architectures and nothing between them: a linear
+classifier fitted to convergence, which is the floor, and one small nonlinear
+network, which is the check on whether the floor is the ceiling. Both are trained
+on the reduced coordinates the block above produces, which is what makes the two
+numbers comparable to each other and to every other ladder rung.
+
 The functions are extracted from the v3 audit suite, which stays whole in the
 frozen repository as the record of what was run when. Its import sites there —
 ``vmb_s51_encoder_on_raw`` (all three donor modules), ``vmb_s51_resolver``,
 ``pathsig_constant_injection``, ``pathsig_read_e1``, ``pathsig_incremental``,
 ``pathsig_s51_regen`` and ``analyze_signature_richness`` — read from the donors,
-not from here: this module is the living copy, and nothing edits the record.
+not from here: this module is the living copy, and nothing edits the record. The
+living consumer of the surface and readout blocks is
+:mod:`anamnesis.analysis.encoder_ladder`.
 """
 
 from __future__ import annotations
@@ -351,3 +359,117 @@ def preprocess_fold_gpu(
     Zte = (Xte @ Xtr.T @ U) / s                 # (n_te, r) test coords via cross-Gram
     g = Ztr.std().clamp_min(1e-8)
     return (Ztr / g).cpu().numpy(), (Zte / g).cpu().numpy()
+
+
+# ── The readout pair ──────────────────────────────────────────────────────────
+LOGIT = "logit"
+DEEP = "deep"
+
+DEEP_HIDDEN = 256
+DEEP_BOTTLENECK = 32
+DEEP_DROPOUT = 0.4
+DEEP_EPOCHS_RAW = 2500
+DEEP_EPOCHS_REDUCED = 800
+"""Epoch budgets: a raw-wide input needs the larger one, and the Gram-reduced
+input is well enough conditioned to converge in the smaller. A ladder states which
+it used, because the two are not the same measurement of the same architecture."""
+
+LBFGS_ITERATIONS = 200
+LBFGS_L2 = 1e-3
+DEEP_LR = 5e-3
+DEEP_WEIGHT_DECAY = 1e-2
+
+
+def make_encoder(
+    n_features: int,
+    arch: str,
+    *,
+    nclass: int = 5,
+    p_drop: float = DEEP_DROPOUT,
+    k: int = DEEP_BOTTLENECK,
+) -> Any:
+    """The floor readout or the nonlinear one, by name.
+
+    ``logit`` is a single linear layer: with an L2 penalty and a convex solver it
+    reaches the linear optimum, which is what makes it a floor rather than one
+    fit's opinion. ``deep`` is ``P -> 256 -> k -> classes`` with dropout, and its
+    only job is to say whether the floor was the ceiling.
+    """
+    import torch.nn as nn
+
+    if arch == LOGIT:
+        return nn.Linear(n_features, nclass)
+    if arch == DEEP:
+        return nn.Sequential(
+            nn.Linear(n_features, DEEP_HIDDEN),
+            nn.ReLU(),
+            nn.Dropout(p_drop),
+            nn.Linear(DEEP_HIDDEN, k),
+            nn.ReLU(),
+            nn.Linear(k, nclass),
+        )
+    raise ValueError(f"unknown arch {arch!r} (expected {LOGIT!r} or {DEEP!r})")
+
+
+def train_eval(
+    Xtr: NDArray[Any],
+    ytr: NDArray[np.int_],
+    Xte: NDArray[Any],
+    yte: NDArray[np.int_],
+    arch: str,
+    seed: int,
+    device: str,
+    *,
+    deep_epochs: int = DEEP_EPOCHS_RAW,
+    lbfgs_l2: float = LBFGS_L2,
+    nclass: int = 5,
+    k: int = DEEP_BOTTLENECK,
+) -> tuple[float, float]:
+    """Fit one architecture on a whole fold; return ``(test_acc, train_acc)``.
+
+    The solvers are not interchangeable and the pairing is the measured one: the
+    linear readout is convex, so LBFGS with a strong-Wolfe line search reaches its
+    optimum where a first-order optimizer stops short of it and reports a floor
+    that is really an optimization artifact. The nonlinear readout is not convex and
+    takes AdamW. The training accuracy comes back beside the test accuracy because a
+    floor at chance means one thing when the fit did not converge and another when
+    it fitted the training rows perfectly.
+    """
+    import torch
+    import torch.nn as nn
+
+    torch.manual_seed(seed)
+    train_rows = torch.tensor(Xtr, dtype=torch.float32, device=device)
+    train_labels = torch.tensor(ytr, dtype=torch.long, device=device)
+    test_rows = torch.tensor(Xte, dtype=torch.float32, device=device)
+    net = make_encoder(Xtr.shape[1], arch, nclass=nclass, k=k).to(device)
+    loss_fn = nn.CrossEntropyLoss()
+
+    if arch == LOGIT:
+        optimizer = torch.optim.LBFGS(
+            net.parameters(), max_iter=LBFGS_ITERATIONS, line_search_fn="strong_wolfe"
+        )
+
+        def closure() -> Any:
+            optimizer.zero_grad()
+            penalty = lbfgs_l2 * sum((p ** 2).sum() for p in net.parameters())
+            loss = loss_fn(net(train_rows), train_labels) + penalty
+            loss.backward()
+            return loss
+
+        optimizer.step(closure)
+    else:
+        optimizer = torch.optim.AdamW(
+            net.parameters(), lr=DEEP_LR, weight_decay=DEEP_WEIGHT_DECAY
+        )
+        for _ in range(deep_epochs):
+            net.train()
+            optimizer.zero_grad()
+            loss_fn(net(train_rows), train_labels).backward()
+            optimizer.step()
+
+    net.eval()
+    with torch.no_grad():
+        test_acc = float((net(test_rows).argmax(1).cpu().numpy() == yte).mean())
+        train_acc = float((net(train_rows).argmax(1).cpu().numpy() == ytr).mean())
+    return test_acc, train_acc

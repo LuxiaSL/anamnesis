@@ -32,7 +32,7 @@ from anamnesis.config import ExperimentConfig
 from anamnesis.extraction.generation_runner import (
     _convert_outputs_to_raw,
     _convert_streaming_to_raw,
-    _router_fields_from_hooks,
+    router_fields_from_hooks,
     build_generation_specs,
     find_completed_ids,
     format_prompt,
@@ -251,7 +251,7 @@ def test_gate_captures_are_absent_rather_than_zero_filled_when_no_hook_ran() -> 
 def test_a_dense_model_yields_no_router_fields() -> None:
     """A dense checkpoint populates no router captures, so the expert-routing family is
     absent from the vector rather than reading zeros."""
-    assert _router_fields_from_hooks(FakeHookState(), [0, 1, 2]) == (None, None, None)
+    assert router_fields_from_hooks(FakeHookState(), [0, 1, 2]) == (None, None, None)
 
 
 def streaming_output(n_generated: int = 3, prompt_length: int = 4) -> StreamingOutput:

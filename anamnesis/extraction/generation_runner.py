@@ -220,7 +220,7 @@ def run_single_generation(
     return result, metadata
 
 
-def _router_fields_from_hooks(
+def router_fields_from_hooks(
     hook_state: Any, sampled_layers: list[int]
 ) -> tuple[dict[int, list[F32]] | None, dict[int, list[F32]] | None, dict[int, list[F32]] | None]:
     """Build (router_dist, router_branch_norms, router_logit_norms) for MoE models (arm A7, M6).
@@ -352,7 +352,7 @@ def _convert_outputs_to_raw(
                     for g in gen_gates
                 ]
 
-    router_dist, router_branch_norms, router_logit_norms = _router_fields_from_hooks(
+    router_dist, router_branch_norms, router_logit_norms = router_fields_from_hooks(
         hook_state, sampled_layers)
 
     return RawGenerationData(
@@ -407,7 +407,7 @@ def _convert_streaming_to_raw(
                 for k in pre_rope_keys[l_idx]
             ]
 
-    router_dist, router_branch_norms, router_logit_norms = _router_fields_from_hooks(
+    router_dist, router_branch_norms, router_logit_norms = router_fields_from_hooks(
         hook_state, sampled_layers)
 
     return RawGenerationData(
