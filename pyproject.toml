@@ -9,13 +9,13 @@ description = "Computational state signatures: instrument for how a forward pass
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-dependencies = []
+dependencies = ["pydantic>=2.7"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "numpy>=1.26"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["tools"]
+packages = ["anamnesis", "tools"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

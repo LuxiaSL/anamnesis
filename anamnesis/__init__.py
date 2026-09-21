@@ -1,0 +1,20 @@
+"""Anamnesis: the instrument for computational state signatures.
+
+A signature is a lossy compression of the causal history of a forward pass over
+a span of text — what the computation did, not what the text said.
+
+Importing this package does nothing but make its submodules addressable. Each
+one is imported for what it holds:
+
+* :mod:`anamnesis.config` — per-model presets, one pass's settings, named runs.
+* :mod:`anamnesis.modes` — the processing-mode prompt sets and the prompt-swap
+  pairs the confound test is built from.
+
+The package directory also ships :mod:`anamnesis.config`'s run registry and the
+prompt-set data, so a checkout is enough to describe a run without reaching for
+a data store.
+"""
+
+from __future__ import annotations
+
+__all__: tuple[str, ...] = ()
