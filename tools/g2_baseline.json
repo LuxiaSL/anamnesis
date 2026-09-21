@@ -6,8 +6,8 @@
     "C1": {
       "capability": "steering vectors",
       "module": "anamnesis/steering/vectors.py",
-      "justification": "consolidation",
-      "ported_consumers": null,
+      "justification": "consolidation. The five consumers are anamnesis/steering/screens.py, anamnesis/steering/gates.py, anamnesis/steering/readouts.py, anamnesis/scripts/steer_vectors.py (the golden-path-6 entry point) and tests/test_steering_vectors.py; the five donor scripts stay in the frozen record, where their banks were built. Where two donors disagreed the primary donor's convention won and both are reachable: the paired and unpaired mean-difference laws are separate functions, and the pooled-within-class and injection-target covariance estimators are named separately rather than defaulted.",
+      "ported_consumers": 5,
       "donor_total": 932,
       "donors": {
         "anamnesis/scripts/vmb_a5_build_vectors.py": 282,
