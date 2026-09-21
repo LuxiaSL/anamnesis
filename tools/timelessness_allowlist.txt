@@ -1,0 +1,37 @@
+# Citation markers for G3's dated-comment rule (check_timelessness.py).
+#
+# A date on evidence stays; a date on an edit goes. A dated comment is exempt
+# when the same line carries one of these markers, which name the kind of thing
+# a reader can go and check: a ruling, a pre-registration, a measured number, a
+# named arm or stage, a document that holds the record.
+#
+# One regex per line, matched case-insensitively anywhere in the source line.
+# Lines starting with `#` and blank lines are ignored. Add a pattern when a new
+# citation idiom appears in the code; the set is maintained, not closed.
+
+\bruling\b
+\baddendum\b
+\bspec[- ]
+\bjournal\b
+\bverified\b
+\bper\s
+\bprereg
+\bfinding\b
+\bsee\s
+\bcf\.
+\bcitation\b
+\bn=
+\bp[<=]0
+\bp<
+\barm\s
+\bstage
+\bgate\s
+\bfloor
+\bcensus\b
+\bmemo\b
+\bwave\b
+\baudit\b
+\blesson\b
+\bonboarding\b
+\bsweep\b
+bug caught
