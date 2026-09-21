@@ -9,8 +9,10 @@ matter live — so they are tested directly:
   * the split helper is topic-grouped by default and falls back to plain
     stratified folds only when there are no groups, which is the leak-proof
     default the corpus of record was rerun under;
-  * the permutation p-value cannot report zero, because with N permutations the
-    smallest resolvable p is 1/(N+1);
+  * the permutation p-value is the add-one statistic from
+    ``anamnesis.analysis.battery.stats``, recomputed here from a reproduced null
+    so that the two call sites are checked against each other rather than each
+    against itself;
   * BH-FDR over the per-block permutation family is monotone in p;
   * the pairwise and four-way readouts name their own conditions, so a missing
     mode is an error stub rather than a silently smaller comparison.
@@ -30,8 +32,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from anamnesis.analysis.battery.stats import (
+    bh_fdr_by_key,
+    permutation_pvalue,
+    permutation_resolution,
+)
 from anamnesis.analysis.gauntlet.classification import (
-    _bh_fdr,
     _make_splits,
     _run_4way_no_analogical,
     _run_cv_stability,
@@ -149,10 +155,40 @@ def test_a_permutation_p_value_cannot_be_reported_as_zero(separable) -> None:
     X, y, topics = separable
     result = _run_permutation_test(X, y, n_permutations=12, groups=groups_of(topics))
     assert result.n_permutations == 12
-    assert result.p_value >= 1.0 / 13, "the resolution floor is 1/(N+1), not 0"
+    assert result.p_value >= permutation_resolution(12), "1/(N+1) is the resolution"
     assert result.observed_accuracy > result.null_mean
     assert result.null_p95 <= result.null_max
     assert result.q_value is None, "the q-value is attached by the section, not here"
+
+
+def test_the_section_reports_the_p_value_the_battery_computes(separable) -> None:
+    """The two call sites agree, checked by recomputing one against the other.
+
+    The null is reproducible — one seed drives the label shuffles and every forest
+    grown on them — so the section's number can be rebuilt here and handed to
+    ``permutation_pvalue`` directly. Agreement is the receipt that the section owns
+    no second copy of the arithmetic.
+    """
+    X, y, topics = separable
+    groups = groups_of(topics)
+    n_permutations = 8
+    result = _run_permutation_test(
+        X, y, n_permutations=n_permutations, groups=groups, seed=42,
+    )
+
+    rng = np.random.default_rng(42)
+    null = np.array([
+        _run_rf_cv(
+            X, rng.permutation(y), seed=42, return_confusion=False, groups=groups,
+        ).accuracy
+        for _ in range(n_permutations)
+    ])
+    assert result.null_mean == pytest.approx(float(np.mean(null))), (
+        "the reproduced null matches the one the section drew"
+    )
+    assert result.p_value == pytest.approx(
+        permutation_pvalue(result.observed_accuracy, null)
+    )
 
 
 def test_cv_stability_summarises_the_seeds_it_ran(separable) -> None:
@@ -165,13 +201,15 @@ def test_cv_stability_summarises_the_seeds_it_ran(separable) -> None:
 
 
 def test_bh_fdr_is_monotone_and_never_exceeds_one() -> None:
-    q = _bh_fdr({"a": 0.001, "b": 0.02, "c": 0.5, "d": 0.9})
+    """The per-block family is corrected by the shared step-up, keyed by block."""
+    q = bh_fdr_by_key({"a": 0.001, "b": 0.02, "c": 0.5, "d": 0.9})
     assert set(q) == {"a", "b", "c", "d"}
     ordered = [q[k] for k in ["a", "b", "c", "d"]]
     assert ordered == sorted(ordered), "q-values follow the p-value order"
     assert all(0.0 <= v <= 1.0 for v in q.values())
     assert q["a"] >= 0.001, "adjustment can only raise a p-value"
-    assert _bh_fdr({"only": 0.04})["only"] == pytest.approx(0.04)
+    assert bh_fdr_by_key({"only": 0.04})["only"] == pytest.approx(0.04)
+    assert bh_fdr_by_key({}) == {}, "a family with no members corrects to nothing"
 
 
 def test_the_length_only_baseline_reports_when_it_has_no_lengths(separable) -> None:

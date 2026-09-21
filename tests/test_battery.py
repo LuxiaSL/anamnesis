@@ -48,8 +48,10 @@ from anamnesis.analysis.battery import (
     ResultStamp,
     StampedValue,
     bh_fdr,
+    bh_fdr_by_key,
     compute_stochastic_floors,
     permutation_pvalue,
+    permutation_resolution,
 )
 from anamnesis.analysis.battery.channel import ChannelSplit, decompose_channel
 from anamnesis.analysis.battery.decomp import CellVerdict, decompose
@@ -151,6 +153,45 @@ def test_a_permutation_p_value_carries_the_plus_one() -> None:
         permutation_pvalue(1.0, np.array([]))
     with pytest.raises(ValueError, match="unknown alternative"):
         permutation_pvalue(1.0, null, alternative="sideways")
+
+
+def test_bh_fdr_by_key_is_the_same_step_up_under_names() -> None:
+    family = {"attention": 0.001, "residual": 0.02, "gate": 0.4, "keys": 0.9}
+    keyed = bh_fdr_by_key(family)
+    _reject, adjusted = bh_fdr(list(family.values()))
+    assert list(keyed) == list(family), "the caller's keys come back unchanged"
+    for (key, q), expected in zip(keyed.items(), adjusted):
+        assert q == pytest.approx(float(expected)), key
+    # Ties take one q-value, which is what makes the two entry points substitutable
+    # for a family holding repeated p-values.
+    tied = bh_fdr_by_key({"a": 0.02, "b": 0.02, "c": 0.9})
+    assert tied["a"] == pytest.approx(tied["b"])
+    assert bh_fdr_by_key({}) == {}
+
+
+def test_the_add_one_correction_is_never_zero_and_never_below_its_resolution() -> None:
+    """The convention every permutation p-value in the package is reported under."""
+    for n_permutations in (12, 500, 1000):
+        null = np.zeros(n_permutations)
+        resolution = permutation_resolution(n_permutations)
+        assert resolution == pytest.approx(1.0 / (n_permutations + 1))
+        # Nothing in the null reaches the observation: the finest p available.
+        assert permutation_pvalue(1.0, null) == pytest.approx(resolution)
+        assert permutation_pvalue(1.0, null) > 0.0
+
+        # One hit is where the add-one form and a floored hits/n part company.
+        one_hit = np.concatenate([np.zeros(n_permutations - 1), np.ones(1)])
+        add_one = permutation_pvalue(1.0, one_hit)
+        floored = max(1.0 / n_permutations, resolution)
+        assert add_one == pytest.approx(2.0 / (n_permutations + 1))
+        assert add_one > floored, "the floored form is the anti-conservative one"
+
+    assert permutation_pvalue(1.0, np.zeros(500)) == pytest.approx(0.001996, abs=1e-6)
+    assert permutation_pvalue(1.0, np.concatenate([np.zeros(499), np.ones(1)])) == \
+        pytest.approx(0.003992, abs=1e-6)
+
+    with pytest.raises(ValueError, match="at least one draw"):
+        permutation_resolution(0)
 
 
 def test_a_stamped_value_is_frozen_and_can_point_at_its_artifact() -> None:
