@@ -401,3 +401,65 @@ that spawns it.
 | — | `tests/test_calibration_io.py` | New. What the one reader does with both banked shapes, with absence, and with the per-layer shape it refuses rather than silently reduces. |
 | — | `tests/test_interventions.py` | New. The refusals, which are the substance: a partial spec, a bank missing a key, a write whose gating did not fire or fired the wrong number of times, and an unsteered cell asked to report a dose. |
 | — | `tests/test_entry_points.py` | New. Each command's refusals before a model loads, the decode policy coming from the preset row rather than from a literal, and the recompute configs pinned field-for-field against the record's construction. |
+
+## Steering — construction, screens, gates and readouts
+
+Interventions are half the instrument, so the write side is in the repository
+whole (manifest ruling 1): a contributor gets the read and the write loop in one
+place. The thirteen donor scripts were thirteen experiments, and what they hold
+between them is one vocabulary — a construction, a screen that says whether it
+can be injected, a gate that says whether a cell is valid, and a readout that
+says what it did. Each is now one module with a caller on golden path 6.
+
+Everything here is **per-model**: a vector is built in one checkpoint's residual
+basis, whitened by its covariance, dosed in its median residual norm and injected
+at a site chosen by its own layer sweep, and none of those four transports.
+Carrying a vector across models is a transport problem with its own instrument,
+which is metabasis's to own, so this package offers no path that pretends
+otherwise.
+
+### Construction (C1)
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/vmb_a5_build_vectors.py` (**primary**) · `vmb_a5_whiten_steer_build.py` · `annex_band_pass.py` · `annex_perp_vectors.py` · `c5_sweep_and_build.py` | `anamnesis/steering/vectors.py` (**C1**) | 932 donor lines to 921. The primary donor's conventions win where donors disagree, and the disagreements are named rather than merged. **Mean difference:** `paired_mean_difference` is the primary's law (mean of per-pair, topic-matched differences, which is what the banked vectors are) and `mean_difference` is the unpaired difference of condition means; they coincide only on a complete balanced pairing, so both are callable and neither is a default the other hides behind. **Covariance:** `pooled_within_class_covariance` is the whitened-build donor's estimator and `target_covariance` the install donor's Σ-from-the-injection-target; the caller names one, because the choice is the science. **Median residual norm:** the primary's pooled-over-positions median wins over the whitened donor's median-of-per-generation-medians, which weights a short generation like a long one. **Degenerate-case conventions:** `heldout_cohens_d` takes `sd_floor` and `min_direction_norm` explicitly, because the sweep donor divides by `max(sd, 1e-8)` where the separation donor returns zero, and the two differ only where the statistic degenerates. Also here: `Spectrum` (descending on construction, from arrays, a covariance, observation rows or a banked npz), `band_pass` and its anatomy, `orthogonalize` with the hard cosine check, `random_unit_vectors` and `random_band_vector`, `dose_alpha`, `half_split_sweep`, the two banked builders, the install-lever builder, and bank IO under the frozen `a5_vectors.npz` / `a5_vectors_stamps.json` names. The five donors stay frozen in `anamnesis-pl`, where the banks they built were built. |
+| `scripts/c5_ledoit_wolf_gpu.py` | *record, for this PR* | The GPU Ledoit–Wolf estimator the install donor calls. `ledoit_wolf_covariance` uses the scikit-learn estimator it was validated against, which is the reference of record and is what a CPU-only contributor can run; the GPU version is a stranded generic primitive on the manifest's own list and lands with whichever PR gives it a consumer. |
+| kotodama's `steer_site_sweep.py` · `steer_install_build.py` | *record, another repository* | Convention donors only, and they are kotodama's. Their laws arrived here through `c5_sweep_and_build`, which is the anamnesis-side port of record: per-prompt averaging first, half-splits over prompts, Σ from the injection target, and the band-matched null. |
+
+### Screens
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/vmb_a5_covariance_screen.py` · `vmb_a5_band_mass_readout.py` · `vmb_a5_layer_separation.py` · `vmb_a5_routing_separation.py` | `anamnesis/steering/screens.py` | 803 donor lines to 482. `screen_vector` and `screen_bank` are the Mahalanobis-and-eigenmass screen, promoted per the manifest's own reading of the donor's docstring: it is a statistic for any candidate vector at any site, not an arm's tool. `band_mass` is the band-health readout, conventions verbatim. `deformation_curve` is the graded-Goodhart leg, and it takes captured arrays rather than a model, so the dose/α² law is testable without a checkpoint. The two separation companions collapse into one pair of metrics (`two_fold_heldout_d`, `centroid_ratio`) over one row builder (`axis_separation_rows`), which is what makes the residual-stream and expert-routing curves comparable rather than nearly comparable — the donors carried two copies of the same arithmetic with different degenerate-case thresholds. `capture_site_outputs` uses the package's `attach_residual_write` instead of the donor's private pre-hook: the same math at the same positions, through one implementation. |
+
+### Gates
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/vmb_a5_onpolicy_gate.py` · `vmb_a5_upstream_zero.py` · `annex_null.py` · `annex_shape_audit.py` | `anamnesis/steering/gates.py` | 697 donor lines to 523, and the manifest's **PORT-WITH-REWORK** carried out. The two annex gates graduate properly: `assert_against_own_null` and `audit_axis` / `audit_axes` take arrays and return verdicts, with no corpus loader anywhere in the module. The donors imported `annex_corpus` and `annex_spectrum.pca`, which self-declare as not buildable upon, only to reach a self-test and a principal-components fit — so the loaders stay in the record and the checks now run on any corpus, with the caller supplying the projections. `on_policy_gate` is the ≥0.85 matched-token bar with its `alpha = 0` baseline, over one write handle per site whose alpha is mutated per cell. `upstream_zero_check` is the exactly-zero standing check, keyed on the *deepest* layer a feature name reads so a cross-layer feature cannot be called upstream on the strength of its shallower index. |
+| `anamnesis/scripts/_a5_common.py` | `anamnesis/steering/gates.py` · `anamnesis/steering/vectors.py` | One of its three helpers is a gate primitive and it lands as `gates.teacher_forced_agreement`; the dose currency it also held is `vectors.median_row_norm` and `vectors.capture_median_residual_norms`, and the bank reader is `vectors.load_vector`. The file is on the manifest's list of four underscore helpers that become `orchestration/`, so this is a private copy pending convergence with that module when it lands — nothing else imports it, and the function is eleven lines of arithmetic over one forward pass. |
+
+### Readouts
+
+Filed under `steering/` per the STRUCTURE seam-3 ruling: these read
+*interventions*, where `analysis/` reads runs.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/vmb_a5_lever_readout.py` · `vmb_matched_support_efficiency.py` · `vmb_a6_directional_readout.py` · `vmb_partc_contrast.py` · `vmb_identity_histogram.py` | `anamnesis/steering/readouts.py` | 691 donor lines to 600. `lever_readout` is the model-agnostic lever; `matched_support_efficiency` is the same decomposition under the never-pool-nulls-across-supports constraint, and it is **C4's first package consumer** — it imports `analysis.text_stats.text_stats` for the coherence statistics that ride beside every cell, where the donor reached into a superseded analyzer for them. `directional_series`, `seed_floor` and `sign_flip_p` are the checkpoint-series readout; `contrast_fields` returns the frame alongside the fields so the contrast frame is stamped rather than assumed. `expert_usage_histogram` is the identity sidecar, warning included. `parse_cell_name` accepts both banked cell-directory spellings — the signed-dose one and the open-vector-name one the record-side scripts read through `vmb_arm_a5_analyze.parse_cell_dir` — because steered-cell naming is steering's own vocabulary, which is why it lands here rather than travelling with the superseded analyzer that C4 left in the record. |
+
+### The entry point
+
+| old path | new home | notes |
+|---|---|---|
+| — | `anamnesis/scripts/steer_vectors.py` | New, and not optional: without it C1 lands with no caller at all (staleness F3). Six subcommands, one per leg of golden path 6 up to the judge — `sweep`, `build`, `screen`, `gate`, `null`, `lever` — and it is a shim throughout: argparse, dispatch and JSON writing over package calls, with a test asserting its public surface holds nothing another module would import. The judge leg is `anamnesis/judging/`, which lands separately. |
+
+### Tests
+
+| old path | new home | notes |
+|---|---|---|
+| — | `tests/test_steering_vectors.py` | New; the donors carried no tests. Each convention against what it exists for: that an ascending eigendecomposition comes back descending, that the two mean-difference laws agree on a balanced pairing and disagree otherwise, that `Σ⁻¹Δ` leaves Δ under anisotropy, that a band member is confined and an amplified residue is visible as a low band mass, that orthogonalization refuses a parallel vector, that a band null stays in its band, that the pooled dose currency is not swayed by one outlying position, that the held-out d is smaller than the in-sample value on noise and that the two degenerate conventions differ only at zero variance, and that a sweep finds a planted layer. |
+| — | `tests/test_steering_screens.py` | New. The screen's own claim, that the same unit magnitude costs more in the tail than at the top; that eigenmass entries are fractions; that a flat dose/α² ratio distinguishes a linear response from a super-linear one; and that a routing substrate's sparse layer list and a residual substrate's dense one both produce rows naming their layer and depth. |
+| — | `tests/test_steering_gates.py` | New. That a cross-layer feature keys on its deepest layer and a delta feature is upstream one block shallower; that the upstream bar is exact zero, failing at `1e-12`; that the mean-difference null is the top-k trace share and the isotropic null is `k/d`; that the gate raises on a gradient and on a whitened direction rather than returning a number; that **the same vector reads above an isotropic null and inside its own**, which is the failure the gate exists for; and that the shape audit catches a six-row axis that both covariate legs call clean. |
+| — | `tests/test_steering_readouts.py` | New. Both cell-name spellings and the refusal to default a non-cell directory; the target/off-target split and its dose invariance; a lever ratio separating a real vector from its controls over synthetic banks; that a band target with no band null reports no ratio rather than borrowing the tail's; that the coherence statistics distinguish a looping generation from a healthy one; and that the matched-control frame cancels exactly the drift the vs-base frame keeps. |
+| — | `tests/test_steer_vectors_cli.py` | New. The shim rule as a test, the reachability of all four steering modules from the entry point, and `sweep` run end to end on synthetic banks so the CLI is a caller rather than a declaration. |
