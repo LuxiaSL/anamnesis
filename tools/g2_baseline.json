@@ -1,0 +1,84 @@
+{
+  "metric": "physical lines, counted as wc -l counts them (newline-terminated lines)",
+  "donor_source": "anamnesis-pl @ 4acedbf",
+  "total_python_loc_before": 94090,
+  "consolidations": {
+    "C1": {
+      "capability": "steering vectors",
+      "module": "anamnesis/steering/vectors.py",
+      "justification": "consolidation",
+      "ported_consumers": null,
+      "donor_total": 932,
+      "donors": {
+        "anamnesis/scripts/vmb_a5_build_vectors.py": 282,
+        "anamnesis/scripts/vmb_a5_whiten_steer_build.py": 182,
+        "anamnesis/scripts/annex_band_pass.py": 94,
+        "anamnesis/scripts/annex_perp_vectors.py": 79,
+        "anamnesis/scripts/c5_sweep_and_build.py": 295
+      }
+    },
+    "C2": {
+      "capability": "2AFC judge harness",
+      "module": "anamnesis/judging/harness.py",
+      "justification": "consolidation",
+      "ported_consumers": null,
+      "donor_total": 1700,
+      "donors": {
+        "anamnesis/scripts/run_2afc_mode_hardening.py": 190,
+        "anamnesis/scripts/run_2afc_temperature_hardening.py": 162,
+        "anamnesis/scripts/vmb_a5_judge_formality.py": 185,
+        "anamnesis/scripts/vmb_a5_judge_socratic.py": 271,
+        "anamnesis/scripts/vmb_d4_judge_analogical.py": 159,
+        "anamnesis/scripts/vmb_judge_family2.py": 307,
+        "anamnesis/scripts/vmb_judge_family2_annex.py": 181,
+        "anamnesis/scripts/c5_blind_judge.py": 245
+      }
+    },
+    "C3": {
+      "capability": "GPU fan-out launchers",
+      "module": "anamnesis/orchestration/launch.py",
+      "justification": "consolidation",
+      "ported_consumers": null,
+      "donor_total": 1387,
+      "donors": {
+        "anamnesis/scripts/parallel_generate.py": 219,
+        "anamnesis/scripts/parallel_replay.py": 193,
+        "anamnesis/scripts/vmb_stage0_generate.py": 299,
+        "anamnesis/scripts/vmb_a2_generate.py": 169,
+        "anamnesis/scripts/vmb_a5_gen_multicell.py": 201,
+        "anamnesis/scripts/vmb_a5_replay_multicell.py": 154,
+        "anamnesis/scripts/vmb_stage0_faithfulness.py": 152
+      }
+    },
+    "C4": {
+      "capability": "text-stats utilities",
+      "module": "anamnesis/analysis/text_stats.py",
+      "justification": "capability: ported as instrument capability rather than as a consolidation (ruling 5, 2026-09-20), so the arithmetic is reported beside the consumer count and neither number stands alone",
+      "ported_consumers": 1,
+      "donor_total": 826,
+      "donors": {
+        "anamnesis/scripts/vmb_arm_a5_analyze.py": 389,
+        "anamnesis/scripts/vmb_c3_entropy_replay.py": 180,
+        "anamnesis/scripts/vmb_14n_hedging_index.py": 257
+      }
+    },
+    "C5": {
+      "capability": "audit lib",
+      "module": "anamnesis/analysis/audit_lib.py",
+      "justification": "consolidation",
+      "ported_consumers": null,
+      "donor_total": 648,
+      "donors": {
+        "anamnesis/analysis/v3_audit/_common.py": 223,
+        "anamnesis/analysis/v3_audit/build_surface_caches.py": 265,
+        "anamnesis/analysis/v3_audit/surface_encoder_floor.py": 160
+      }
+    }
+  },
+  "tests": {
+    "paths": [
+      "tests"
+    ],
+    "floor_loc": 4559
+  }
+}
