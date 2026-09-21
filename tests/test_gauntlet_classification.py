@@ -20,14 +20,16 @@ matter live — so they are tested directly:
     against itself;
   * BH-FDR over the per-block permutation family is monotone in p;
   * the pairwise and four-way readouts name their own conditions, so a missing
-    mode is an error stub rather than a silently smaller comparison.
-
-One behaviour is pinned here as it stands rather than as it should be: the
-length-only confound baseline probes attribute names (``token_counts``, ``texts``,
-``run4.metadata``) that the loaded data object does not carry, so on a real run it
-reports "no length data available" instead of measuring the confound. The port
-carried it unchanged; the test records what it does so that fixing it is a
-visible change rather than a surprise.
+    mode is an error stub rather than a silently smaller comparison;
+  * the length-only baseline reads the one field that carries a generated-token
+    count and measures a real confound with it. Two corpora pin it from both sides:
+    one whose modes differ only in how much text they generated, where the baseline
+    must score well above chance, and one whose lengths are identical across modes,
+    where it must fall back to chance. A baseline that silently measured nothing
+    would pass a shape assertion and fail both of these;
+  * a run that cannot supply lengths raises rather than returning a
+    baseline-shaped stub, because in a results file "could not be measured" and
+    "measured nothing" sit in the same field.
 
 CPU only; no banked data, no model, no GPU.
 """
@@ -43,6 +45,8 @@ from anamnesis.analysis.battery.stats import (
     permutation_resolution,
 )
 from anamnesis.analysis.gauntlet.classification import (
+    LengthDataUnavailable,
+    _generation_lengths,
     _make_splits,
     _run_4way_no_analogical,
     _run_cv_stability,
@@ -59,6 +63,7 @@ from anamnesis.analysis.gauntlet.schemas import (
     LengthOnlyResult,
     TopicHeldoutResult,
 )
+from anamnesis.analysis.gauntlet.signature_io import AnalysisData, Run4Data, SampleMeta
 
 MODES = ["linear", "socratic", "contrastive", "dialectical", "analogical"]
 N_TOPICS = 6
@@ -340,26 +345,120 @@ def test_bh_fdr_is_monotone_and_never_exceeds_one() -> None:
     assert bh_fdr_by_key({}) == {}, "a family with no members corrects to nothing"
 
 
-def test_the_length_only_baseline_reports_when_it_has_no_lengths(separable) -> None:
-    _X, y, _topics = separable
+def run_with_lengths(lengths: list[int], modes: list[str], topics: list[str]) -> AnalysisData:
+    """A loaded run carrying nothing but the labels and the lengths under test.
 
-    class NoLengths:
-        n_samples = len(y)
-        run4 = object()
+    The feature matrix is a single zero column: the length baseline never reads it,
+    and a matrix that carried signal would make a length readout unfalsifiable.
+    """
+    samples = [
+        SampleMeta(
+            generation_id=index,
+            topic=topic,
+            topic_idx=sorted(set(topics)).index(topic),
+            mode=mode,
+            mode_idx=MODES.index(mode),
+            num_generated_tokens=length,
+            file_stem=f"gen_{index:03d}",
+        )
+        for index, (length, mode, topic) in enumerate(zip(lengths, modes, topics))
+    ]
+    X = np.zeros((len(samples), 1), dtype=np.float32)
+    run4 = Run4Data(
+        block_features={"norms_and_output_stats": X},
+        group_features={},
+        all_features=X,
+        block_feature_names={"norms_and_output_stats": np.array(["zero"])},
+        samples=samples,
+        modes=np.array([s.mode for s in samples]),
+        topics=np.array([s.topic for s in samples]),
+        mode_indices=np.array([s.mode_idx for s in samples], dtype=np.int64),
+        topic_indices=np.array([s.topic_idx for s in samples], dtype=np.int64),
+    )
+    return AnalysisData(run4=run4, run_name="synthetic")
 
-    result = _run_length_only_baseline(NoLengths(), y)
-    assert isinstance(result, LengthOnlyResult)
-    assert result.accuracy is None
-    assert result.error == "no length data available"
 
-    # Given lengths under one of the names it probes, it does measure the confound.
-    class WithLengths:
-        n_samples = len(y)
-        token_counts = [100 + 10 * MODES.index(m) for m in y]
-        run4 = object()
+def length_corpus(spread: int, reps: int = 8) -> tuple[AnalysisData, np.ndarray, np.ndarray]:
+    """Five modes over four topics; ``spread`` tokens of length between neighbours."""
+    rng = np.random.default_rng(20260921)
+    lengths, modes, topics = [], [], []
+    for mode_index, mode in enumerate(MODES):
+        for rep in range(reps):
+            lengths.append(400 + spread * mode_index + int(rng.integers(-3, 4)))
+            modes.append(mode)
+            topics.append(f"topic_{rep % 4}")
+    data = run_with_lengths(lengths, modes, topics)
+    return data, np.array(modes), groups_of(np.array(topics))
 
-    measured = _run_length_only_baseline(WithLengths(), y)
+
+def test_the_length_only_baseline_measures_the_confound_it_is_named_for() -> None:
+    """Modes that differ only in length are read off length alone."""
+    data, y, groups = length_corpus(spread=40)
+
+    measured = _run_length_only_baseline(data, y, groups=groups)
+    assert isinstance(measured, LengthOnlyResult)
     assert measured.error is None
-    assert measured.accuracy is not None and measured.accuracy > 0.5
+    assert measured.accuracy is not None and measured.accuracy > 0.8, (
+        "a corpus separated on length alone is separable on length alone"
+    )
+    assert measured.fold_accuracies and len(measured.fold_accuracies) == 4
+    assert measured.confusion_matrix is not None and measured.labels == sorted(MODES)
     assert measured.per_mode_lengths is not None
     assert set(measured.per_mode_lengths) == set(MODES)
+    means = [measured.per_mode_lengths[mode].mean for mode in MODES]
+    assert means == sorted(means), "the per-mode means follow the spread that was built in"
+
+
+def test_the_length_only_baseline_falls_to_chance_when_lengths_do_not_differ() -> None:
+    """The other side of the same check: no length difference, no length readout."""
+    data, y, groups = length_corpus(spread=0)
+
+    measured = _run_length_only_baseline(data, y, groups=groups)
+    assert measured.accuracy is not None and measured.accuracy < 2 * CHANCE, (
+        f"chance is {CHANCE:.2f}; a baseline far above it here would be reading noise"
+    )
+
+
+def test_the_baseline_reads_the_field_the_loader_fills() -> None:
+    """One home for the number: ``SampleMeta.num_generated_tokens``, row-aligned."""
+    data, _y, _groups = length_corpus(spread=40)
+    lengths = _generation_lengths(data)
+    assert lengths.dtype == np.float64
+    assert lengths.tolist() == [float(s.num_generated_tokens) for s in data.run4.samples]
+
+
+def test_a_run_that_cannot_supply_lengths_refuses_instead_of_stubbing() -> None:
+    """A moved or absent field is a failure, not a baseline reporting nothing."""
+
+    class NoSamples:
+        n_samples = 3
+        run4 = object()
+
+    with pytest.raises(LengthDataUnavailable, match="num_generated_tokens"):
+        _generation_lengths(NoSamples())
+    with pytest.raises(LengthDataUnavailable):
+        _run_length_only_baseline(NoSamples(), np.array(MODES[:3]))
+
+    class SamplesWithoutTheField:
+        n_samples = 2
+        run4 = type("Run", (), {"samples": [object(), object()]})()
+
+    with pytest.raises(LengthDataUnavailable, match="num_generated_tokens"):
+        _generation_lengths(SamplesWithoutTheField())
+
+
+def test_lengths_misaligned_with_the_feature_rows_are_refused() -> None:
+    """A baseline scored against the wrong rows is worse than an absent one.
+
+    A loaded run derives its row count from its samples, so the two cannot disagree
+    there; the guard is what keeps a second source of row count from being added
+    without this check noticing.
+    """
+    data, _y, _groups = length_corpus(spread=40)
+
+    class Misaligned:
+        n_samples = data.n_samples + 1
+        run4 = data.run4
+
+    with pytest.raises(LengthDataUnavailable, match="feature rows"):
+        _generation_lengths(Misaligned())

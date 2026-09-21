@@ -13,6 +13,14 @@ under roughly 15pp is fold noise. ``cv_stability`` on the key blocks measures th
 spread directly — its ``std`` and 95% interval are what a pairwise gap should be
 weighed against.
 
+One number here is not a finding but a ruler: the length-only baseline, a forest on
+generated-token count alone. Every mode accuracy in this section is read against it,
+because a corpus whose modes generate different amounts of text can be classified by
+length while looking like it was classified by computation. It runs first, before the
+stability sweeps and the permutation nulls, and it refuses rather than reporting a
+stub — a length baseline that says nothing and a length baseline that could not be
+measured look identical in a results file, and only one of them is honest.
+
 The two family-level statistics this module reports — the permutation p-value and
 the BH-FDR adjustment across the per-block permutation family (q_value on
 PermutationTestResult) — come from ``anamnesis.analysis.battery.stats``, which is
@@ -54,6 +62,17 @@ from .utils import get_available_blocks
 # n_jobs=1 on RF to avoid joblib thread pool deadlocks.
 # We parallelize at the outer loop level instead.
 _RF_KWARGS = dict(n_estimators=100, n_jobs=1)
+
+
+class LengthDataUnavailable(ValueError):
+    """No per-sample generated-token count is reachable on a loaded run.
+
+    A refusal rather than a reported absence. The length baseline is the ruler the
+    rest of this section is read against, and in a results file a stub saying it
+    could not be measured sits in the same field as a number saying length carries
+    nothing — so a pass that cannot measure it stops instead of banking the
+    ambiguity.
+    """
 
 
 def _make_splits(
@@ -315,6 +334,14 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
         print("  CV: WARNING — no topic labels; falling back to ungrouped "
               "StratifiedKFold (legacy, topic-leak-prone)")
 
+    # The confound check comes first. It is seconds of work, every accuracy below is
+    # read against it, and a run that cannot supply lengths should refuse before the
+    # stability sweeps and the thousand-permutation nulls rather than after them.
+    print("  Length-only baseline...")
+    length_only = _run_length_only_baseline(data, y, groups=groups)
+    print(f"    Length-only RF: {length_only.accuracy:.1%} "
+          f"against {1 / len(set(y)):.1%} chance")
+
     available_blocks, key_blocks = get_available_blocks(data)
     for block in available_blocks:
         print(f"  Classification: {block}")
@@ -367,46 +394,60 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
                 },
             )
 
-    # Length-only confound check
-    print("  Length-only baseline...")
-    length_only = _run_length_only_baseline(data, y, groups=groups)
-
     return ClassificationResult(by_block=by_block, length_only=length_only)
+
+
+def _generation_lengths(data: AnalysisData) -> NDArray[np.float64]:
+    """Generated tokens per sample, in the row order of the feature matrices.
+
+    ``SampleMeta.num_generated_tokens`` is this number's one home: a required field
+    of every loaded sample, filled from that signature's own sidecar, so it is there
+    whether or not the pass also loaded generated text. It is read by name off the
+    typed object rather than searched for among candidate spellings, because a
+    search that comes up empty produces a baseline-shaped absence, while a name that
+    has moved produces a failure somebody fixes.
+    """
+    try:
+        samples = data.run4.samples
+        lengths = np.array(
+            [float(sample.num_generated_tokens) for sample in samples], dtype=np.float64
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise LengthDataUnavailable(
+            "the length baseline reads run4.samples[i].num_generated_tokens and the "
+            f"loaded run does not supply it ({exc})"
+        ) from exc
+    if lengths.size != data.n_samples:
+        raise LengthDataUnavailable(
+            f"{lengths.size} sample lengths against {data.n_samples} feature rows; "
+            "a baseline aligned to the wrong rows measures nothing"
+        )
+    if not np.all(np.isfinite(lengths)):
+        raise LengthDataUnavailable(
+            "at least one sample carries a non-finite generated-token count"
+        )
+    return lengths
 
 
 def _run_length_only_baseline(
     data: AnalysisData, y: NDArray, groups: NDArray | None = None,
 ) -> LengthOnlyResult:
-    """RF with generation length as only feature — should be at chance (~20%).
+    """RF on generated-token count alone, under the same folds as everything else.
 
-    Critical confound check: if length alone predicts mode, feature-based
-    classification is suspect.
+    Chance is one over the number of modes. Near chance says the mode signal is not
+    length in disguise. Well above chance says the modes generate different amounts
+    of text, and then every accuracy in this section has to be read against this
+    number rather than against chance — which is why the per-mode length
+    distributions come back beside the accuracy: a mode whose generations end before
+    the token cap while the rest are truncated at it is separable on length alone,
+    and the distributions are what name it.
+
+    Raises
+    ------
+    LengthDataUnavailable
+        When no per-sample length is reachable.
     """
-    lengths: NDArray | None = None
-    if hasattr(data, "token_counts") and data.token_counts is not None:
-        lengths = np.array(data.token_counts, dtype=float)
-    elif hasattr(data, "texts") and data.texts is not None:
-        lengths = np.array([len(t.split()) for t in data.texts], dtype=float)
-    else:
-        try:
-            gen_lengths: list[float] = []
-            for i in range(data.n_samples):
-                meta = data.run4.metadata[i] if hasattr(data.run4, "metadata") else None
-                if meta and "n_tokens" in meta:
-                    gen_lengths.append(float(meta["n_tokens"]))
-                elif meta and "generation_length" in meta:
-                    gen_lengths.append(float(meta["generation_length"]))
-                else:
-                    gen_lengths.append(float("nan"))
-            if not any(np.isnan(gen_lengths)):
-                lengths = np.array(gen_lengths)
-        except Exception as e:
-            print(f"    length-baseline: metadata length probe failed ({e}); "
-                  "reporting 'no length data available'")
-
-    if lengths is None or np.any(np.isnan(lengths)):
-        return LengthOnlyResult(accuracy=None, error="no length data available")
-
+    lengths = _generation_lengths(data)
     X_length = lengths.reshape(-1, 1)
     base = _run_rf_cv(X_length, y, return_confusion=True, groups=groups)
 
