@@ -8,11 +8,12 @@ the composite. These tests close that off:
     ``__all__`` and the modules agree in both directions;
   * the composite declares one field per section and its types are the sections'
     own result models, so a section renamed in one place fails here;
-  * the two reshaping models — classification's tier-keys-at-top-level and
+  * the two reshaping models — classification's block-keys-at-top-level and
     contrastive's on-disk key vocabulary — round-trip, because those are the
     places where the model's shape and the file's shape are not the same shape;
   * ``extra="forbid"`` is live on every model, which is the whole reason a
-    checkpoint can be trusted after validation.
+    checkpoint can be trusted after validation — and the read-side rename table is
+    the reason a checkpoint written under older field names still gets that far.
 
 CPU only; no data, no model.
 """
@@ -39,9 +40,14 @@ SECTION_MODULES = (
     "results",
     "scorecard",
     "semantic",
-    "tier_ablation",
+    "legacy_bin_readout",
     "topology",
 )
+
+COMPAT_EXPORTS = frozenset({"FIELD_RENAMES", "SECTION_RENAMES", "migrate_banked_results"})
+"""The package's non-model exports: the read-side rename table and its function. They
+are re-exported beside the models because a caller validating a banked file needs both,
+and they are named here so the export check stays exhaustive rather than approximate."""
 
 
 def models_in(module_name: str) -> dict[str, type[BaseModel]]:
@@ -59,11 +65,13 @@ def test_every_section_model_is_exported_and_nothing_is_exported_twice() -> None
         for name in models_in(module_name):
             assert name not in defined, f"{name} defined in both {defined.get(name)} and {module_name}"
             defined[name] = module_name
-    assert set(defined) == set(schemas.__all__), (
-        f"missing from __all__: {sorted(set(defined) - set(schemas.__all__))}; "
-        f"in __all__ but undefined: {sorted(set(schemas.__all__) - set(defined))}"
+    exported = set(schemas.__all__) - COMPAT_EXPORTS
+    assert set(defined) == exported, (
+        f"missing from __all__: {sorted(set(defined) - exported)}; "
+        f"in __all__ but undefined: {sorted(exported - set(defined))}"
     )
-    for name in schemas.__all__:
+    assert COMPAT_EXPORTS <= set(schemas.__all__)
+    for name in exported:
         assert getattr(schemas, name).__name__ == name
 
 
@@ -80,7 +88,7 @@ def test_the_composite_covers_every_section_the_orchestrator_runs() -> None:
 
 
 def test_every_model_forbids_unknown_keys() -> None:
-    for name in schemas.__all__:
+    for name in set(schemas.__all__) - COMPAT_EXPORTS:
         model = getattr(schemas, name)
         assert model.model_config.get("extra") == "forbid", name
     assert _FORBID["extra"] == "forbid"
@@ -105,7 +113,7 @@ def test_error_stubs_round_trip_through_exclude_none() -> None:
     }
 
 
-def tier_classification_payload() -> dict[str, object]:
+def block_classification_payload() -> dict[str, object]:
     return {
         "rf_5way": {"accuracy": 0.8, "fold_accuracies": [0.8], "confusion_matrix": [[1]],
                     "labels": ["linear"]},
@@ -116,15 +124,15 @@ def tier_classification_payload() -> dict[str, object]:
     }
 
 
-def test_classification_reshapes_tier_keys_both_ways() -> None:
+def test_classification_reshapes_block_keys_both_ways() -> None:
     wire = {
-        "T2+T2.5": tier_classification_payload(),
-        "combined": tier_classification_payload(),
+        "T2+T2.5": block_classification_payload(),
+        "combined": block_classification_payload(),
         "length_only": {"accuracy": None, "error": "no length metadata"},
     }
     parsed = schemas.ClassificationResult.model_validate(wire)
-    assert set(parsed.by_tier) == {"T2+T2.5", "combined"}
-    assert parsed.by_tier["combined"].rf_5way.accuracy == 0.8
+    assert set(parsed.by_block) == {"T2+T2.5", "combined"}
+    assert parsed.by_block["combined"].rf_5way.accuracy == 0.8
     assert parsed.length_only is not None
     out = parsed.model_dump(mode="json")
     assert set(out) == set(wire)
@@ -134,7 +142,7 @@ def test_classification_reshapes_tier_keys_both_ways() -> None:
 
 
 def test_a_classification_result_with_no_length_baseline_omits_the_key() -> None:
-    parsed = schemas.ClassificationResult.model_validate({"T1": tier_classification_payload()})
+    parsed = schemas.ClassificationResult.model_validate({"T1": block_classification_payload()})
     assert parsed.length_only is None
     assert "length_only" not in parsed.model_dump(mode="json")
 
@@ -153,15 +161,16 @@ def test_contrastive_reads_the_frozen_on_disk_key_vocabulary() -> None:
         "T2+T2.5_beats_combined": True,
     }
     parsed = schemas.ContrastiveSuperAdditivity.model_validate(on_disk)
-    assert parsed.T2_5_alone == 0.6
-    assert parsed.T2_T2_5_pair == 0.75
-    assert parsed.T2_T2_5_beats_combined is True
+    assert parsed.attention_alone == 0.5
+    assert parsed.cache_alone == 0.6
+    assert parsed.attention_and_cache_pair == 0.75
+    assert parsed.attention_and_cache_beats_combined is True
     assert parsed.model_dump(mode="json") == on_disk
     # The Python spelling also validates, so a freshly constructed result and a
     # reloaded one are the same object.
     python_spelling = {
-        "T2_alone": 0.5, "T2_5_alone": 0.6, "T2_T2_5_pair": 0.75,
+        "attention_alone": 0.5, "cache_alone": 0.6, "attention_and_cache_pair": 0.75,
         "best_individual": 0.6, "gain": 0.15, "combined_knn": 0.7,
-        "T2_T2_5_beats_combined": True,
+        "attention_and_cache_beats_combined": True,
     }
     assert schemas.ContrastiveSuperAdditivity.model_validate(python_spelling) == parsed

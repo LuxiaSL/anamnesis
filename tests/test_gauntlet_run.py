@@ -15,7 +15,7 @@ are the record's — but the machinery around them, which is what the rename to
   * the returned composite validates, which is the one place a section returning
     a shape its schema forbids would be caught.
 
-Five sections stay out of the pass. Classification's key-tier sweep is minutes of
+Five sections stay out of the pass. Classification's key-block sweep is minutes of
 CPU, so its parts are tested at small parameters in
 ``test_gauntlet_classification``; the intrinsic-dimension and CCGP sections want a
 corpus with condition structure a toy corpus does not have; the contrastive and
@@ -49,7 +49,7 @@ from anamnesis.analysis.gauntlet.schemas import (
 from anamnesis.analysis.gauntlet.signature_io import load_analysis_data
 from anamnesis.analysis.gauntlet.utils import (
     clean_for_json,
-    get_available_tiers,
+    get_available_blocks,
     remove_constant,
     standardize,
     timer,
@@ -78,13 +78,13 @@ def synthetic_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
             names: list[str] = []
             slices: dict[str, list[int]] = {}
             cursor = 0
-            for tier, w in width.items():
+            for block, w in width.items():
                 key = {"T1": "features_tier1", "T2": "features_tier2",
-                       "T2.5": "features_tier2_5", "T3": "features_tier3"}[tier]
+                       "T2.5": "features_tier2_5", "T3": "features_tier3"}[block]
                 signal = float(mode_idx) + 0.15 * rng.standard_normal(w)
                 arrays[key] = signal.astype(np.float32)
                 slices[key.replace("features_", "")] = [cursor, cursor + w]
-                names.extend(f"{tier}_feat_{i}" for i in range(w))
+                names.extend(f"{block}_feat_{i}" for i in range(w))
                 cursor += w
             np.savez(
                 folder / f"gen_{index:03d}.npz",
@@ -144,13 +144,13 @@ def test_a_full_pass_checkpoints_resumes_and_validates(synthetic_run: Path, tmp_
     assert isinstance(first, AnalysisResults)
     assert first.run_name == "synthetic"
     assert first.n_samples == len(MODES) * N_TOPICS
-    assert first.integrity is not None and first.tier_ablation is not None
+    assert first.integrity is not None and first.legacy_bin_readout is not None
     assert first.clustering is not None and first.topology is not None
     assert first.manifold_geometry is not None
     assert isinstance(first.scorecard, ScorecardResult)
     assert first.classification is None, "a skipped section stays unpopulated"
     assert first.ccgp is None
-    assert set(first.section_times) == {"integrity", "tier_ablation", "clustering",
+    assert set(first.section_times) == {"integrity", "legacy_bin_readout", "clustering",
                                         "topology", "manifold_geometry"}
 
     checkpoint = json.loads((out / "results.json").read_text())
@@ -169,7 +169,7 @@ def test_a_full_pass_checkpoints_resumes_and_validates(synthetic_run: Path, tmp_
     # Resumed sections come back from the checkpoint identical, and the
     # scorecard — always_rerun — is recomputed rather than trusted.
     assert second.integrity == first.integrity
-    assert second.tier_ablation == first.tier_ablation
+    assert second.legacy_bin_readout == first.legacy_bin_readout
     assert second.scorecard is not None
     assert second.timestamp == first.timestamp, "resume keeps the original run's stamp"
     assert second.last_updated >= first.last_updated
@@ -197,14 +197,14 @@ def test_an_error_stub_in_a_checkpoint_is_not_a_completed_section(
     assert isinstance(resumed.integrity, IntegrityResult), "the error stub was rerun"
 
 
-def test_available_tiers_separates_the_expensive_composites(synthetic_run: Path) -> None:
+def test_available_blocks_separates_the_expensive_composites(synthetic_run: Path) -> None:
     data = load_analysis_data(synthetic_run, run_name="synthetic", core_only=True,
                               load_text=False)
-    all_tiers, key_tiers = get_available_tiers(data)
-    assert set(all_tiers) >= {"T1", "T2", "T2.5", "T3", "combined"}
-    assert set(key_tiers) <= set(all_tiers)
-    assert "T1" not in key_tiers, "a single tier never pays for the expensive sweep"
-    assert "combined" in key_tiers
+    all_blocks, key_blocks = get_available_blocks(data)
+    assert set(all_blocks) >= {"T1", "T2", "T2.5", "T3", "combined"}
+    assert set(key_blocks) <= set(all_blocks)
+    assert "T1" not in key_blocks, "a single block never pays for the expensive sweep"
+    assert "combined" in key_blocks
 
 
 def test_the_timer_reports_the_elapsed_time_it_measured() -> None:

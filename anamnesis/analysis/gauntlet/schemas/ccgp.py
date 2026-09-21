@@ -24,7 +24,7 @@ class CCGPDichotomy(BaseModel):
 
 
 class CCGPVariant(BaseModel):
-    """One CCGP variant (classifier × seed × fold-count × optional tier)."""
+    """One CCGP variant (classifier × seed × fold-count × optional block)."""
 
     model_config = _FORBID
 

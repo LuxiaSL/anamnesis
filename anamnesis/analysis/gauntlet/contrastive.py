@@ -10,15 +10,23 @@ from sklearn.metrics import silhouette_score
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
-from .signature_io import AnalysisData, BASELINE_TIERS, ENGINEERED_TIERS
+from .signature_io import (
+    ALL_CORE,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    CORE_BLOCKS,
+    FAMILY_BLOCKS,
+    AnalysisData,
+)
 from .schemas import (
     CapacitySweepEntry,
     ContrastiveAblationEntry,
     ContrastivePairwiseEntry,
     ContrastiveResult,
     ContrastiveSuperAdditivity,
-    ContrastiveTierAblation,
-    ContrastiveTierResult,
+    ContrastiveBlockAblation,
+    ContrastiveBlockResult,
     LinearBaselineEntry,
 )
 
@@ -132,11 +140,11 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
     if not HAS_TORCH:
         return ContrastiveResult(error="PyTorch not installed — skipping contrastive projection")
 
-    tier_results: dict[str, ContrastiveTierResult] = {}
+    block_results: dict[str, ContrastiveBlockResult] = {}
 
-    for tier_name in ["T2+T2.5", "combined"]:
-        print(f"    Contrastive: {tier_name}")
-        X = data.get_tier(tier_name)
+    for block_name in [ATTENTION_AND_CACHE, ALL_CORE]:
+        print(f"    Contrastive: {block_name}")
+        X = data.get_block(block_name)
         X_scaled = StandardScaler().fit_transform(X)
 
         folds = _build_topic_folds(data.topics, n_folds=5, seed=42)
@@ -164,16 +172,16 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
                 fold_accs.append(0.0)
                 print(f"      Fold failed: {e}")
 
-        tier_results[tier_name] = ContrastiveTierResult(
+        block_results[block_name] = ContrastiveBlockResult(
             knn_accuracy_mean=float(np.mean(fold_accs)) if fold_accs else 0.0,
             knn_accuracy_std=float(np.std(fold_accs)) if fold_accs else 0.0,
             knn_fold_accs=fold_accs,
             silhouette_mean=float(np.mean(fold_sils)) if fold_sils else None,
         )
 
-    # Capacity sweep (T2+T2.5 only)
+    # Capacity sweep (the attention-and-cache union only)
     print("    Capacity sweep...")
-    X_key = StandardScaler().fit_transform(data.get_tier("T2+T2.5"))
+    X_key = StandardScaler().fit_transform(data.get_block(ATTENTION_AND_CACHE))
     folds = _build_topic_folds(data.topics, n_folds=5, seed=42)
     capacities = [64, 128, 256, 512]
     capacity_results: dict[str, CapacitySweepEntry] = {}
@@ -205,29 +213,29 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
             silhouette=float(np.mean(fold_sils)) if fold_sils else None,
         )
 
-    # Contrastive tier ablation (per-tier + pairwise)
-    print("    Contrastive tier ablation...")
-    ablation = _run_contrastive_tier_ablation(data)
+    # Contrastive block ablation (per-block + pairwise)
+    print("    Contrastive block ablation...")
+    ablation = _run_contrastive_block_ablation(data)
 
     # Linear projection baselines (LDA / NCA) — compare to nonlinear MLP
     print("    Linear projection baselines...")
     baselines = _run_linear_baselines(data)
 
     return ContrastiveResult(
-        T2_T2_5=tier_results["T2+T2.5"],
-        combined=tier_results["combined"],
+        attention_and_cache=block_results[ATTENTION_AND_CACHE],
+        combined=block_results[ALL_CORE],
         capacity_sweep=capacity_results,
-        tier_ablation=ablation,
+        legacy_bin_readout=ablation,
         linear_baselines=baselines,
     )
 
 
 def _run_linear_baselines(data: AnalysisData) -> dict[str, LinearBaselineEntry]:
-    """LDA and NCA projection baselines on T2+T2.5."""
+    """LDA and NCA projection baselines on the attention-and-cache union."""
     from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
     from sklearn.neighbors import NeighborhoodComponentsAnalysis
 
-    X = data.get_tier("T2+T2.5")
+    X = data.get_block(ATTENTION_AND_CACHE)
     X_scaled = StandardScaler().fit_transform(X)
     folds = _build_topic_folds(data.topics, n_folds=5, seed=42)
     n_components = min(len(data.unique_modes) - 1, X.shape[1])
@@ -275,7 +283,7 @@ def _run_linear_baselines(data: AnalysisData) -> dict[str, LinearBaselineEntry]:
     return results
 
 
-def _eval_contrastive_tier(
+def _eval_contrastive_block(
     X: NDArray, modes: NDArray, topics: NDArray, seed: int = 42,
 ) -> ContrastiveAblationEntry:
     """Run contrastive MLP + kNN evaluation on a single feature set."""
@@ -312,28 +320,28 @@ def _eval_contrastive_tier(
     )
 
 
-def _run_contrastive_tier_ablation(data: AnalysisData) -> ContrastiveTierAblation:
-    """Contrastive MLP tier ablation: individual tiers, all pairs, key combos."""
-    present_baseline = [t for t in BASELINE_TIERS if t in data.run4.tier_features]
-    present_engineered = [t for t in ENGINEERED_TIERS if t in data.run4.tier_features]
-    all_individual = present_baseline + present_engineered
+def _run_contrastive_block_ablation(data: AnalysisData) -> ContrastiveBlockAblation:
+    """Contrastive MLP block ablation: individual blocks, all pairs, key combos."""
+    present_core = [t for t in CORE_BLOCKS if t in data.run4.block_features]
+    present_families = [t for t in FAMILY_BLOCKS if t in data.run4.block_features]
+    all_individual = present_core + present_families
 
-    # Individual tiers
+    # Individual blocks
     individual: dict[str, ContrastiveAblationEntry] = {}
-    for tier in all_individual:
-        print(f"      Individual: {tier}")
-        individual[tier] = _eval_contrastive_tier(data.get_tier(tier), data.modes, data.topics)
+    for block in all_individual:
+        print(f"      Individual: {block}")
+        individual[block] = _eval_contrastive_block(data.get_block(block), data.modes, data.topics)
 
     # Pairwise combinations (within baseline only — bounded)
     pairwise: dict[str, ContrastivePairwiseEntry] = {}
-    for t1, t2 in combinations(present_baseline, 2):
-        key = f"{t1}+{t2}"
+    for left, right in combinations(present_core, 2):
+        key = f"{left}+{right}"
         print(f"      Pair: {key}")
-        X_pair = np.concatenate([data.get_tier(t1), data.get_tier(t2)], axis=1)
-        result = _eval_contrastive_tier(X_pair, data.modes, data.topics)
+        X_pair = np.concatenate([data.get_block(left), data.get_block(right)], axis=1)
+        result = _eval_contrastive_block(X_pair, data.modes, data.topics)
         best_individual = max(
-            individual[t1].knn_accuracy,
-            individual[t2].knn_accuracy,
+            individual[left].knn_accuracy,
+            individual[right].knn_accuracy,
         )
         pairwise[key] = ContrastivePairwiseEntry(
             knn_accuracy=result.knn_accuracy,
@@ -344,28 +352,30 @@ def _run_contrastive_tier_ablation(data: AnalysisData) -> ContrastiveTierAblatio
             gain_over_best_individual=result.knn_accuracy - best_individual,
         )
 
-    print("      Combo: T2+T2.5")
-    t2t25 = _eval_contrastive_tier(data.get_tier("T2+T2.5"), data.modes, data.topics)
+    print("      Combo: attention and cache")
+    attention_and_cache = _eval_contrastive_block(data.get_block(ATTENTION_AND_CACHE), data.modes, data.topics)
     print("      Combo: combined")
-    combined = _eval_contrastive_tier(data.get_tier("combined"), data.modes, data.topics)
+    combined = _eval_contrastive_block(data.get_block(ALL_CORE), data.modes, data.topics)
 
-    t2_knn = individual["T2"].knn_accuracy
-    t25_knn = individual["T2.5"].knn_accuracy
-    t2t25_knn = pairwise["T2+T2.5"].knn_accuracy
-    super_add = ContrastiveSuperAdditivity.model_validate({
-        "T2_alone": t2_knn,
-        "T2.5_alone": t25_knn,
-        "T2+T2.5_pair": t2t25_knn,
-        "best_individual": max(t2_knn, t25_knn),
-        "gain": t2t25_knn - max(t2_knn, t25_knn),
-        "combined_knn": combined.knn_accuracy,
-        "T2+T2.5_beats_combined": t2t25_knn > combined.knn_accuracy,
-    })
+    attention_knn = individual[ATTENTION_AND_DELTAS].knn_accuracy
+    cache_knn = individual[CACHE_AND_KEYS].knn_accuracy
+    attention_and_cache_knn = pairwise[ATTENTION_AND_CACHE].knn_accuracy
+    super_add = ContrastiveSuperAdditivity(
+        attention_alone=attention_knn,
+        cache_alone=cache_knn,
+        attention_and_cache_pair=attention_and_cache_knn,
+        best_individual=max(attention_knn, cache_knn),
+        gain=attention_and_cache_knn - max(attention_knn, cache_knn),
+        combined_knn=combined.knn_accuracy,
+        attention_and_cache_beats_combined=(
+            attention_and_cache_knn > combined.knn_accuracy
+        ),
+    )
 
-    return ContrastiveTierAblation.model_validate({
+    return ContrastiveBlockAblation.model_validate({
         "individual": individual,
         "pairwise": pairwise,
-        "T2+T2.5": t2t25,
-        "combined": combined,
+        ATTENTION_AND_CACHE: attention_and_cache,
+        ALL_CORE: combined,
         "super_additivity": super_add,
     })

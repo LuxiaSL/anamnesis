@@ -2,7 +2,7 @@
 
 For each swap pair, a binary classifier is trained on the two pure modes and asked
 where the swap generations land: on the mode whose system prompt they were given, or
-on the mode whose execution they were asked for. The answer is a count, tier by tier,
+on the mode whose execution they were asked for. The answer is a count, block by block,
 and pooled with a direction named at the 1.5:1 bar.
 
 A run needs swap generations in its bank; a run without them is named and skipped

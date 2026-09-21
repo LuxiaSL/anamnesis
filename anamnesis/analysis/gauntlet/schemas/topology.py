@@ -46,7 +46,7 @@ class TopologyResult(BaseModel):
 
     model_config = _FORBID
 
-    tier: str
+    block: str
     euclidean_centroid_distances: dict[str, float]
     cosine_centroid_distances: dict[str, float]
     manhattan_centroid_distances: dict[str, float]

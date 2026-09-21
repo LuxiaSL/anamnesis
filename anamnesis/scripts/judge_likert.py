@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
-"""The rating judge. A mid-tier model is the default because a Likert pass scores every
+"""The rating judge. A mid-block model is the default because a Likert pass scores every
 generation of a bank, and the paradigm's ceiling is set by its blinding rather than by
 the reader's grade."""
 

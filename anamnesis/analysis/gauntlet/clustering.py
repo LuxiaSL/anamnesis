@@ -9,24 +9,24 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score, silhouette_score, silhouette_samples
 from sklearn.preprocessing import StandardScaler
 
-from .signature_io import AnalysisData
+from .signature_io import ALL_CORE, ATTENTION_AND_CACHE, AnalysisData
 from .schemas import (
     ClusteringResult,
     EmbeddingResult,
     PerModeSilhouetteStats,
-    TierSilhouette,
+    BlockSilhouette,
 )
-from .utils import get_available_tiers
+from .utils import get_available_blocks
 
 
 def run_clustering(data: AnalysisData) -> ClusteringResult:
     """Silhouette analysis, K-Means ARI, and dimensionality reduction."""
-    silhouette_by_tier: dict[str, TierSilhouette] = {}
+    silhouette_by_block: dict[str, BlockSilhouette] = {}
 
-    available_tiers, _ = get_available_tiers(data)
-    # Silhouette per tier (mode labels) — compute both cosine and euclidean
-    for tier in available_tiers:
-        X = data.get_tier(tier)
+    available_blocks, _ = get_available_blocks(data)
+    # Silhouette per block (mode labels) — compute both cosine and euclidean
+    for block in available_blocks:
+        X = data.get_block(block)
         scaler = StandardScaler()
         X_std = scaler.fit_transform(X)
 
@@ -44,15 +44,15 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
         except Exception:
             topic_score = None
 
-        silhouette_by_tier[tier] = TierSilhouette(
+        silhouette_by_block[block] = BlockSilhouette(
             mode_silhouette_cosine=scores["cosine"],
             mode_silhouette_euclidean=scores["euclidean"],
             mode_silhouette=scores["cosine"],  # backward compat alias
             topic_silhouette=topic_score,
         )
 
-    # Per-mode silhouette decomposition (T2+T2.5)
-    X_key = data.get_tier("T2+T2.5")
+    # Per-mode silhouette decomposition (attention-and-cache union)
+    X_key = data.get_block(ATTENTION_AND_CACHE)
     scaler = StandardScaler()
     X_std = scaler.fit_transform(X_key)
 
@@ -80,8 +80,8 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
 
     # K-Means ARI
     kmeans_ari: dict[str, float | str] = {}
-    for tier in ["T2+T2.5", "combined"]:
-        X = data.get_tier(tier)
+    for block in [ATTENTION_AND_CACHE, ALL_CORE]:
+        X = data.get_block(block)
         X_std = StandardScaler().fit_transform(X)
 
         mode_to_int = {m: i for i, m in enumerate(data.unique_modes)}
@@ -90,9 +90,9 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
         try:
             km = KMeans(n_clusters=len(data.unique_modes), random_state=42, n_init=10)
             y_pred = km.fit_predict(X_std)
-            kmeans_ari[tier] = float(adjusted_rand_score(y_true, y_pred))
+            kmeans_ari[block] = float(adjusted_rand_score(y_true, y_pred))
         except Exception as e:
-            kmeans_ari[tier] = f"ERROR: {e}"
+            kmeans_ari[block] = f"ERROR: {e}"
 
     # UMAP / t-SNE embeddings (save coordinates for plotting)
     embeddings: dict[str, EmbeddingResult] = {}
@@ -100,20 +100,20 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
     # t-SNE (always available via sklearn)
     from sklearn.manifold import TSNE
 
-    X_key_std = StandardScaler().fit_transform(data.get_tier("T2+T2.5"))
+    X_key_std = StandardScaler().fit_transform(data.get_block(ATTENTION_AND_CACHE))
     try:
         tsne = TSNE(
             n_components=2, random_state=42,
             perplexity=min(30, data.n_samples - 1),
         )
         coords = tsne.fit_transform(X_key_std)
-        embeddings["tsne_t2t25"] = EmbeddingResult(
+        embeddings["tsne_attention_and_cache"] = EmbeddingResult(
             coords=coords.tolist(),
             modes=data.modes.tolist(),
             topics=data.topics.tolist(),
         )
     except Exception as e:
-        embeddings["tsne_t2t25"] = EmbeddingResult(error=str(e))
+        embeddings["tsne_attention_and_cache"] = EmbeddingResult(error=str(e))
 
     # UMAP (optional)
     try:
@@ -123,18 +123,18 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
             n_neighbors=min(15, data.n_samples - 1),
         )
         coords = reducer.fit_transform(X_key_std)
-        embeddings["umap_t2t25"] = EmbeddingResult(
+        embeddings["umap_attention_and_cache"] = EmbeddingResult(
             coords=coords.tolist(),
             modes=data.modes.tolist(),
             topics=data.topics.tolist(),
         )
     except ImportError:
-        embeddings["umap_t2t25"] = EmbeddingResult(error="umap not installed")
+        embeddings["umap_attention_and_cache"] = EmbeddingResult(error="umap not installed")
     except Exception as e:
-        embeddings["umap_t2t25"] = EmbeddingResult(error=str(e))
+        embeddings["umap_attention_and_cache"] = EmbeddingResult(error=str(e))
 
     return ClusteringResult(
-        silhouette_by_tier=silhouette_by_tier,
+        silhouette_by_block=silhouette_by_block,
         per_mode_silhouette=per_mode_silhouette,
         per_mode_silhouette_cosine=per_mode_silhouette_cosine,
         per_mode_silhouette_euclidean=per_mode_silhouette_euclidean,

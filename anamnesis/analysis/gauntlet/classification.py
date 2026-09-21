@@ -4,7 +4,7 @@
 number this module reports — the pre-v3 ungrouped StratifiedKFold allowed same-topic
 samples to straddle train/test (topic leakage in the headline rf_5way). The ungrouped
 path survives only as a fallback when no topic labels exist, and is labeled as legacy
-in the printed output. Permutation p-values are BH-FDR-corrected across the per-tier
+in the printed output. Permutation p-values are BH-FDR-corrected across the per-block
 family (q_value on PermutationTestResult). Pairwise-binary accuracies carry no p-values;
 read them against the fold-noise law (diffs <15pp at n=100 are noise — v3 delta memo).
 """
@@ -31,10 +31,10 @@ from .schemas import (
     LengthOnlyResult,
     PerModeLengthStats,
     PermutationTestResult,
-    TierClassificationResult,
+    BlockClassificationResult,
     TopicHeldoutResult,
 )
-from .utils import get_available_tiers
+from .utils import get_available_blocks
 
 # n_jobs=1 on RF to avoid joblib thread pool deadlocks.
 # We parallelize at the outer loop level instead.
@@ -294,7 +294,7 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
     """Run all classification analyses across feature groups."""
     y = data.modes
     topics = data.topics
-    by_tier: dict[str, TierClassificationResult] = {}
+    by_block: dict[str, BlockClassificationResult] = {}
 
     # Topic-grouped CV everywhere: the leak-proof default, because all
     # repetitions of a topic share its prompt.
@@ -307,10 +307,10 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
         print("  CV: WARNING — no topic labels; falling back to ungrouped "
               "StratifiedKFold (legacy, topic-leak-prone)")
 
-    available_tiers, key_tiers = get_available_tiers(data)
-    for tier in available_tiers:
-        print(f"  Classification: {tier}")
-        X = data.get_tier(tier)
+    available_blocks, key_blocks = get_available_blocks(data)
+    for block in available_blocks:
+        print(f"  Classification: {block}")
+        X = data.get_block(block)
 
         rf_5way = _run_rf_cv(X, y, groups=groups)
         topic_heldout = _run_topic_heldout(X, y, topics)
@@ -320,16 +320,16 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
 
         cv_stability = None
         permutation = None
-        if tier in key_tiers:
-            print(f"    CV stability ({tier})...")
+        if block in key_blocks:
+            print(f"    CV stability ({block})...")
             cv_stability = _run_cv_stability(X, y, n_seeds=100, groups=groups)
 
-            print(f"    Permutation test ({tier})...")
+            print(f"    Permutation test ({block})...")
             permutation = _run_permutation_test(
                 X, y, n_permutations=1000, groups=groups,
             )
 
-        by_tier[tier] = TierClassificationResult(
+        by_block[block] = BlockClassificationResult(
             rf_5way=rf_5way,
             topic_heldout=topic_heldout,
             linear_probe=linear_probe,
@@ -338,18 +338,18 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
             cv_stability=cv_stability,
             permutation_test=permutation,
         )
-        print(f"    Done: {tier} RF={rf_5way.accuracy:.1%}")
+        print(f"    Done: {block} RF={rf_5way.accuracy:.1%}")
 
     # BH-FDR across the per-group permutation family (2026-07-11 sweep).
     perm_ps = {
         t: r.permutation_test.p_value
-        for t, r in by_tier.items()
+        for t, r in by_block.items()
         if r.permutation_test is not None
     }
     if len(perm_ps) > 1:
         for t, q in _bh_fdr(perm_ps).items():
-            r = by_tier[t]
-            by_tier[t] = r.model_copy(
+            r = by_block[t]
+            by_block[t] = r.model_copy(
                 update={
                     "permutation_test": r.permutation_test.model_copy(
                         update={"q_value": q},
@@ -361,7 +361,7 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
     print("  Length-only baseline...")
     length_only = _run_length_only_baseline(data, y, groups=groups)
 
-    return ClassificationResult(by_tier=by_tier, length_only=length_only)
+    return ClassificationResult(by_block=by_block, length_only=length_only)
 
 
 def _run_length_only_baseline(

@@ -5,11 +5,11 @@ A signature directory holds one ``gen_NNN.npz`` of feature vectors beside one
 directory into the two objects the gauntlet's sections consume:
 
 ``Run4Data``
-    Feature matrices partitioned by tier, plus the composite groups, plus the
-    mode and topic labels aligned to the matrix rows. Both the baseline tiers
-    (T1/T2/T2.5/T3) and the v2 families are supported, and which ones are
-    present is discovered from the npz contents rather than declared, so a
-    directory extracted with a narrower suite loads as itself.
+    Feature matrices partitioned by block, plus the unions over them, plus the
+    mode and topic labels aligned to the matrix rows. Both the four core blocks
+    and the v2 families are supported, and which ones are present is discovered
+    from the npz contents rather than declared, so a directory extracted with a
+    narrower suite loads as itself.
 ``AnalysisData``
     The same, plus the generated text and prompt fields that the semantic
     section reads. Every section takes this type; the narrower one exists
@@ -38,53 +38,77 @@ from numpy.typing import NDArray
 
 from anamnesis.analysis.lane_guard import MixedLaneError, require_single_lane
 from anamnesis.config.paths import legacy_data_root
+from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
 
 logger = logging.getLogger(__name__)
 
 
-# ── Tier definitions ──────────────────────────────────────────────────────────
-# Maps human-readable tier names to npz array keys.
-# All known tiers — loader gracefully skips any that are absent from the data.
+# ── Block labels ──────────────────────────────────────────────────────────────
+# A feature vector is addressed in contiguous blocks, and every block has a label
+# it is stored and reported under. The four the numeric anchor builds carry short
+# historical labels; the families carry their own names. All of them are a wire
+# format — a banked npz keys its arrays with them, and banked analysis JSON keys
+# its per-block numbers with them — so the labels are fixed and the constants
+# below carry what each block reads. Read a block by the constant, never by the
+# string, and the string stays where it belongs: on disk.
+#
+# The four core blocks read, in order: residual activation norms with output
+# statistics; attention distributions with cross-layer residual deltas;
+# cache-read profiles with pre-RoPE key geometry; residual-stream PCA. The third
+# spans two substrates, which is why a block is an address and not a finding —
+# `anamnesis/feature_map.py` is what says which substrate a feature reads.
 
-TIER_KEYS: dict[str, str] = {
-    # Baseline tiers
-    "T1": "features_tier1",
-    "T2": "features_tier2",
-    "T2.5": "features_tier2_5",
-    "T3": "features_tier3",
-    # v2 feature families
-    "residual_trajectory": "features_residual_trajectory",
-    "attention_flow": "features_attention_flow",
-    "gate_features": "features_gate_features",
-    "temporal_dynamics": "features_temporal_dynamics",
-    "contrastive_projection": "features_contrastive_projection",
+NORMS_AND_OUTPUT_STATS = "T1"
+ATTENTION_AND_DELTAS = "T2"
+CACHE_AND_KEYS = "T2.5"
+RESIDUAL_PCA = "T3"
+
+RESIDUAL_TRAJECTORY = "residual_trajectory"
+ATTENTION_FLOW = "attention_flow"
+GATE_FEATURES = "gate_features"
+TEMPORAL_DYNAMICS = "temporal_dynamics"
+CONTRASTIVE_PROJECTION = "contrastive_projection"
+
+# Union labels: a block built by concatenating others, addressed as one.
+ATTENTION_AND_CACHE = "T2+T2.5"
+ALL_CORE = "combined"
+ALL_FAMILIES = "engineered"
+EVERYTHING = "combined_v2"
+ATTENTION_AND_CACHE_WITH_FAMILIES = "T2+T2.5+engineered"
+
+# Label → npz array key. The loader skips any block absent from the data.
+BLOCK_NPZ_KEYS: dict[str, str] = {
+    NORMS_AND_OUTPUT_STATS: "features_tier1",
+    ATTENTION_AND_DELTAS: "features_tier2",
+    CACHE_AND_KEYS: "features_tier2_5",
+    RESIDUAL_PCA: "features_tier3",
+    RESIDUAL_TRAJECTORY: "features_residual_trajectory",
+    ATTENTION_FLOW: "features_attention_flow",
+    GATE_FEATURES: "features_gate_features",
+    TEMPORAL_DYNAMICS: "features_temporal_dynamics",
+    CONTRASTIVE_PROJECTION: "features_contrastive_projection",
 }
 
-# Tier categories for structured ablation
-BASELINE_TIERS = ["T1", "T2", "T2.5", "T3"]
-ENGINEERED_TIERS = [
-    "residual_trajectory", "attention_flow", "gate_features",
-    "temporal_dynamics", "contrastive_projection",
+# The blocks the numeric anchor builds, in vector order, and the families beside them.
+CORE_BLOCKS = [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA]
+FAMILY_BLOCKS = [
+    RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES,
+    TEMPORAL_DYNAMICS, CONTRASTIVE_PROJECTION,
 ]
 
-# Composite tier groups — built from whichever individual tiers are present.
-# Groups with missing members are silently omitted.
-TIER_GROUPS: dict[str, list[str]] = {
-    "T2+T2.5": ["T2", "T2.5"],
-    "combined": ["T1", "T2", "T2.5", "T3"],
-    "engineered": [
-        "residual_trajectory", "attention_flow", "gate_features",
-        "temporal_dynamics",
+# Each union is built from whichever of its members are present; a union missing a
+# member is omitted rather than built short, because a short union would be a
+# different feature set reported under the same label.
+BLOCK_UNIONS: dict[str, list[str]] = {
+    ATTENTION_AND_CACHE: [ATTENTION_AND_DELTAS, CACHE_AND_KEYS],
+    ALL_CORE: list(CORE_BLOCKS),
+    ALL_FAMILIES: [
+        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, TEMPORAL_DYNAMICS,
     ],
-    "combined_v2": [
-        "T1", "T2", "T2.5", "T3",
-        "residual_trajectory", "attention_flow", "gate_features",
-        "temporal_dynamics", "contrastive_projection",
-    ],
-    "T2+T2.5+engineered": [
-        "T2", "T2.5",
-        "residual_trajectory", "attention_flow", "gate_features",
-        "temporal_dynamics",
+    EVERYTHING: [*CORE_BLOCKS, *FAMILY_BLOCKS],
+    ATTENTION_AND_CACHE_WITH_FAMILIES: [
+        ATTENTION_AND_DELTAS, CACHE_AND_KEYS,
+        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, TEMPORAL_DYNAMICS,
     ],
 }
 
@@ -113,14 +137,14 @@ class SampleMeta:
 @dataclass
 class Run4Data:
     """Loaded Run 4 data with feature matrices and metadata."""
-    # Per-tier feature matrices: {tier_name: (N, D_tier)}
-    tier_features: dict[str, NDArray[np.float32]]
+    # Per-block feature matrices: {block_name: (N, D_block)}
+    block_features: dict[str, NDArray[np.float32]]
     # Composite group matrices: {group_name: (N, D_group)}
     group_features: dict[str, NDArray[np.float32]]
     # Full combined matrix (N, 1837)
     all_features: NDArray[np.float32]
-    # Feature names per tier
-    tier_feature_names: dict[str, NDArray]
+    # Feature names per block
+    block_feature_names: dict[str, NDArray]
     # Sample metadata (ordered to match matrix rows)
     samples: list[SampleMeta]
     # Convenience arrays
@@ -150,14 +174,14 @@ class Run4Data:
         """Boolean mask for samples of a given topic."""
         return self.topics == topic
 
-    def get_tier(self, tier_or_group: str) -> NDArray[np.float32]:
-        """Get feature matrix for a tier name or group name."""
-        if tier_or_group in self.tier_features:
-            return self.tier_features[tier_or_group]
-        if tier_or_group in self.group_features:
-            return self.group_features[tier_or_group]
-        raise KeyError(f"Unknown tier/group: {tier_or_group}. "
-                       f"Available: {list(self.tier_features) + list(self.group_features)}")
+    def get_block(self, block_or_group: str) -> NDArray[np.float32]:
+        """Get feature matrix for a block name or group name."""
+        if block_or_group in self.block_features:
+            return self.block_features[block_or_group]
+        if block_or_group in self.group_features:
+            return self.group_features[block_or_group]
+        raise KeyError(f"Unknown block/group: {block_or_group}. "
+                       f"Available: {list(self.block_features) + list(self.group_features)}")
 
 
 def load_run4(
@@ -180,7 +204,7 @@ def load_run4(
         Excludes multi-repetition extras and supplementary linear samples.
     addon_dirs : list[Path], optional
         Additional directories with features_* arrays to merge in.
-        Files must match gen_NNN.npz naming. Extra tiers are added
+        Files must match gen_NNN.npz naming. Extra blocks are added
         alongside those from the primary directory.
     mode_filter : list[str], optional
         If provided, only include samples whose mode is in this list.
@@ -254,35 +278,35 @@ def load_run4(
         raise MixedLaneError("tagged signature directory contains files without lane metadata")
     all_meta.sort(key=lambda x: (x[1]["mode_idx"], x[1]["topic_idx"]))
 
-    # Second pass: load features. Tier discovery happens on the first file of
+    # Second pass: load features. Block discovery happens on the first file of
     # this loop rather than in a pass of its own, so the first npz is opened and
     # decompressed once.
-    present_tiers: dict[str, str] = {}
-    tiers_discovered = False
-    tier_arrays: dict[str, list[NDArray]] = {}
+    present_blocks: dict[str, str] = {}
+    blocks_discovered = False
+    block_arrays: dict[str, list[NDArray]] = {}
     samples: list[SampleMeta] = []
     all_feature_names: dict[str, NDArray] | None = None
 
     for npz_path, meta in all_meta:
         data = np.load(npz_path, allow_pickle=True)
 
-        if not tiers_discovered:
-            tiers_discovered = True
-            # ── Discover available tiers from the first npz file ──
+        if not blocks_discovered:
+            blocks_discovered = True
+            # ── Discover available blocks from the first npz file ──
             available_npz_keys = set(data.files)
-            for tier_name, npz_key in TIER_KEYS.items():
+            for block_name, npz_key in BLOCK_NPZ_KEYS.items():
                 if npz_key in available_npz_keys:
-                    present_tiers[tier_name] = npz_key
-            tier_arrays = {k: [] for k in present_tiers}
+                    present_blocks[block_name] = npz_key
+            block_arrays = {k: [] for k in present_blocks}
             logger.info(
-                f"Discovered {len(present_tiers)} tiers: {list(present_tiers.keys())}"
+                f"Discovered {len(present_blocks)} blocks: {list(present_blocks.keys())}"
             )
-            missing = set(TIER_KEYS) - set(present_tiers)
+            missing = set(BLOCK_NPZ_KEYS) - set(present_blocks)
             if missing:
                 logger.info(f"  Missing (skipped): {sorted(missing)}")
 
-        for tier_name, npz_key in present_tiers.items():
-            tier_arrays[tier_name].append(data[npz_key])
+        for block_name, npz_key in present_blocks.items():
+            block_arrays[block_name].append(data[npz_key])
 
         samples.append(SampleMeta(
             generation_id=meta["generation_id"],
@@ -297,20 +321,20 @@ def load_run4(
         # Grab feature names once
         if all_feature_names is None:
             names = data.get("feature_names")
-            slices = meta.get("tier_slices", {})
+            slices = meta.get(STORED_BLOCK_SLICES_KEY, {})
             all_feature_names = {}
             if names is not None and slices:
-                for tier_name in present_tiers:
-                    # Map tier display name to slice key
-                    slice_key = TIER_KEYS[tier_name].replace("features_", "")
+                for block_name in present_blocks:
+                    # Map block display name to slice key
+                    slice_key = BLOCK_NPZ_KEYS[block_name].replace("features_", "")
                     if slice_key in slices:
                         start, end = slices[slice_key]
-                        all_feature_names[tier_name] = names[start:end]
+                        all_feature_names[block_name] = names[start:end]
 
     # Stack into matrices
-    tier_features = {
+    block_features = {
         name: np.stack(arrays, axis=0)
-        for name, arrays in tier_arrays.items()
+        for name, arrays in block_arrays.items()
         if arrays  # skip empty
     }
 
@@ -325,29 +349,29 @@ def load_run4(
                 logger.warning(f"Addon dir not found: {addon_path}")
                 continue
 
-            # Discover tiers in addon
+            # Discover blocks in addon
             addon_files = sorted(addon_path.glob("gen_*.npz"))
             if not addon_files:
                 logger.warning(f"No npz files in addon dir: {addon_path}")
                 continue
 
             first_addon = np.load(addon_files[0], allow_pickle=True)
-            addon_tiers: dict[str, str] = {}
-            for tier_name, npz_key in TIER_KEYS.items():
-                if npz_key in first_addon.files and tier_name not in tier_features:
-                    addon_tiers[tier_name] = npz_key
+            addon_blocks: dict[str, str] = {}
+            for block_name, npz_key in BLOCK_NPZ_KEYS.items():
+                if npz_key in first_addon.files and block_name not in block_features:
+                    addon_blocks[block_name] = npz_key
 
-            if not addon_tiers:
-                logger.info(f"  Addon {addon_path.name}: no new tiers (all duplicates)")
+            if not addon_blocks:
+                logger.info(f"  Addon {addon_path.name}: no new blocks (all duplicates)")
                 continue
 
             logger.info(
-                f"  Addon {addon_path.name}: merging {list(addon_tiers.keys())}"
+                f"  Addon {addon_path.name}: merging {list(addon_blocks.keys())}"
             )
 
             # Load addon features in sample order
             addon_arrays: dict[str, list[NDArray | None]] = {
-                k: [None] * len(samples) for k in addon_tiers
+                k: [None] * len(samples) for k in addon_blocks
             }
             matched = 0
             for npz_file in addon_files:
@@ -366,8 +390,8 @@ def load_run4(
                 # addon must not silently enter a tagged lane's vector.
                 require_single_lane([all_meta[idx][1],addon_metadata])
                 data = np.load(npz_file, allow_pickle=True)
-                for tier_name, npz_key in addon_tiers.items():
-                    addon_arrays[tier_name][idx] = data[npz_key]
+                for block_name, npz_key in addon_blocks.items():
+                    addon_arrays[block_name][idx] = data[npz_key]
                 matched += 1
 
                 # Grab feature names
@@ -378,10 +402,10 @@ def load_run4(
                         try:
                             with open(addon_meta_path) as f:
                                 addon_meta = json.load(f)
-                            addon_slices = addon_meta.get("tier_slices", {})
-                            for tn in addon_tiers:
+                            addon_slices = addon_meta.get(STORED_BLOCK_SLICES_KEY, {})
+                            for tn in addon_blocks:
                                 if tn not in all_feature_names:
-                                    sk = TIER_KEYS[tn].replace("features_", "")
+                                    sk = BLOCK_NPZ_KEYS[tn].replace("features_", "")
                                     if sk in addon_slices:
                                         s, e = addon_slices[sk]
                                         all_feature_names[tn] = addon_names[s:e]
@@ -395,36 +419,36 @@ def load_run4(
                 )
                 continue
 
-            # Stack and add to tier_features
-            for tier_name, arrays in addon_arrays.items():
+            # Stack and add to block_features
+            for block_name, arrays in addon_arrays.items():
                 if any(a is None for a in arrays):
-                    logger.warning(f"  Addon tier {tier_name}: has None entries, skipping")
+                    logger.warning(f"  Addon block {block_name}: has None entries, skipping")
                     continue
-                tier_features[tier_name] = np.stack(arrays, axis=0)
+                block_features[block_name] = np.stack(arrays, axis=0)
 
     # Build composite groups — only include groups where all members are present
     group_features: dict[str, NDArray[np.float32]] = {}
-    for group_name, tier_list in TIER_GROUPS.items():
-        available_members = [t for t in tier_list if t in tier_features]
+    for group_name, block_list in BLOCK_UNIONS.items():
+        available_members = [t for t in block_list if t in block_features]
         if not available_members:
             continue
-        if len(available_members) < len(tier_list):
+        if len(available_members) < len(block_list):
             # Partial group — still useful, note which members are present
             logger.debug(
-                f"  Group '{group_name}': {len(available_members)}/{len(tier_list)} "
+                f"  Group '{group_name}': {len(available_members)}/{len(block_list)} "
                 f"members present ({available_members})"
             )
         group_features[group_name] = np.concatenate(
-            [tier_features[t] for t in available_members], axis=1
+            [block_features[t] for t in available_members], axis=1
         )
 
-    # Full combined — all present individual tiers
+    # Full combined — all present individual blocks
     all_present_individual = [
-        t for t in list(BASELINE_TIERS) + list(ENGINEERED_TIERS)
-        if t in tier_features
+        t for t in list(CORE_BLOCKS) + list(FAMILY_BLOCKS)
+        if t in block_features
     ]
     all_features = np.concatenate(
-        [tier_features[t] for t in all_present_individual], axis=1
+        [block_features[t] for t in all_present_individual], axis=1
     ) if all_present_individual else np.array([], dtype=np.float32)
 
     # Convenience arrays
@@ -438,10 +462,10 @@ def load_run4(
     topic_indices = np.array([topic_to_idx[s.topic] for s in samples], dtype=np.int64)
 
     return Run4Data(
-        tier_features=tier_features,
+        block_features=block_features,
         group_features=group_features,
         all_features=all_features,
-        tier_feature_names=all_feature_names or {},
+        block_feature_names=all_feature_names or {},
         samples=samples,
         modes=modes,
         topics=topics,
@@ -467,7 +491,7 @@ def check_data_quality(data: Run4Data) -> dict[str, object]:
     # Check for NaN/Inf
     nan_counts: dict[str, int] = {}
     inf_counts: dict[str, int] = {}
-    for name, feat in {**data.tier_features, **data.group_features}.items():
+    for name, feat in {**data.block_features, **data.group_features}.items():
         nan_counts[name] = int(np.sum(np.isnan(feat)))
         inf_counts[name] = int(np.sum(np.isinf(feat)))
 
@@ -475,9 +499,9 @@ def check_data_quality(data: Run4Data) -> dict[str, object]:
     report["inf_counts"] = inf_counts
 
     # Feature dimensions
-    report["tier_dims"] = {
+    report["block_dims"] = {
         name: feat.shape[1]
-        for name, feat in data.tier_features.items()
+        for name, feat in data.block_features.items()
     }
     report["group_dims"] = {
         name: feat.shape[1]
@@ -519,8 +543,8 @@ class AnalysisData:
     def unique_topics(self) -> list[str]:
         return self.run4.unique_topics
 
-    def get_tier(self, name: str) -> NDArray[np.float32]:
-        return self.run4.get_tier(name)
+    def get_block(self, name: str) -> NDArray[np.float32]:
+        return self.run4.get_block(name)
 
     def mode_mask(self, mode: str) -> NDArray[np.bool_]:
         return self.run4.mode_mask(mode)

@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from .signature_io import (
+    ALL_CORE,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+)
 from .schemas import (
     CCGPResult,
     ClassificationResult,
@@ -11,7 +19,7 @@ from .schemas import (
     ScorecardPrediction,
     ScorecardResult,
     ScorecardSummary,
-    TierAblationResult,
+    LegacyBinReadoutResult,
     TopologyResult,
 )
 
@@ -73,19 +81,22 @@ def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
         detail=f"expected_near={has_expected_near}, outgroup={has_outgroup}",
     ))
 
-    # ── Prediction 3: T1/T2/T2.5 ID convergence ──
+    # ── Prediction 3: intrinsic dimension converges across the core blocks ──
     id_result = all_results.get("intrinsic_dimension")
     convergence_values: dict[str, float] = {}
     max_diff: float | None = None
-    if isinstance(id_result, IntrinsicDimensionResult) and id_result.tier_convergence is not None:
-        max_diff = id_result.tier_convergence.max_pairwise_diff
-        convergence_values = id_result.tier_convergence.values
+    if isinstance(id_result, IntrinsicDimensionResult) and id_result.block_convergence is not None:
+        max_diff = id_result.block_convergence.max_pairwise_diff
+        convergence_values = id_result.block_convergence.values
 
     p3_outcome = "CONFIRMED" if max_diff is not None and max_diff < 4.0 else (
         "PARTIAL" if max_diff is not None and max_diff < 6.0 else "WRONG"
     )
     predictions.append(ScorecardPrediction(
-        prediction="3. T1/T2/T2.5 ID convergence (within ±2)",
+        prediction=(
+            "3. Intrinsic dimension converges across the first three core blocks "
+            "(within ±2)"
+        ),
         confidence="75%",
         importance="HIGH",
         outcome=p3_outcome,
@@ -125,76 +136,80 @@ def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
         mode_ids=mode_ids,
     ))
 
-    # ── Prediction 5: T3 remains elevated ──
-    t3_id: float | None = None
-    t1_id: float | None = None
-    t2_id: float | None = None
-    if isinstance(id_result, IntrinsicDimensionResult) and id_result.global_ is not None:
-        for tier_key, target in (("T3", "t3"), ("T1", "t1"), ("T2", "t2")):
-            entry = id_result.global_.get(tier_key)
-            if entry is not None and isinstance(entry.dadapy_id, (int, float)):
-                if target == "t3":
-                    t3_id = float(entry.dadapy_id)
-                elif target == "t1":
-                    t1_id = float(entry.dadapy_id)
-                else:
-                    t2_id = float(entry.dadapy_id)
+    # ── Prediction 5: residual PCA stays elevated ──
+    def block_id(label: str) -> float | None:
+        if not isinstance(id_result, IntrinsicDimensionResult) or id_result.global_ is None:
+            return None
+        entry = id_result.global_.get(label)
+        if entry is None or not isinstance(entry.dadapy_id, (int, float)):
+            return None
+        return float(entry.dadapy_id)
+
+    residual_pca_id = block_id(RESIDUAL_PCA)
+    norms_id = block_id(NORMS_AND_OUTPUT_STATS)
+    attention_id = block_id(ATTENTION_AND_DELTAS)
 
     mean_other: float | None = None
-    if t3_id is not None and t1_id is not None and t2_id is not None:
-        mean_other = (t1_id + t2_id) / 2
-        elevated = t3_id > mean_other + 5
+    if residual_pca_id is not None and norms_id is not None and attention_id is not None:
+        mean_other = (norms_id + attention_id) / 2
+        elevated = residual_pca_id > mean_other + 5
         p5_outcome = "CONFIRMED" if elevated else (
-            "PARTIAL" if t3_id > mean_other + 2 else "WRONG"
+            "PARTIAL" if residual_pca_id > mean_other + 2 else "WRONG"
         )
     else:
         p5_outcome = "INSUFFICIENT_DATA"
 
     predictions.append(ScorecardPrediction(
-        prediction="5. T3 remains elevated relative to T1/T2/T2.5",
+        prediction=(
+            "5. The residual-PCA block's intrinsic dimension stays elevated "
+            "relative to the other core blocks"
+        ),
         confidence="80%",
         importance="MEDIUM",
         outcome=p5_outcome,
-        t3_id=t3_id,
-        mean_t1_t2=mean_other,
+        residual_pca_id=residual_pca_id,
+        mean_norms_and_attention_id=mean_other,
     ))
 
-    # ── Prediction 6: T2.5 load-bearing (tier inversion) ──
-    ablation = all_results.get("tier_ablation")
-    tier_inversion: bool | None = None
-    per_tier: dict[str, float] = {}
-    removal_cost: dict[str, float | None] = {"T1": None, "T2": None, "T2.5": None}
-    if isinstance(ablation, TierAblationResult):
-        tier_inversion = ablation.tier_inversion_t25_gt_t2_gt_t1
-        per_tier = ablation.per_tier_accuracy
-        for tier_key in ("T1", "T2", "T2.5"):
-            entry = ablation.leave_one_tier_out.get(tier_key)
-            removal_cost[tier_key] = entry.cost_of_removal if entry is not None else None
+    # ── Prediction 6: the cache-and-keys block is load-bearing ──
+    ablation = all_results.get("legacy_bin_readout")
+    block_inversion: bool | None = None
+    per_block: dict[str, float] = {}
+    removal_cost: dict[str, float | None] = {NORMS_AND_OUTPUT_STATS: None, ATTENTION_AND_DELTAS: None, CACHE_AND_KEYS: None}
+    if isinstance(ablation, LegacyBinReadoutResult):
+        block_inversion = ablation.cache_beats_attention_beats_norms
+        per_block = ablation.per_block_accuracy
+        for block_key in (NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS):
+            entry = ablation.leave_one_block_out.get(block_key)
+            removal_cost[block_key] = entry.cost_of_removal if entry is not None else None
 
-    p6_outcome = "CONFIRMED" if tier_inversion else (
-        "PARTIAL" if per_tier.get("T2.5", 0) >= per_tier.get("T1", 0) else "WRONG"
+    p6_outcome = "CONFIRMED" if block_inversion else (
+        "PARTIAL" if per_block.get(CACHE_AND_KEYS, 0) >= per_block.get(NORMS_AND_OUTPUT_STATS, 0) else "WRONG"
     )
     predictions.append(ScorecardPrediction(
-        prediction="6. T2.5 load-bearing (T2.5 > T2 > T1 accuracy)",
+        prediction=(
+            "6. Cache reads and key geometry are load-bearing: that block beats "
+            "attention-and-deltas, which beats norms-and-output-stats"
+        ),
         confidence="70%",
         importance="MEDIUM",
         outcome=p6_outcome,
-        tier_inversion_holds=tier_inversion,
-        per_tier_accuracy=per_tier,
+        cache_beats_attention_beats_norms=block_inversion,
+        per_block_accuracy=per_block,
         removal_costs=removal_cost,
     ))
 
     # ── Prediction 7: 5-way accuracy ~67-73% ──
     clf_result = all_results.get("classification")
-    t2t25_acc: float | None = None
+    attention_and_cache_acc: float | None = None
     combined_acc: float | None = None
     if isinstance(clf_result, ClassificationResult):
-        t2t25 = clf_result.by_tier.get("T2+T2.5")
-        combined = clf_result.by_tier.get("combined")
-        t2t25_acc = t2t25.rf_5way.accuracy if t2t25 is not None else None
+        attention_and_cache = clf_result.by_block.get(ATTENTION_AND_CACHE)
+        combined = clf_result.by_block.get(ALL_CORE)
+        attention_and_cache_acc = attention_and_cache.rf_5way.accuracy if attention_and_cache is not None else None
         combined_acc = combined.rf_5way.accuracy if combined is not None else None
 
-    best_acc = max(t2t25_acc or 0.0, combined_acc or 0.0)
+    best_acc = max(attention_and_cache_acc or 0.0, combined_acc or 0.0)
     p7_outcome = "CONFIRMED" if 0.57 <= best_acc <= 0.83 else (
         "PARTIAL" if 0.50 <= best_acc <= 0.90 else "WRONG"
     )
@@ -203,16 +218,16 @@ def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
         confidence="50%",
         importance="LOW",
         outcome=p7_outcome,
-        t2t25_accuracy=t2t25_acc,
+        attention_and_cache_accuracy=attention_and_cache_acc,
         combined_accuracy=combined_acc,
     ))
 
     # ── Prediction 8: Hard pairs improve more ──
     pairwise: dict[str, float] = {}
     if isinstance(clf_result, ClassificationResult):
-        t2t25 = clf_result.by_tier.get("T2+T2.5")
-        if t2t25 is not None:
-            pairwise = {p: entry.accuracy for p, entry in t2t25.pairwise_binary.items()}
+        attention_and_cache = clf_result.by_block.get(ATTENTION_AND_CACHE)
+        if attention_and_cache is not None:
+            pairwise = {p: entry.accuracy for p, entry in attention_and_cache.pairwise_binary.items()}
 
     hard_pairs = ["linear_vs_socratic", "linear_vs_contrastive", "contrastive_vs_socratic"]
     easy_pairs = ["analogical_vs_contrastive", "analogical_vs_dialectical",

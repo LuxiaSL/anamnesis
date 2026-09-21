@@ -276,7 +276,7 @@ lane guard runs inside it, and the merged module is smaller than its two donors
 | `anamnesis/analysis/geometric_trio/__init__.py` | *record* | The directory dissolves: an empty `__init__` for a package whose mathematics went elsewhere. |
 | `anamnesis/analysis/unified_runner/results_schema.py` | `anamnesis/analysis/gauntlet/schemas/` | **Split per section**, one module each for the eleven sections plus the composite, class bodies unchanged. `base.py` holds the one shared `model_config` and the two rules that follow from `extra="forbid"`; the package `__init__` re-exports all 81 models, so `from ...schemas import X` reaches every name the flat module exported. The split costs lines against a single file (1,731 across fourteen files, against 1,409) and buys the property the section layout already had everywhere else: a section's schema, its runner and its `--skip` number move together. |
 | `anamnesis/analysis/unified_runner/classification.py` | `anamnesis/analysis/gauntlet/classification.py` | Import paths only, plus one comment that carried the date of a decision rather than of evidence. |
-| `anamnesis/analysis/unified_runner/tier_ablation.py` | `anamnesis/analysis/gauntlet/tier_ablation.py` | Import paths, plus one necessary adaptation: `LogisticRegression(multi_class="multinomial")` no longer constructs under scikit-learn 1.7 and later, which removed the argument after making multinomial the only multiclass fit its solvers perform. The argument is dropped and the behaviour stated in a comment; the fit is the same fit. The file keeps its name — the tier-vocabulary rename is a later sweep. |
+| `anamnesis/analysis/unified_runner/tier_ablation.py` | `anamnesis/analysis/gauntlet/tier_ablation.py` | Import paths, plus one necessary adaptation: `LogisticRegression(multi_class="multinomial")` no longer constructs under scikit-learn 1.7 and later, which removed the argument after making multinomial the only multiclass fit its solvers perform. The argument is dropped and the behaviour stated in a comment; the fit is the same fit. The module and its result model are renamed; **The vocabulary sweep** at the end of this map is where the old names map to the new ones. |
 | `anamnesis/analysis/unified_runner/{geometry,clustering,contrastive,semantic,integrity,scorecard,utils}.py` | `anamnesis/analysis/gauntlet/` | Import paths only. |
 | — | `anamnesis/analysis/gauntlet/schemas/base.py` | New. The shared `_FORBID`, and the two backward-compatibility rules that follow from it, stated once where every section module reads them. |
 
@@ -779,3 +779,95 @@ device. C3's donor table already counts the script's 152 lines.
 
 With that, manifest §2 is exhausted: forty-two items live in this repository and
 six are in the frozen record by ruling, with no item unaccounted for.
+
+## The vocabulary sweep
+
+A feature vector is addressed in contiguous blocks. The four the numeric anchor
+builds were once named for how expensive they were to compute rather than for what
+they read, and three of them span more than one substrate, so the names described
+nothing and suggested a localization the numbers do not support. The code now names
+each block by what it reads, and what a feature reads is answered by
+`anamnesis/feature_map.py` and its (source × method × depth) cell.
+
+Three layers, treated differently, because they are not the same kind of thing.
+
+**On disk: unchanged.** The npz array keys `features_tier1`, `features_tier2`,
+`features_tier2_5` and `features_tier3`, the `tier_slices` key of a signature's JSON
+sidecar and the block labels inside it, and the block labels banked analysis JSON
+keys its per-block numbers by, are a wire format. Every signature and every analysis
+result ever banked indexes into itself with them, so none of them moved. They are
+declared in exactly two places: `STORED_*` in
+`anamnesis/extraction/state_extractor.py` for the write side, and the label constants
+at the top of `anamnesis/analysis/gauntlet/signature_io.py` for the read side.
+
+**Code: renamed.** Function signatures, module paths and internal call graphs are
+outside data compatibility, so they now say what they mean.
+
+| old name | new name |
+|---|---|
+| `state_extractor.extract_tier1` | `extract_norms_and_output_stats` |
+| `state_extractor.extract_tier2` | `extract_attention_and_deltas` |
+| `state_extractor.extract_tier2_5` | `extract_cache_and_keys` |
+| `state_extractor.extract_tier3` | `extract_residual_pca` |
+| `ExtractionResult.tier_slices` | `ExtractionResult.block_slices` (the sidecar key it is written under is unchanged) |
+| `ExtractionConfig.enable_tier1` / `enable_tier2` / `enable_tier2_5` / `enable_tier3` | `enable_norms_and_output_stats` / `enable_attention_and_deltas` / `enable_cache_and_keys` / `enable_residual_pca` |
+| `FeaturePipelineConfig.include_baseline_tiers` | `include_core_blocks` |
+| `feature_pipeline` CLI `--no-tier3` / `--no-baseline` | `--no-residual-pca` / `--no-core-blocks` |
+| `feature_map.legacy_family` | `feature_map.stored_family` (its return labels are unchanged) |
+| `signature_io.TIER_KEYS` | `BLOCK_NPZ_KEYS` |
+| `signature_io.BASELINE_TIERS` / `ENGINEERED_TIERS` / `TIER_GROUPS` | `CORE_BLOCKS` / `FAMILY_BLOCKS` / `BLOCK_UNIONS` |
+| `Run4Data.tier_features` / `tier_feature_names` / `get_tier` | `block_features` / `block_feature_names` / `get_block` |
+| `gauntlet/utils.py` · `ALL_TIERS` / `KEY_TIERS` / `get_available_tiers` | `ALL_BLOCKS` / `KEY_BLOCKS` / `get_available_blocks` |
+| `gauntlet/tier_ablation.py` · `run_tier_ablation` | `gauntlet/legacy_bin_readout.py` · `run_legacy_bin_readout` |
+| `schemas/tier_ablation.py` · `TierAblationResult` | `schemas/legacy_bin_readout.py` · `LegacyBinReadoutResult` |
+| `PairwiseTierCombo` / `TripleTierCombo` / `TierRankingEntry` | `PairwiseBlockCombo` / `TripleBlockCombo` / `BlockRankingEntry` |
+| `TierClassificationResult` / `TierSilhouette` / `TierVarianceReport` / `TierValueRange` | `BlockClassificationResult` / `BlockSilhouette` / `BlockVarianceReport` / `BlockValueRange` |
+| `GlobalTierIDResult` / `TierConvergenceResult` | `GlobalBlockIDResult` / `BlockConvergenceResult` |
+| `PerTierSemanticResult` / `PromptSwapTierResult` / `TierSwapResult` | `PerBlockSemanticResult` / `PromptSwapBlockResult` / `BlockSwapResult` |
+| `ContrastiveTierResult` / `ContrastiveTierAblation` | `ContrastiveBlockResult` / `ContrastiveBlockAblation` |
+| `complementarity.BASELINE_TIER_ORDER` / `COMPOSITE_TIERS` / `BASELINE_BLOCK_BY_SIGNAL` / `analyze_tier_ordering` | `CORE_BLOCK_ORDER` / `BLOCK_UNION_LABELS` / `CORE_BLOCK_BY_SIGNAL` / `analyze_block_ordering` |
+
+**Result-schema fields: renamed, with a reader.** These names are in banked
+`results.json` files, so renaming them is only half a change.
+`anamnesis/analysis/gauntlet/schemas/compat.py` holds the other half: one table,
+`migrate_banked_results` applies it, and the strict schemas then validate the
+result unchanged. Both read paths call it — the orchestrator's checkpoint resume
+and `complementarity.load_results` — so an older file loads into the current
+names. The table is the authority; this is a reading of it.
+
+| old field | new field |
+|---|---|
+| `tier_ablation` (a section of `results.json`, and its key in `section_times`) | `legacy_bin_readout` |
+| `integrity.tier_dims` | `block_dims` |
+| `legacy_bin_readout.per_tier_accuracy` | `per_block_accuracy` |
+| `legacy_bin_readout.pairwise_tier_combinations` / `triple_tier_combinations` | `pairwise_block_combinations` / `triple_block_combinations` |
+| `legacy_bin_readout.leave_one_tier_out` | `leave_one_block_out` |
+| `legacy_bin_readout.tier_ranking`, and `tier` inside each of its rows | `block_ranking`, `block` |
+| `legacy_bin_readout.tier_inversion_t25_gt_t2_gt_t1` | `cache_beats_attention_beats_norms` |
+| `legacy_bin_readout.tier_contribution_ratio` | `block_contribution_ratio` |
+| `legacy_bin_readout.top_features_rf_t2t25` / `top_features_lr_t2t25` | `top_features_rf_attention_and_cache` / `top_features_lr_attention_and_cache` |
+| `intrinsic_dimension.tier_convergence` | `block_convergence` |
+| `topology.tier` | `block` |
+| `clustering.silhouette_by_tier` | `silhouette_by_block` |
+| `clustering.embeddings` keys `tsne_t2t25` / `umap_t2t25` | `tsne_attention_and_cache` / `umap_attention_and_cache` |
+| `semantic.per_tier_semantic` / `per_tier` | `per_block_semantic` / `per_block` |
+| `semantic` · `compute_t2t25` | `compute_attention_and_cache` |
+| `scorecard` rows · `tier_inversion_holds` / `per_tier_accuracy` / `t3_id` / `mean_t1_t2` / `t2t25_accuracy` | `cache_beats_attention_beats_norms` / `per_block_accuracy` / `residual_pca_id` / `mean_norms_and_attention_id` / `attention_and_cache_accuracy` |
+
+`ClassificationResult.by_tier` is not in that table: it became `by_block`, but the
+name was never on the wire — a classification result carries one top-level key per
+block and the validator gathers them, so nothing needs mapping. Two schema families
+translate their own key spelling in their own validators for the same reason, their
+labels never having been legal Python identifiers: `ContrastiveSuperAdditivity` and
+`ContrastiveBlockAblation` in
+`anamnesis/analysis/gauntlet/schemas/contrastive.py`.
+
+One write-only report is renamed without a reader, because nothing reads it back.
+`complementarity_report.json` now carries `block_ordering`, `blocks`,
+`individual_blocks`, `block_a` / `block_b`, `blocks_analyzed`,
+`baseline_attention_and_cache`, `delta_vs_baseline_attention_and_cache` and
+`subfam_importance_attention_and_cache`, where it carried `tier_ordering`, `tiers`,
+`individual_tiers`, `tier_a` / `tier_b`, `tiers_analyzed`, `baseline_t2t25`,
+`delta_vs_baseline_t2t25` and `subfam_importance_t2t25`. Every number in the report is
+unchanged: the report was taken over the six banked runs on this branch and on `main`
+and the two differ in key names alone.

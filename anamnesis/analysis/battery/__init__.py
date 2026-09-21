@@ -1,7 +1,7 @@
 """anamnesis.analysis.battery — the one analysis template for every arm × model.
 
-prereg-vmb-v1 §6b. Typed (pydantic) throughout; prereg-locked readouts; no tier
-vocabulary in code or output strings; every emitted number carries
+prereg-vmb-v1 §6b. Typed (pydantic) throughout; prereg-locked readouts; localization
+in feature_map cells, in code and in output strings alike; every emitted number carries
 (n, M, law, floor-type). Stage 0 ships manifest + floors + stats functional;
 deltas / decomp / channel / dissoc / report are typed Wave-1 stubs.
 

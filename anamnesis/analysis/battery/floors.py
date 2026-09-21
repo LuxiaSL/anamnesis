@@ -24,7 +24,8 @@ delta's location exceeds the floor median by (k−1)×median — i.e. "the arm s
 at k× floor", the floor-ruler criterion — so effect size d = (k−1)·median/σ_floor.
 A rank-test variant inflates n by 1/0.955 (Mann-Whitney ARE vs t).
 
-Every emitted number is stamped (n, M, law, floor_type). No tier vocabulary.
+Every emitted number is stamped (n, M, law, floor_type), and localization is a
+feature_map cell rather than a coarse feature block.
 """
 from __future__ import annotations
 

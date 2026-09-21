@@ -16,7 +16,7 @@ class ScorecardPrediction(BaseModel):
     """One row of the pre-registered prediction scorecard.
 
     Each of the 9 predictions carries different evidence fields, so
-    the per-prediction extras (values, expected_order, mean_t1_t2,
+    the per-prediction extras (values, expected_order, mean_norms_and_attention_id,
     combined_accuracy, all_pairwise, etc.) are all Optional. Canonical
     runs populate the evidence fields relevant to each prediction; the
     serializer drops unset optionals.
@@ -38,12 +38,12 @@ class ScorecardPrediction(BaseModel):
     expected_order: list[str] | None = None  # P4
     actual_order: list[str] | None = None  # P4
     mode_ids: dict[str, float] | None = None  # P4
-    t3_id: float | None = None  # P5
-    mean_t1_t2: float | None = None  # P5
-    tier_inversion_holds: bool | None = None  # P6
-    per_tier_accuracy: dict[str, float] | None = None  # P6
+    residual_pca_id: float | None = None  # P5
+    mean_norms_and_attention_id: float | None = None  # P5
+    cache_beats_attention_beats_norms: bool | None = None  # P6
+    per_block_accuracy: dict[str, float] | None = None  # P6
     removal_costs: dict[str, float | None] | None = None  # P6
-    t2t25_accuracy: float | None = None  # P7
+    attention_and_cache_accuracy: float | None = None  # P7
     combined_accuracy: float | None = None  # P7
     mean_hard_pair_accuracy: float | None = None  # P8
     mean_easy_pair_accuracy: float | None = None  # P8

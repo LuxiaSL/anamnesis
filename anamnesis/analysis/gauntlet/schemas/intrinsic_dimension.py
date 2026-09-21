@@ -1,8 +1,8 @@
 """Section 4 schemas: intrinsic dimension of the signature cloud.
 
 Global and per-mode estimates with their bootstrap intervals, the GRIDE scale
-profile, and the convergence check across tiers. The estimators are
-third-party (``dadapy``, ``skdim``), so a tier that could not be estimated
+profile, and the convergence check across blocks. The estimators are
+third-party (``dadapy``, ``skdim``), so a block that could not be estimated
 carries its reason rather than a number.
 """
 
@@ -27,8 +27,8 @@ class BootstrapStats(BaseModel):
     n_successful: int
 
 
-class GlobalTierIDResult(BaseModel):
-    """ID metrics for one tier of the full dataset.
+class GlobalBlockIDResult(BaseModel):
+    """ID metrics for one block of the full dataset.
 
     ``dadapy_id`` / ``skdim_id`` fall back to ``"ERROR: ..."`` strings
     when the respective estimator raises. ``dadapy_err`` is set only on
@@ -45,7 +45,7 @@ class GlobalTierIDResult(BaseModel):
 
 
 class PerModeIDResult(BaseModel):
-    """ID metrics for one mode on the T2+T2.5 feature set."""
+    """ID metrics for one mode on the attention-and-cache feature set."""
 
     model_config = _FORBID
 
@@ -67,8 +67,8 @@ class GRIDEResult(BaseModel):
     error: str | None = None
 
 
-class TierConvergenceResult(BaseModel):
-    """T1/T2/T2.5 ID convergence summary."""
+class BlockConvergenceResult(BaseModel):
+    """Whether intrinsic dimension converges across the first three core blocks."""
 
     model_config = _FORBID
 
@@ -86,10 +86,10 @@ class IntrinsicDimensionResult(BaseModel):
 
     model_config = _FORBID
 
-    global_: dict[str, GlobalTierIDResult] | None = None
+    global_: dict[str, GlobalBlockIDResult] | None = None
     per_mode: dict[str, PerModeIDResult] | None = None
     gride: GRIDEResult | None = None
-    tier_convergence: TierConvergenceResult | None = None
+    block_convergence: BlockConvergenceResult | None = None
     error: str | None = None
 
     @model_validator(mode="before")
@@ -116,8 +116,8 @@ class IntrinsicDimensionResult(BaseModel):
             }
         if self.gride is not None:
             out["gride"] = self.gride.model_dump(mode="json", exclude_none=True)
-        if self.tier_convergence is not None:
-            out["tier_convergence"] = self.tier_convergence.model_dump(mode="json")
+        if self.block_convergence is not None:
+            out["block_convergence"] = self.block_convergence.model_dump(mode="json")
         if self.error is not None:
             out["error"] = self.error
         return out

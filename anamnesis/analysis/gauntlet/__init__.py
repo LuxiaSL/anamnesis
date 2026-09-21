@@ -10,7 +10,7 @@ another beside a length-only baseline that reaches the same number.
 The eleven sections:
   1. Data integrity & descriptive statistics
   2. Classification (5-way mode discrimination)
-  3. Tier ablation & feature importance
+  3. Block ablation & feature importance
   4. Intrinsic dimension profiling
   5. CCGP (cross-condition generalization)
   6. Topology & hyperbolicity
@@ -44,7 +44,19 @@ from pydantic import BaseModel, ValidationError
 
 from anamnesis.config.paths import outputs_root
 
-from .signature_io import AnalysisData, load_analysis_data
+from .signature_io import (
+    ALL_CORE,
+    ALL_FAMILIES,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    EVERYTHING,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+    AnalysisData,
+    load_analysis_data,
+)
 from .schemas import (
     AnalysisResults,
     CCGPResult,
@@ -56,8 +68,9 @@ from .schemas import (
     ManifoldGeometryResult,
     ScorecardResult,
     SemanticResult,
-    TierAblationResult,
+    LegacyBinReadoutResult,
     TopologyResult,
+    migrate_banked_results,
 )
 from .utils import clean_for_json
 
@@ -132,8 +145,8 @@ SECTIONS: list[SectionSpec] = [
                 _run_data_only("integrity", "run_integrity_checks")),
     SectionSpec(2, "Classification", "classification",
                 _run_data_only("classification", "run_classification")),
-    SectionSpec(3, "Tier Ablation", "tier_ablation",
-                _run_data_only("tier_ablation", "run_tier_ablation")),
+    SectionSpec(3, "Legacy Bin Readout", "legacy_bin_readout",
+                _run_data_only("legacy_bin_readout", "run_legacy_bin_readout")),
     SectionSpec(4, "Intrinsic Dimension", "intrinsic_dimension",
                 _run_data_only("geometry", "run_intrinsic_dimension")),
     SectionSpec(5, "CCGP", "ccgp",
@@ -163,7 +176,7 @@ SECTION_NAMES: dict[int, str] = {spec.number: spec.name for spec in SECTIONS}
 SECTION_MODELS: dict[str, type[BaseModel]] = {
     "integrity": IntegrityResult,
     "classification": ClassificationResult,
-    "tier_ablation": TierAblationResult,
+    "legacy_bin_readout": LegacyBinReadoutResult,
     "intrinsic_dimension": IntrinsicDimensionResult,
     "ccgp": CCGPResult,
     "topology": TopologyResult,
@@ -210,12 +223,18 @@ def _save_checkpoint(results: dict, output_dir: Path) -> None:
 
 
 def _load_checkpoint(output_dir: Path) -> dict | None:
-    """Load existing checkpoint if present."""
+    """Load an existing checkpoint if present, reading older field spellings forward.
+
+    A checkpoint can predate a schema rename, and a resume that dropped a section
+    because its key moved would silently recompute it under a new name and leave the
+    old one beside it. ``migrate_banked_results`` maps the names, so the resume sees
+    one document.
+    """
     checkpoint_path = output_dir / "results.json"
     if checkpoint_path.exists():
         try:
             with open(checkpoint_path) as f:
-                return json.load(f)
+                return migrate_banked_results(json.load(f))
         except (json.JSONDecodeError, OSError):
             return None
     return None
@@ -393,50 +412,53 @@ def _print_summary(results: dict) -> None:
 
     # Classification
     clf = results.get("classification")
-    clf_by_tier: dict = {}
+    clf_by_block: dict = {}
     if isinstance(clf, ClassificationResult):
-        clf_by_tier = clf.by_tier
-    # Show all tiers that have results
-    reported_tiers = ["T2+T2.5", "combined", "engineered", "combined_v2",
-                      "T2+T2.5+engineered"]
-    for tier in reported_tiers:
-        tier_clf = clf_by_tier.get(tier)
-        if tier_clf is not None and tier_clf.rf_5way.accuracy is not None:
-            print(f"\n  5-way RF ({tier}): {tier_clf.rf_5way.accuracy:.1%}")
+        clf_by_block = clf.by_block
+    # Show all blocks that have results
+    reported_blocks = [ATTENTION_AND_CACHE, ALL_CORE, ALL_FAMILIES, EVERYTHING,
+                      ATTENTION_AND_CACHE_WITH_FAMILIES]
+    for block in reported_blocks:
+        block_clf = clf_by_block.get(block)
+        if block_clf is not None and block_clf.rf_5way.accuracy is not None:
+            print(f"\n  5-way RF ({block}): {block_clf.rf_5way.accuracy:.1%}")
 
     # CV stability
-    for tier in ["T2+T2.5", "combined_v2", "combined"]:
-        tier_clf = clf_by_tier.get(tier)
-        if tier_clf is not None and tier_clf.cv_stability is not None:
-            stab = tier_clf.cv_stability
-            print(f"  CV stability ({tier}): median={stab.median:.1%}, "
+    for block in [ATTENTION_AND_CACHE, EVERYTHING, ALL_CORE]:
+        block_clf = clf_by_block.get(block)
+        if block_clf is not None and block_clf.cv_stability is not None:
+            stab = block_clf.cv_stability
+            print(f"  CV stability ({block}): median={stab.median:.1%}, "
                   f"95% CI=[{stab.ci_lo:.1%}, {stab.ci_hi:.1%}]")
 
     # Permutation test
-    for tier in ["T2+T2.5", "combined_v2", "combined"]:
-        tier_clf = clf_by_tier.get(tier)
-        if tier_clf is not None and tier_clf.permutation_test is not None:
-            print(f"  Permutation p ({tier}): {tier_clf.permutation_test.p_value}")
+    for block in [ATTENTION_AND_CACHE, EVERYTHING, ALL_CORE]:
+        block_clf = clf_by_block.get(block)
+        if block_clf is not None and block_clf.permutation_test is not None:
+            print(f"  Permutation p ({block}): {block_clf.permutation_test.p_value}")
 
-    # Tier ablation
-    ablation = results.get("tier_ablation")
-    if isinstance(ablation, TierAblationResult) and ablation.tier_ranking:
+    # The readout over the stored blocks
+    ablation = results.get("legacy_bin_readout")
+    if isinstance(ablation, LegacyBinReadoutResult) and ablation.block_ranking:
         rank_str = " > ".join(
-            f"{entry.tier}({entry.accuracy:.0%})" for entry in ablation.tier_ranking
+            f"{entry.block}({entry.accuracy:.0%})" for entry in ablation.block_ranking
         )
-        print(f"\n  Tier ranking: {rank_str}")
-        print(f"  T2.5 > T2 > T1 inversion: {ablation.tier_inversion_t25_gt_t2_gt_t1}")
+        print(f"\n  Block ranking: {rank_str}")
+        print(
+            "  cache > attention > norms: "
+            f"{ablation.cache_beats_attention_beats_norms}"
+        )
 
     # ID
     id_data = results.get("intrinsic_dimension")
     if isinstance(id_data, IntrinsicDimensionResult) and id_data.global_:
         print("\n  Intrinsic dimension:")
-        for tier in ["T1", "T2", "T2.5", "T3", "T2+T2.5"]:
-            tier_id = id_data.global_.get(tier)
-            if tier_id is not None and isinstance(tier_id.dadapy_id, (int, float)):
-                print(f"    {tier}: {tier_id.dadapy_id:.1f}")
-        if id_data.tier_convergence is not None:
-            print(f"  Tier convergence (max diff): {id_data.tier_convergence.max_pairwise_diff:.1f}")
+        for block in [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA, ATTENTION_AND_CACHE]:
+            block_id = id_data.global_.get(block)
+            if block_id is not None and isinstance(block_id.dadapy_id, (int, float)):
+                print(f"    {block}: {block_id.dadapy_id:.1f}")
+        if id_data.block_convergence is not None:
+            print(f"  Block convergence (max diff): {id_data.block_convergence.max_pairwise_diff:.1f}")
 
     # CCGP
     ccgp = results.get("ccgp")
@@ -455,28 +477,28 @@ def _print_summary(results: dict) -> None:
 
     # Semantic orthogonality
     semantic = results.get("semantic")
-    if isinstance(semantic, SemanticResult) and semantic.per_tier_semantic:
-        per_tier_sem = semantic.per_tier_semantic
-        print(f"\n  Semantic orthogonality ({len(per_tier_sem)} tiers tested):")
+    if isinstance(semantic, SemanticResult) and semantic.per_block_semantic:
+        per_block_sem = semantic.per_block_semantic
+        print(f"\n  Semantic orthogonality ({len(per_block_sem)} blocks tested):")
         tfidf_bundle = semantic.tfidf_classification
         if tfidf_bundle is not None and tfidf_bundle.rf is not None:
             print(f"    TF-IDF surface baseline: {tfidf_bundle.rf.accuracy:.1%}")
-        for tier_name, tier_data in per_tier_sem.items():
-            if tier_data.error is not None:
+        for block_name, block_data in per_block_sem.items():
+            if block_data.error is not None:
                 continue
             parts: list[str] = []
-            if tier_data.classification is not None and tier_data.classification.rf is not None:
-                parts.append(f"RF={tier_data.classification.rf.accuracy:.1%}")
-            if tier_data.mantel_tfidf_cosine is not None:
-                parts.append(f"Mantel r={tier_data.mantel_tfidf_cosine.r:.3f}")
-            if tier_data.text_to_compute_r2 is not None:
-                parts.append(f"R²={tier_data.text_to_compute_r2.median_r2:.3f}")
+            if block_data.classification is not None and block_data.classification.rf is not None:
+                parts.append(f"RF={block_data.classification.rf.accuracy:.1%}")
+            if block_data.mantel_tfidf_cosine is not None:
+                parts.append(f"Mantel r={block_data.mantel_tfidf_cosine.r:.3f}")
+            if block_data.text_to_compute_r2 is not None:
+                parts.append(f"R²={block_data.text_to_compute_r2.median_r2:.3f}")
             n_sub = (
-                tier_data.per_mode_surface_vs_compute.n_sub_semantic
-                if tier_data.per_mode_surface_vs_compute is not None else "?"
+                block_data.per_mode_surface_vs_compute.n_sub_semantic
+                if block_data.per_mode_surface_vs_compute is not None else "?"
             )
             parts.append(f"sub-semantic modes={n_sub}")
-            print(f"    {tier_name}: {', '.join(parts)}")
+            print(f"    {block_name}: {', '.join(parts)}")
 
     # Scorecard
     sc = results.get("scorecard")

@@ -8,7 +8,7 @@ check the readings by value:
   * a section that does not validate leaves the rest of the file readable;
   * pair difficulty is read off the pair's two modes, and the three buckets are kept apart
     because averaging them hides the hard pairs;
-  * the complementarity matrix is over **hard pairs only**, a tier at ceiling on all of them
+  * the complementarity matrix is over **hard pairs only**, a block at ceiling on all of them
     is dropped by name rather than entering as a flat profile, and the correlation is sorted
     so the most complementary pair reads first;
   * feature importance is grouped by family and by sub-family, including the baseline blocks
@@ -36,7 +36,7 @@ from anamnesis.analysis.complementarity import (
     analyze_consistency,
     analyze_resolution,
     analyze_subfamily_importance,
-    analyze_tier_ordering,
+    analyze_block_ordering,
     analyze_value_add,
     complementarity_report,
     feature_family,
@@ -50,13 +50,13 @@ from anamnesis.analysis.complementarity import (
 LABELS = ["analogical", "contrastive", "dialectical", "linear", "socratic"]
 
 
-def tier_block(
+def block_block(
     accuracy: float,
     *,
     pairwise: dict[str, float] | None = None,
     confusion: list[list[int]] | None = None,
 ) -> dict[str, object]:
-    """One tier's section of a banked classification result, in its own schema.
+    """One block's section of a banked classification result, in its own schema.
 
     Every required field is present, because the reader validates the section and a
     fixture that skipped one would be testing the fallback rather than the reading.
@@ -95,7 +95,7 @@ def write_results(
     root: Path,
     run: str,
     *,
-    by_tier: dict[str, dict[str, object]],
+    by_block: dict[str, dict[str, object]],
     n_samples: int = 100,
     top_features: list[tuple[str, float]] | None = None,
 ) -> Path:
@@ -104,22 +104,22 @@ def write_results(
     document: dict[str, object] = {
         "run_name": run,
         "n_samples": n_samples,
-        "classification": {"by_tier": by_tier},
+        "classification": {"by_block": by_block},
     }
     if top_features is not None:
         ranked = [
             {"name": name, "importance": importance} for name, importance in top_features
         ]
-        document["tier_ablation"] = {
-            "per_tier_accuracy": {"T2": 0.5},
-            "pairwise_tier_combinations": {},
-            "leave_one_tier_out": {},
-            "tier_ranking": [],
-            "tier_inversion_t25_gt_t2_gt_t1": False,
+        document["legacy_bin_readout"] = {
+            "per_block_accuracy": {"T2": 0.5},
+            "pairwise_block_combinations": {},
+            "leave_one_block_out": {},
+            "block_ranking": [],
+            "cache_beats_attention_beats_norms": False,
             "top_features_rf": ranked,
-            "top_features_rf_t2t25": ranked,
-            "top_features_lr_t2t25": ranked,
-            "tier_contribution_ratio": {},
+            "top_features_rf_attention_and_cache": ranked,
+            "top_features_lr_attention_and_cache": ranked,
+            "block_contribution_ratio": {},
             "std_vs_mean": {},
             "cohens_d_per_topic": {
                 "per_topic": {},
@@ -151,7 +151,7 @@ def test_an_absent_or_broken_run_is_named_and_skipped(tmp_path: Path) -> None:
     (broken / "results.json").write_text("{not json")
     assert load_results(broken / "results.json") is None
 
-    write_results(tmp_path, "8b_v2", by_tier={"T1": tier_block(0.4)})
+    write_results(tmp_path, "8b_v2", by_block={"T1": block_block(0.4)})
     loaded = load_report_inputs(tmp_path)
     assert set(loaded) == {"8b_v2"}, "only the run that exists is loaded"
 
@@ -160,7 +160,7 @@ def test_a_section_that_does_not_validate_leaves_the_file_readable(tmp_path: Pat
     directory = tmp_path / "8b_v2"
     directory.mkdir()
     (directory / "results.json").write_text(
-        json.dumps({"n_samples": 40, "classification": {"by_tier": {"T1": {"nonsense": 1}}}})
+        json.dumps({"n_samples": 40, "classification": {"by_block": {"T1": {"nonsense": 1}}}})
     )
     results = load_results(directory / "results.json")
     assert results is not None
@@ -173,19 +173,19 @@ def test_a_section_that_does_not_validate_leaves_the_file_readable(tmp_path: Pat
     )
 
 
-def test_consistency_flags_the_tiers_that_moved(tmp_path: Path) -> None:
-    write_results(tmp_path, "8b_baseline", by_tier={"T1": tier_block(0.40), "T2": tier_block(0.60)})
+def test_consistency_flags_the_blocks_that_moved(tmp_path: Path) -> None:
+    write_results(tmp_path, "8b_baseline", by_block={"T1": block_block(0.40), "T2": block_block(0.60)})
     write_results(
-        tmp_path, "8b_v2_5way", by_tier={"T1": tier_block(0.41), "T2": tier_block(0.80)}
+        tmp_path, "8b_v2_5way", by_block={"T1": block_block(0.41), "T2": block_block(0.80)}
     )
     results = load_report_inputs(tmp_path)
     comparisons = analyze_consistency(results)["comparisons"]
     assert len(comparisons) == 1, "the 3B pair is absent and is skipped"
-    tiers = comparisons[0]["tiers"]
-    assert tiers["T1"]["divergent"] is False
-    assert tiers["T2"]["divergent"] is True
-    assert tiers["T2"]["diff"] == pytest.approx(0.20)
-    assert abs(tiers["T1"]["diff"]) < DIVERGENCE_BAR
+    blocks = comparisons[0]["blocks"]
+    assert blocks["T1"]["divergent"] is False
+    assert blocks["T2"]["divergent"] is True
+    assert blocks["T2"]["diff"] == pytest.approx(0.20)
+    assert abs(blocks["T1"]["diff"]) < DIVERGENCE_BAR
 
 
 def test_resolution_keeps_the_difficulty_buckets_apart(tmp_path: Path) -> None:
@@ -197,7 +197,7 @@ def test_resolution_keeps_the_difficulty_buckets_apart(tmp_path: Path) -> None:
             ("associative", "compressed"): 0.99,
         }
     )
-    write_results(tmp_path, "8b_v2", by_tier={"T2": tier_block(0.5, pairwise=pairwise)})
+    write_results(tmp_path, "8b_v2", by_block={"T2": block_block(0.5, pairwise=pairwise)})
     resolution = analyze_resolution(load_report_inputs(tmp_path))["8b_v2"]["T2"]
     assert resolution["hard"]["n_pairs"] == 2
     assert resolution["hard"]["mean"] == pytest.approx(0.65)
@@ -206,7 +206,7 @@ def test_resolution_keeps_the_difficulty_buckets_apart(tmp_path: Path) -> None:
     assert resolution["easy-easy"]["mean"] == pytest.approx(0.99)
 
 
-def test_the_complementarity_matrix_drops_a_tier_with_no_profile(tmp_path: Path) -> None:
+def test_the_complementarity_matrix_drops_a_block_with_no_profile(tmp_path: Path) -> None:
     hard = {
         ("linear", "socratic"): 0.6,
         ("linear", "dialectical"): 0.9,
@@ -217,18 +217,18 @@ def test_the_complementarity_matrix_drops_a_tier_with_no_profile(tmp_path: Path)
     write_results(
         tmp_path,
         "8b_v2",
-        by_tier={
-            "T2": tier_block(0.5, pairwise=hard_pairs(hard)),
-            "T2.5": tier_block(0.5, pairwise=hard_pairs(inverse)),
-            "T3": tier_block(0.5, pairwise=hard_pairs(flat)),
+        by_block={
+            "T2": block_block(0.5, pairwise=hard_pairs(hard)),
+            "T2.5": block_block(0.5, pairwise=hard_pairs(inverse)),
+            "T3": block_block(0.5, pairwise=hard_pairs(flat)),
         },
     )
     out = analyze_complementarity(load_report_inputs(tmp_path))["8b_v2"]
     assert len(out["hard_pairs"]) == 3
     pairs = out["pairs_by_correlation"]
     assert [row["r"] for row in pairs] == sorted(row["r"] for row in pairs)
-    assert {row["tier_a"] for row in pairs} | {row["tier_b"] for row in pairs} == {"T2", "T2.5"}, (
-        "the tier at ceiling on every hard pair has no profile to correlate"
+    assert {row["block_a"] for row in pairs} | {row["block_b"] for row in pairs} == {"T2", "T2.5"}, (
+        "the block at ceiling on every hard pair has no profile to correlate"
     )
     assert pairs[0]["r"] < COMPLEMENTARY_BAR and pairs[0]["reading"] == "COMPLEMENTARY"
 
@@ -255,7 +255,7 @@ def test_importance_is_summed_per_family_and_per_sub_family(tmp_path: Path) -> N
     write_results(
         tmp_path,
         "8b_v2",
-        by_tier={"T2": tier_block(0.5)},
+        by_block={"T2": block_block(0.5)},
         top_features=[
             ("af_L8_recency_bias_mean", 0.10),
             ("af_L16_recency_bias_mean", 0.05),
@@ -267,7 +267,7 @@ def test_importance_is_summed_per_family_and_per_sub_family(tmp_path: Path) -> N
     assert out["family_importance"]["temporal_dynamics"] == pytest.approx(0.20)
     assert out["subfam_importance"]["af_recency_bias"] == pytest.approx(0.15)
     assert out["n_features_ranked"] == 3
-    assert out["subfam_importance_t2t25"]["td_key_drift"] == pytest.approx(0.20)
+    assert out["subfam_importance_attention_and_cache"]["td_key_drift"] == pytest.approx(0.20)
 
 
 def test_the_hardest_confusion_is_read_off_the_matrix_that_carries_its_labels(
@@ -280,9 +280,9 @@ def test_the_hardest_confusion_is_read_off_the_matrix_that_carries_its_labels(
         [0, 0, 0, 5, 5],
         [0, 0, 0, 5, 5],
     ]
-    write_results(tmp_path, "8b_v2", by_tier={"T2": tier_block(0.8, confusion=confusion)})
+    write_results(tmp_path, "8b_v2", by_block={"T2": block_block(0.8, confusion=confusion)})
     out = analyze_confusion(load_report_inputs(tmp_path))["8b_v2"]
-    assert out["tiers_analyzed"] == ["T2"]
+    assert out["blocks_analyzed"] == ["T2"]
     hardest = out["hardest_confusion"]["T2"]
     assert hardest["pair"] == pair_name("linear", "socratic"), (
         "the two classes the matrix recovers half the time are the hardest pair"
@@ -291,9 +291,9 @@ def test_the_hardest_confusion_is_read_off_the_matrix_that_carries_its_labels(
 
 
 def test_a_confusion_matrix_without_labels_is_skipped(tmp_path: Path) -> None:
-    write_results(tmp_path, "8b_v2", by_tier={"T2": tier_block(0.8)})
+    write_results(tmp_path, "8b_v2", by_block={"T2": block_block(0.8)})
     out = analyze_confusion(load_report_inputs(tmp_path))["8b_v2"]
-    assert out["tiers_analyzed"] == []
+    assert out["blocks_analyzed"] == []
 
 
 def test_the_ordering_check_reports_the_three_accuracies_and_its_verdict(tmp_path: Path) -> None:
@@ -301,14 +301,14 @@ def test_the_ordering_check_reports_the_three_accuracies_and_its_verdict(tmp_pat
         tmp_path,
         "8b_v2",
         n_samples=100,
-        by_tier={
-            "T1": tier_block(0.30),
-            "T2": tier_block(0.50),
-            "T2.5": tier_block(0.62),
-            "T3": tier_block(0.40),
+        by_block={
+            "T1": block_block(0.30),
+            "T2": block_block(0.50),
+            "T2.5": block_block(0.62),
+            "T3": block_block(0.40),
         },
     )
-    out = analyze_tier_ordering(load_report_inputs(tmp_path))["8b_v2"]
+    out = analyze_block_ordering(load_report_inputs(tmp_path))["8b_v2"]
     assert out["inversion"] is True
     assert out["n_modes"] == 5, "the mode count comes from the samples and the topics per mode"
     assert out["T3"] == pytest.approx(0.40)
@@ -316,29 +316,29 @@ def test_the_ordering_check_reports_the_three_accuracies_and_its_verdict(tmp_pat
 
 def test_value_add_is_a_delta_and_a_missing_baseline_is_not_a_zero(tmp_path: Path) -> None:
     write_results(
-        tmp_path, "8b_baseline", by_tier={"T2+T2.5": tier_block(0.60), "combined": tier_block(0.70)}
+        tmp_path, "8b_baseline", by_block={"T2+T2.5": block_block(0.60), "combined": block_block(0.70)}
     )
     write_results(
         tmp_path,
         "8b_v2_5way",
-        by_tier={
-            "attention_flow": tier_block(0.66),
-            "engineered": tier_block(0.75),
+        by_block={
+            "attention_flow": block_block(0.66),
+            "engineered": block_block(0.75),
         },
     )
     out = analyze_value_add(load_report_inputs(tmp_path))["8B"]
-    assert out["families"]["attention_flow"]["delta_vs_baseline_t2t25"] == pytest.approx(0.06)
+    assert out["families"]["attention_flow"]["delta_vs_baseline_attention_and_cache"] == pytest.approx(0.06)
     assert out["composites"]["engineered"]["delta_vs_baseline_combined"] == pytest.approx(0.05)
 
-    write_results(tmp_path, "3b_run4", by_tier={"T1": tier_block(0.3)})
-    write_results(tmp_path, "3b_v2_5way", by_tier={"attention_flow": tier_block(0.5)})
+    write_results(tmp_path, "3b_run4", by_block={"T1": block_block(0.3)})
+    write_results(tmp_path, "3b_v2_5way", by_block={"attention_flow": block_block(0.5)})
     out_3b = analyze_value_add(load_report_inputs(tmp_path))["3B"]
-    assert out_3b["baseline_t2t25"] is None
-    assert out_3b["families"]["attention_flow"]["delta_vs_baseline_t2t25"] is None
+    assert out_3b["baseline_attention_and_cache"] is None
+    assert out_3b["families"]["attention_flow"]["delta_vs_baseline_attention_and_cache"] is None
 
 
 def test_the_report_carries_all_seven_readings(tmp_path: Path) -> None:
-    write_results(tmp_path, "8b_v2", by_tier={"T1": tier_block(0.4), "T2": tier_block(0.6)})
+    write_results(tmp_path, "8b_v2", by_block={"T1": block_block(0.4), "T2": block_block(0.6)})
     report = complementarity_report(load_report_inputs(tmp_path))
     assert set(report) == {
         "runs",
@@ -347,7 +347,7 @@ def test_the_report_carries_all_seven_readings(tmp_path: Path) -> None:
         "complementarity",
         "subfamily_importance",
         "confusion",
-        "tier_ordering",
+        "block_ordering",
         "value_add",
     }
     assert report["runs"] == ["8b_v2"]

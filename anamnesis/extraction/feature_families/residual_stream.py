@@ -10,8 +10,8 @@ during generation — velocity, curvature, directness. These are the "dynamical
 motifs" that neuroscience literature identifies as diagnostic of computational
 mode (Russo et al., Driscoll et al.).
 
-Contrastive projection replaces PCA T3 with a mode-supervised projection that
-finds directions maximizing mode separation in the residual stream.
+Contrastive projection stands in for the residual-PCA block with a mode-supervised
+projection that finds directions maximizing mode separation in the residual stream.
 """
 
 from __future__ import annotations

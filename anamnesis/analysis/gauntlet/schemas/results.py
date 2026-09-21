@@ -20,7 +20,7 @@ from anamnesis.analysis.gauntlet.schemas.intrinsic_dimension import IntrinsicDim
 from anamnesis.analysis.gauntlet.schemas.manifold_geometry import ManifoldGeometryResult
 from anamnesis.analysis.gauntlet.schemas.scorecard import ScorecardResult
 from anamnesis.analysis.gauntlet.schemas.semantic import SemanticResult
-from anamnesis.analysis.gauntlet.schemas.tier_ablation import TierAblationResult
+from anamnesis.analysis.gauntlet.schemas.legacy_bin_readout import LegacyBinReadoutResult
 from anamnesis.analysis.gauntlet.schemas.topology import TopologyResult
 
 
@@ -52,7 +52,7 @@ class AnalysisResults(BaseModel):
     # Section results (11 in the current pipeline)
     integrity: IntegrityResult | None = None
     classification: ClassificationResult | None = None
-    tier_ablation: TierAblationResult | None = None
+    legacy_bin_readout: LegacyBinReadoutResult | None = None
     intrinsic_dimension: IntrinsicDimensionResult | None = None
     ccgp: CCGPResult | None = None
     topology: TopologyResult | None = None

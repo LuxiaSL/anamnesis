@@ -1,13 +1,13 @@
-"""Section 2 schemas: mode discrimination, per tier.
+"""Section 2 schemas: mode discrimination, per block.
 
-The battery each tier is put through — five-way random forest with its confusion
+The battery each block is put through — five-way random forest with its confusion
 matrix, topic-held-out CV, a linear probe, every pairwise binary, and the
 four-way set with analogical removed — plus the multi-seed stability and
-label-permutation null that only the key composite tiers pay for, and the
+label-permutation null that only the key composite blocks pay for, and the
 length-only baseline that says how much of it generation length could explain.
 
-The wire format stores tier keys at the top level beside ``length_only``, so the
-validator gathers them into ``by_tier`` and the serializer flattens them back.
+The wire format stores block keys at the top level beside ``length_only``, so the
+validator gathers them into ``by_block`` and the serializer flattens them back.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class TopicHeldoutResult(BaseModel):
 
 
 class CVStabilityResult(BaseModel):
-    """Multi-seed RF stability distribution (key tiers only)."""
+    """Multi-seed RF stability distribution (key blocks only)."""
 
     model_config = _FORBID
 
@@ -72,7 +72,7 @@ class CVStabilityResult(BaseModel):
 
 
 class PermutationTestResult(BaseModel):
-    """Label-permutation null distribution (key tiers only)."""
+    """Label-permutation null distribution (key blocks only)."""
 
     model_config = _FORBID
 
@@ -139,12 +139,11 @@ class LengthOnlyResult(BaseModel):
         return out
 
 
-class TierClassificationResult(BaseModel):
-    """Per-tier classification battery.
+class BlockClassificationResult(BaseModel):
+    """Per-block classification battery.
 
-    ``cv_stability`` / ``permutation_test`` are populated only for key
-    composite tiers (``T2+T2.5``, ``combined``, ``combined_v2``, ...);
-    other tiers omit them on the wire.
+    ``cv_stability`` / ``permutation_test`` are populated only for the union
+    blocks worth the sweep; other blocks omit them on the wire.
     """
 
     model_config = _FORBID
@@ -159,34 +158,35 @@ class TierClassificationResult(BaseModel):
 
 
 class ClassificationResult(BaseModel):
-    """Section 2 result: per-tier classification + length-only confound.
+    """Section 2 result: per-block classification + length-only confound.
 
-    Wire format stores dynamic tier keys at the top level (e.g. ``T1``,
-    ``T2+T2.5``, ``combined``) alongside ``length_only``. Internally we
-    gather the tier entries into ``by_tier`` so consumers can use
-    attribute access (``result.by_tier[tier].rf_5way.accuracy``). The
-    validator reshapes wire → internal; the serializer reshapes back.
+    The wire format stores one key per block at the top level, beside
+    ``length_only``, and which blocks those are depends on the run. The
+    validator gathers them into ``by_block`` so a consumer can use attribute
+    access (``result.by_block[block].rf_5way.accuracy``), and the serializer
+    spreads them back out. `anamnesis/analysis/gauntlet/signature_io.py` is
+    where the block labels come from.
     """
 
     model_config = _FORBID
 
-    by_tier: dict[str, TierClassificationResult]
+    by_block: dict[str, BlockClassificationResult]
     length_only: LengthOnlyResult | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _reshape_in(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "by_tier" not in data:
+        if isinstance(data, dict) and "by_block" not in data:
             flat = dict(data)
             length_only = flat.pop("length_only", None)
-            return {"by_tier": flat, "length_only": length_only}
+            return {"by_block": flat, "length_only": length_only}
         return data
 
     @model_serializer(mode="plain")
     def _reshape_out(self) -> dict[str, Any]:
         out: dict[str, Any] = {
-            tier: tier_result.model_dump(mode="json", exclude_none=True)
-            for tier, tier_result in self.by_tier.items()
+            block: block_result.model_dump(mode="json", exclude_none=True)
+            for block, block_result in self.by_block.items()
         }
         if self.length_only is not None:
             out["length_only"] = self.length_only.model_dump(mode="json")

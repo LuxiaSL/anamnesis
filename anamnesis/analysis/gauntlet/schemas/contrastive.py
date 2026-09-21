@@ -1,10 +1,15 @@
 """Section 8 schemas: learned projections and their ablations.
 
-A supervised contrastive encoder trained per tier, with the kNN readout on its
-embedding, the tier ablation and pairwise grids, the super-additivity test, and
-the capacity sweep and linear baselines that say whether a nonlinear encoder
-was needed. ``_ON_DISK_RENAMES`` is the frozen wire vocabulary: banked JSON
-carries the older key spelling and is read through the map.
+A supervised contrastive encoder trained per feature block, with the kNN readout
+on its embedding, the per-block and pairwise ablation grids, the super-additivity
+test, and the capacity sweep and linear baselines that say whether a nonlinear
+encoder was needed.
+
+The block labels on disk are a frozen wire vocabulary and several are not legal
+Python identifiers, so each model that carries them translates in one place:
+``_ON_DISK_RENAMES`` plus the validator/serializer pair beneath it. The Python
+side says which substrates a block reads; the wire side stays byte-for-byte what
+banked JSON holds.
 """
 
 from __future__ import annotations
@@ -16,8 +21,8 @@ from pydantic import BaseModel, model_serializer, model_validator
 from anamnesis.analysis.gauntlet.schemas.base import _FORBID
 
 
-class ContrastiveTierResult(BaseModel):
-    """Top-level per-tier contrastive result (T2+T2.5 / combined)."""
+class ContrastiveBlockResult(BaseModel):
+    """One block's contrastive result: the kNN readout and silhouette on its embedding."""
 
     model_config = _FORBID
 
@@ -28,8 +33,7 @@ class ContrastiveTierResult(BaseModel):
 
 
 class ContrastiveAblationEntry(BaseModel):
-    """Single tier entry inside ``contrastive.tier_ablation.individual``
-    or the combined/T2+T2.5 sub-keys of ``tier_ablation``."""
+    """One block's entry in the ablation grid: ``individual``, or a union sub-key."""
 
     model_config = _FORBID
 
@@ -53,27 +57,27 @@ class ContrastivePairwiseEntry(BaseModel):
 
 
 class ContrastiveSuperAdditivity(BaseModel):
-    """T2+T2.5 super-additivity summary.
+    """Does the attention block plus the cache-and-keys block beat either alone.
 
-    Keys like ``T2.5_alone`` and ``T2+T2.5_pair`` aren't legal Python
-    identifiers, so the model exposes them as ``T2_5_alone`` etc. A
-    custom validator + serializer translates to/from the on-disk names.
+    The comparison the numbers answer: each of the two blocks on its own, the two
+    concatenated, and the concatenation against the whole vector.
     """
 
     model_config = _FORBID
 
-    T2_alone: float
-    T2_5_alone: float
-    T2_T2_5_pair: float
+    attention_alone: float
+    cache_alone: float
+    attention_and_cache_pair: float
     best_individual: float
     gain: float
     combined_knn: float
-    T2_T2_5_beats_combined: bool
+    attention_and_cache_beats_combined: bool
 
     _ON_DISK_RENAMES: ClassVar[dict[str, str]] = {
-        "T2.5_alone": "T2_5_alone",
-        "T2+T2.5_pair": "T2_T2_5_pair",
-        "T2+T2.5_beats_combined": "T2_T2_5_beats_combined",
+        "T2_alone": "attention_alone",
+        "T2.5_alone": "cache_alone",
+        "T2+T2.5_pair": "attention_and_cache_pair",
+        "T2+T2.5_beats_combined": "attention_and_cache_beats_combined",
     }
 
     @model_validator(mode="before")
@@ -86,37 +90,40 @@ class ContrastiveSuperAdditivity(BaseModel):
     @model_serializer(mode="plain")
     def _to_disk(self) -> dict[str, Any]:
         return {
-            "T2_alone": self.T2_alone,
-            "T2.5_alone": self.T2_5_alone,
-            "T2+T2.5_pair": self.T2_T2_5_pair,
+            "T2_alone": self.attention_alone,
+            "T2.5_alone": self.cache_alone,
+            "T2+T2.5_pair": self.attention_and_cache_pair,
             "best_individual": self.best_individual,
             "gain": self.gain,
             "combined_knn": self.combined_knn,
-            "T2+T2.5_beats_combined": self.T2_T2_5_beats_combined,
+            "T2+T2.5_beats_combined": self.attention_and_cache_beats_combined,
         }
 
 
-class ContrastiveTierAblation(BaseModel):
-    """Contrastive MLP tier ablation bundle.
+class ContrastiveBlockAblation(BaseModel):
+    """The contrastive encoder's per-block ablation bundle.
 
-    ``T2+T2.5`` on the wire becomes ``T2_T2_5`` in Python; translated by
-    the validator + serializer pair below.
+    The union of the attention block and the cache-and-keys block is stored under
+    a label that is not a legal Python identifier, so it is translated on the way
+    in and out by the validator + serializer pair below.
     """
 
     model_config = _FORBID
 
     individual: dict[str, ContrastiveAblationEntry]
     pairwise: dict[str, ContrastivePairwiseEntry]
-    T2_T2_5: ContrastiveAblationEntry
+    attention_and_cache: ContrastiveAblationEntry
     combined: ContrastiveAblationEntry
     super_additivity: ContrastiveSuperAdditivity
+
+    _ON_DISK_ATTENTION_AND_CACHE: ClassVar[str] = "T2+T2.5"
 
     @model_validator(mode="before")
     @classmethod
     def _from_disk(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "T2+T2.5" in data:
+        if isinstance(data, dict) and cls._ON_DISK_ATTENTION_AND_CACHE in data:
             out = dict(data)
-            out["T2_T2_5"] = out.pop("T2+T2.5")
+            out["attention_and_cache"] = out.pop(cls._ON_DISK_ATTENTION_AND_CACHE)
             return out
         return data
 
@@ -131,7 +138,9 @@ class ContrastiveTierAblation(BaseModel):
                 k: v.model_dump(mode="json", exclude_none=True)
                 for k, v in self.pairwise.items()
             },
-            "T2+T2.5": self.T2_T2_5.model_dump(mode="json", exclude_none=True),
+            self._ON_DISK_ATTENTION_AND_CACHE: self.attention_and_cache.model_dump(
+                mode="json", exclude_none=True
+            ),
             "combined": self.combined.model_dump(mode="json", exclude_none=True),
             "super_additivity": self.super_additivity.model_dump(mode="json"),
         }
@@ -161,34 +170,40 @@ class ContrastiveResult(BaseModel):
     """Section 8 result: contrastive projection (MLP + triplet loss).
 
     Top-level fields are all ``Optional`` so the PyTorch-missing error
-    stub (``{"error": "..."}``) round-trips cleanly. The ``T2+T2.5`` key
-    is renamed to ``T2_T2_5`` via validator/serializer for the same
-    reason as ContrastiveTierAblation.
+    stub (``{"error": "..."}``) round-trips cleanly. The union of the attention
+    block and the cache-and-keys block is translated on the way in and out for
+    the same reason as in ContrastiveBlockAblation.
     """
 
     model_config = _FORBID
 
-    T2_T2_5: ContrastiveTierResult | None = None
-    combined: ContrastiveTierResult | None = None
+    attention_and_cache: ContrastiveBlockResult | None = None
+    combined: ContrastiveBlockResult | None = None
     capacity_sweep: dict[str, CapacitySweepEntry] | None = None
-    tier_ablation: ContrastiveTierAblation | None = None
+    block_ablation: ContrastiveBlockAblation | None = None
     linear_baselines: dict[str, LinearBaselineEntry] | None = None
     error: str | None = None
+
+    _ON_DISK_ABLATION: ClassVar[str] = "tier_ablation"
+    _ON_DISK_RENAMES: ClassVar[dict[str, str]] = {
+        ContrastiveBlockAblation._ON_DISK_ATTENTION_AND_CACHE: "attention_and_cache",
+        _ON_DISK_ABLATION: "block_ablation",
+    }
 
     @model_validator(mode="before")
     @classmethod
     def _from_disk(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "T2+T2.5" in data:
-            out = dict(data)
-            out["T2_T2_5"] = out.pop("T2+T2.5")
-            return out
+        if isinstance(data, dict):
+            return {cls._ON_DISK_RENAMES.get(k, k): v for k, v in data.items()}
         return data
 
     @model_serializer(mode="plain")
     def _to_disk(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        if self.T2_T2_5 is not None:
-            out["T2+T2.5"] = self.T2_T2_5.model_dump(mode="json", exclude_none=True)
+        if self.attention_and_cache is not None:
+            out[ContrastiveBlockAblation._ON_DISK_ATTENTION_AND_CACHE] = self.attention_and_cache.model_dump(
+                mode="json", exclude_none=True
+            )
         if self.combined is not None:
             out["combined"] = self.combined.model_dump(mode="json", exclude_none=True)
         if self.capacity_sweep is not None:
@@ -196,8 +211,8 @@ class ContrastiveResult(BaseModel):
                 k: v.model_dump(mode="json", exclude_none=True)
                 for k, v in self.capacity_sweep.items()
             }
-        if self.tier_ablation is not None:
-            out["tier_ablation"] = self.tier_ablation.model_dump(mode="json")
+        if self.block_ablation is not None:
+            out[self._ON_DISK_ABLATION] = self.block_ablation.model_dump(mode="json")
         if self.linear_baselines is not None:
             out["linear_baselines"] = {
                 k: v.model_dump(mode="json", exclude_none=True)

@@ -1,4 +1,16 @@
-"""Section 3: Tier ablation and feature importance."""
+"""Section 3: a readout over the stored feature blocks, and feature importance.
+
+This section measures each stored block on its own, the blocks in pairs and triples,
+and the cost of leaving each one out. Those blocks — the bins banked results are
+expressed in — are the whole reason the section exists: a number banked per bin can
+only be compared per bin, so the readout keeps computing exactly what it computed.
+
+It is a compatibility readout, not the decomposition of record. Three of the four
+blocks the numeric anchor builds span more than one substrate, so a block's accuracy
+localizes nothing. The decomposition of record cuts by family and sub-family —
+`anamnesis/scripts/run_subfamily_decomp.py`, over `anamnesis/analysis/subfamily.py` —
+and the taxonomy it reads is `anamnesis/feature_map.py`.
+"""
 
 from __future__ import annotations
 
@@ -12,18 +24,29 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-from .signature_io import AnalysisData, BASELINE_TIERS, ENGINEERED_TIERS
+from .signature_io import (
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    CORE_BLOCKS,
+    EVERYTHING,
+    FAMILY_BLOCKS,
+    NORMS_AND_OUTPUT_STATS,
+    ALL_CORE,
+    AnalysisData,
+)
 from .schemas import (
     CohensDPerTopicResult,
     CrossGroupAblation,
     FeatureImportanceEntry,
     LeaveOneOutEntry,
-    PairwiseTierCombo,
+    PairwiseBlockCombo,
     PerTopicEffectSize,
     StdVsMeanResult,
-    TierAblationResult,
-    TierRankingEntry,
-    TripleTierCombo,
+    LegacyBinReadoutResult,
+    BlockRankingEntry,
+    TripleBlockCombo,
 )
 
 _RF_KWARGS = dict(n_estimators=100, n_jobs=1)
@@ -83,118 +106,122 @@ def _get_lr_importance(
     return [FeatureImportanceEntry(name=n, importance=float(v)) for n, v in ranked[:30]]
 
 
-def run_tier_ablation(data: AnalysisData) -> TierAblationResult:
-    """Run tier ablation and feature importance analyses."""
+def run_legacy_bin_readout(data: AnalysisData) -> LegacyBinReadoutResult:
+    """Measure every stored block, its unions, and the cost of dropping each one.
+
+    Returns the accuracies, the pairwise and triple combinations, the leave-one-out
+    costs, the ranking, and the feature importances on the widest union present.
+    """
     y = data.modes
 
-    present_baseline = [t for t in BASELINE_TIERS if t in data.run4.tier_features]
-    present_engineered = [t for t in ENGINEERED_TIERS if t in data.run4.tier_features]
-    all_individual = present_baseline + present_engineered
+    present_core = [t for t in CORE_BLOCKS if t in data.run4.block_features]
+    present_families = [t for t in FAMILY_BLOCKS if t in data.run4.block_features]
+    all_individual = present_core + present_families
 
-    print(f"  Baseline tiers: {present_baseline}")
-    if present_engineered:
-        print(f"  Engineered tiers: {present_engineered}")
+    print(f"  Core blocks: {present_core}")
+    if present_families:
+        print(f"  Family blocks: {present_families}")
 
-    # ── Per-tier accuracy (each tier alone) ──
-    per_tier_accuracy: dict[str, float] = {}
-    for tier in all_individual:
-        X = data.get_tier(tier)
-        per_tier_accuracy[tier] = _rf_accuracy(X, y)
-        print(f"    {tier}: {per_tier_accuracy[tier]:.3f} ({X.shape[1]} features)")
+    # ── Per-block accuracy (each block alone) ──
+    per_block_accuracy: dict[str, float] = {}
+    for block in all_individual:
+        X = data.get_block(block)
+        per_block_accuracy[block] = _rf_accuracy(X, y)
+        print(f"    {block}: {per_block_accuracy[block]:.3f} ({X.shape[1]} features)")
 
     for group_name in data.run4.group_features:
-        X = data.get_tier(group_name)
-        per_tier_accuracy[group_name] = _rf_accuracy(X, y)
-        print(f"    {group_name}: {per_tier_accuracy[group_name]:.3f} ({X.shape[1]} features)")
+        X = data.get_block(group_name)
+        per_block_accuracy[group_name] = _rf_accuracy(X, y)
+        print(f"    {group_name}: {per_block_accuracy[group_name]:.3f} ({X.shape[1]} features)")
 
-    # ── Pairwise within baseline ──
-    print("  Pairwise baseline tier combinations...")
-    pairwise_tiers: dict[str, PairwiseTierCombo] = {}
-    for t1, t2 in combinations(present_baseline, 2):
-        key = f"{t1}+{t2}"
-        X_pair = np.concatenate([data.get_tier(t1), data.get_tier(t2)], axis=1)
+    # ── Pairwise within the core blocks ──
+    print("  Pairwise combinations within the core blocks...")
+    pairwise_blocks: dict[str, PairwiseBlockCombo] = {}
+    for left, right in combinations(present_core, 2):
+        key = f"{left}+{right}"
+        X_pair = np.concatenate([data.get_block(left), data.get_block(right)], axis=1)
         acc = _rf_accuracy(X_pair, y)
-        expected = max(per_tier_accuracy[t1], per_tier_accuracy[t2])
-        pairwise_tiers[key] = PairwiseTierCombo(
+        expected = max(per_block_accuracy[left], per_block_accuracy[right])
+        pairwise_blocks[key] = PairwiseBlockCombo(
             accuracy=acc,
             n_features=int(X_pair.shape[1]),
             individual_max=expected,
             gain_over_best_individual=acc - expected,
         )
 
-    # ── Triple within baseline ──
-    triple_tiers: dict[str, TripleTierCombo] | None = None
-    if len(present_baseline) >= 3:
-        print("  Triple baseline tier combinations...")
-        triple_tiers = {}
-        for combo in combinations(present_baseline, 3):
+    # ── Triple within the core blocks ──
+    triple_blocks: dict[str, TripleBlockCombo] | None = None
+    if len(present_core) >= 3:
+        print("  Triple combinations within the core blocks...")
+        triple_blocks = {}
+        for combo in combinations(present_core, 3):
             key = "+".join(combo)
-            X_triple = np.concatenate([data.get_tier(t) for t in combo], axis=1)
+            X_triple = np.concatenate([data.get_block(t) for t in combo], axis=1)
             acc = _rf_accuracy(X_triple, y)
             best_pair_acc = max(
-                (pairwise_tiers[f"{a}+{b}"].accuracy for a, b in combinations(combo, 2)),
+                (pairwise_blocks[f"{a}+{b}"].accuracy for a, b in combinations(combo, 2)),
                 default=0.0,
             )
-            triple_tiers[key] = TripleTierCombo(
+            triple_blocks[key] = TripleBlockCombo(
                 accuracy=acc,
                 n_features=int(X_triple.shape[1]),
                 best_pairwise_subset=best_pair_acc,
                 gain_over_best_pair=acc - best_pair_acc,
             )
 
-    # ── Cross-group: baseline composite + each engineered tier ──
+    # ── Cross-group: baseline composite + each engineered block ──
     cross_group: dict[str, CrossGroupAblation] | None = None
     cross_group_baseline: str | None = None
-    if present_engineered and len(present_baseline) >= 2:
+    if present_families and len(present_core) >= 2:
         print("  Cross-group ablation (baseline + each engineered)...")
-        baseline_key = "T2+T2.5" if "T2+T2.5" in data.run4.group_features else None
-        if baseline_key is None and len(present_baseline) >= 2:
-            baseline_key = "+".join(present_baseline)
-        if baseline_key and baseline_key in per_tier_accuracy:
+        baseline_key = ATTENTION_AND_CACHE if ATTENTION_AND_CACHE in data.run4.group_features else None
+        if baseline_key is None and len(present_core) >= 2:
+            baseline_key = "+".join(present_core)
+        if baseline_key and baseline_key in per_block_accuracy:
             cross_group = {}
             cross_group_baseline = baseline_key
-            baseline_acc = per_tier_accuracy[baseline_key]
-            X_base = data.get_tier(baseline_key)
-            for eng_tier in present_engineered:
-                X_eng = data.get_tier(eng_tier)
+            baseline_acc = per_block_accuracy[baseline_key]
+            X_base = data.get_block(baseline_key)
+            for eng_block in present_families:
+                X_eng = data.get_block(eng_block)
                 X_combined = np.concatenate([X_base, X_eng], axis=1)
                 acc = _rf_accuracy(X_combined, y)
-                cross_group[f"{baseline_key}+{eng_tier}"] = CrossGroupAblation(
+                cross_group[f"{baseline_key}+{eng_block}"] = CrossGroupAblation(
                     accuracy=acc,
                     n_features=int(X_combined.shape[1]),
                     baseline_accuracy=baseline_acc,
-                    engineered_alone=per_tier_accuracy[eng_tier],
+                    engineered_alone=per_block_accuracy[eng_block],
                     gain_over_baseline=acc - baseline_acc,
                 )
 
-    # ── Leave-one-tier-out (from all individual tiers) ──
+    # ── Leave-one-block-out (from all individual blocks) ──
     leave_one_out: dict[str, LeaveOneOutEntry] = {}
     leave_one_out_baseline: float | None = None
     if len(all_individual) >= 2:
-        all_concat = np.concatenate([data.get_tier(t) for t in all_individual], axis=1)
+        all_concat = np.concatenate([data.get_block(t) for t in all_individual], axis=1)
         all_acc = _rf_accuracy(all_concat, y)
         leave_one_out_baseline = all_acc
-        for tier in all_individual:
-            remaining = [t for t in all_individual if t != tier]
-            X_without = np.concatenate([data.get_tier(t) for t in remaining], axis=1)
+        for block in all_individual:
+            remaining = [t for t in all_individual if t != block]
+            X_without = np.concatenate([data.get_block(t) for t in remaining], axis=1)
             acc_without = _rf_accuracy(X_without, y)
-            leave_one_out[tier] = LeaveOneOutEntry(
+            leave_one_out[block] = LeaveOneOutEntry(
                 accuracy_without=acc_without,
                 cost_of_removal=all_acc - acc_without,
             )
 
-    # ── Tier ranking ──
+    # ── Block ranking ──
     ranking_list = sorted(
-        [(t, per_tier_accuracy[t]) for t in all_individual],
+        [(t, per_block_accuracy[t]) for t in all_individual],
         key=lambda x: x[1],
         reverse=True,
     )
-    tier_ranking = [TierRankingEntry(tier=t, accuracy=a) for t, a in ranking_list]
-    tier_inversion = False
-    if all(t in per_tier_accuracy for t in ["T2.5", "T2", "T1"]):
-        tier_inversion = (
-            per_tier_accuracy["T2.5"] > per_tier_accuracy["T2"]
-            > per_tier_accuracy["T1"]
+    block_ranking = [BlockRankingEntry(block=t, accuracy=a) for t, a in ranking_list]
+    block_inversion = False
+    if all(t in per_block_accuracy for t in [CACHE_AND_KEYS, ATTENTION_AND_DELTAS, NORMS_AND_OUTPUT_STATS]):
+        block_inversion = (
+            per_block_accuracy[CACHE_AND_KEYS] > per_block_accuracy[ATTENTION_AND_DELTAS]
+            > per_block_accuracy[NORMS_AND_OUTPUT_STATS]
         )
 
     # ── Feature importance on best available composite ──
@@ -202,23 +229,23 @@ def run_tier_ablation(data: AnalysisData) -> TierAblationResult:
     top_features_lr: list[FeatureImportanceEntry] | None = None
     feature_importance_composite: str | None = None
     best_composite = None
-    for candidate in ["combined_v2", "combined", "T2+T2.5+engineered", "T2+T2.5"]:
+    for candidate in [EVERYTHING, ALL_CORE, ATTENTION_AND_CACHE_WITH_FAMILIES, ATTENTION_AND_CACHE]:
         if candidate in data.run4.group_features:
             best_composite = candidate
             break
 
     if best_composite:
         print(f"  Feature importance ({best_composite})...")
-        X_key = data.get_tier(best_composite)
+        X_key = data.get_block(best_composite)
         key_names: list[str] = []
-        from .signature_io import TIER_GROUPS
+        from .signature_io import BLOCK_UNIONS
         composite_members = []
-        if best_composite in TIER_GROUPS:
-            composite_members = [t for t in TIER_GROUPS[best_composite]
-                                 if t in data.run4.tier_features]
-        for tier in composite_members:
-            tier_names = data.run4.tier_feature_names.get(tier, np.array([]))
-            key_names.extend(list(tier_names))
+        if best_composite in BLOCK_UNIONS:
+            composite_members = [t for t in BLOCK_UNIONS[best_composite]
+                                 if t in data.run4.block_features]
+        for block in composite_members:
+            block_names = data.run4.block_feature_names.get(block, np.array([]))
+            key_names.extend(list(block_names))
         if len(key_names) != X_key.shape[1]:
             key_names = [f"feat_{i}" for i in range(X_key.shape[1])]
 
@@ -226,23 +253,23 @@ def run_tier_ablation(data: AnalysisData) -> TierAblationResult:
         top_features_lr = _get_lr_importance(X_key, y, key_names)
         feature_importance_composite = best_composite
 
-    # Also do T2+T2.5 importance for backward compatibility
-    top_features_rf_t2t25: list[FeatureImportanceEntry] = []
-    top_features_lr_t2t25: list[FeatureImportanceEntry] = []
-    if "T2+T2.5" in data.run4.group_features:
-        print("  Feature importance (T2+T2.5)...")
-        X_t2t25 = data.get_tier("T2+T2.5")
-        t2t25_names = list(data.run4.tier_feature_names.get("T2", [])) + \
-                      list(data.run4.tier_feature_names.get("T2.5", []))
-        if len(t2t25_names) != X_t2t25.shape[1]:
-            t2t25_names = [f"feat_{i}" for i in range(X_t2t25.shape[1])]
-        top_features_rf_t2t25 = _get_feature_importance(X_t2t25, y, t2t25_names)
-        top_features_lr_t2t25 = _get_lr_importance(X_t2t25, y, t2t25_names)
+    # The attention-and-cache union is reported separately: banked results carry it
+    top_features_rf_attention_and_cache: list[FeatureImportanceEntry] = []
+    top_features_lr_attention_and_cache: list[FeatureImportanceEntry] = []
+    if ATTENTION_AND_CACHE in data.run4.group_features:
+        print("  Feature importance (attention and cache)...")
+        X_attention_and_cache = data.get_block(ATTENTION_AND_CACHE)
+        attention_and_cache_names = list(data.run4.block_feature_names.get(ATTENTION_AND_DELTAS, [])) + \
+                      list(data.run4.block_feature_names.get(CACHE_AND_KEYS, []))
+        if len(attention_and_cache_names) != X_attention_and_cache.shape[1]:
+            attention_and_cache_names = [f"feat_{i}" for i in range(X_attention_and_cache.shape[1])]
+        top_features_rf_attention_and_cache = _get_feature_importance(X_attention_and_cache, y, attention_and_cache_names)
+        top_features_lr_attention_and_cache = _get_lr_importance(X_attention_and_cache, y, attention_and_cache_names)
 
-    # ── Tier contribution ratio ──
-    tier_contribution: dict[str, float] = {}
+    # ── Block contribution ratio ──
+    block_contribution: dict[str, float] = {}
     if len(all_individual) >= 2:
-        X_all = np.concatenate([data.get_tier(t) for t in all_individual], axis=1)
+        X_all = np.concatenate([data.get_block(t) for t in all_individual], axis=1)
         scaler = StandardScaler()
         X_s = scaler.fit_transform(X_all)
         clf = RandomForestClassifier(n_estimators=500, random_state=42, n_jobs=1)
@@ -250,13 +277,13 @@ def run_tier_ablation(data: AnalysisData) -> TierAblationResult:
         importances = clf.feature_importances_
 
         offset = 0
-        for tier in all_individual:
-            dim = data.get_tier(tier).shape[1]
-            tier_contribution[tier] = float(np.sum(importances[offset:offset + dim]))
+        for block in all_individual:
+            dim = data.get_block(block).shape[1]
+            block_contribution[block] = float(np.sum(importances[offset:offset + dim]))
             offset += dim
-        total = sum(tier_contribution.values())
+        total = sum(block_contribution.values())
         if total > 0:
-            tier_contribution = {k: v / total for k, v in tier_contribution.items()}
+            block_contribution = {k: v / total for k, v in block_contribution.items()}
 
     # std vs mean features
     print("  std vs mean feature split...")
@@ -266,23 +293,23 @@ def run_tier_ablation(data: AnalysisData) -> TierAblationResult:
     print("  Cohen's d per topic...")
     cohens_d = _topic_controlled_effect_sizes(data, y)
 
-    return TierAblationResult(
-        per_tier_accuracy=per_tier_accuracy,
-        pairwise_tier_combinations=pairwise_tiers,
-        triple_tier_combinations=triple_tiers,
+    return LegacyBinReadoutResult(
+        per_block_accuracy=per_block_accuracy,
+        pairwise_block_combinations=pairwise_blocks,
+        triple_block_combinations=triple_blocks,
         cross_group_ablation=cross_group,
         cross_group_baseline=cross_group_baseline,
-        leave_one_tier_out=leave_one_out,
+        leave_one_block_out=leave_one_out,
         leave_one_out_baseline_accuracy=leave_one_out_baseline,
-        tier_ranking=tier_ranking,
-        tier_inversion_t25_gt_t2_gt_t1=tier_inversion,
+        block_ranking=block_ranking,
+        cache_beats_attention_beats_norms=block_inversion,
         top_features_rf=top_features_rf,
         top_features_lr=top_features_lr,
         feature_importance_composite=feature_importance_composite,
-        top_features_rf_t2t25=top_features_rf_t2t25,
-        top_features_lr_t2t25=top_features_lr_t2t25,
+        top_features_rf_attention_and_cache=top_features_rf_attention_and_cache,
+        top_features_lr_attention_and_cache=top_features_lr_attention_and_cache,
         top_features_rf_combined=None,
-        tier_contribution_ratio=tier_contribution,
+        block_contribution_ratio=block_contribution,
         std_vs_mean=std_vs_mean,
         cohens_d_per_topic=cohens_d,
     )
@@ -290,9 +317,9 @@ def run_tier_ablation(data: AnalysisData) -> TierAblationResult:
 
 def _std_vs_mean_split(data: AnalysisData, y: NDArray) -> StdVsMeanResult:
     """Compare RF accuracy on *_std features vs *_mean features."""
-    X = data.get_tier("T2+T2.5")
-    names = list(data.run4.tier_feature_names.get("T2", [])) + \
-            list(data.run4.tier_feature_names.get("T2.5", []))
+    X = data.get_block(ATTENTION_AND_CACHE)
+    names = list(data.run4.block_feature_names.get(ATTENTION_AND_DELTAS, [])) + \
+            list(data.run4.block_feature_names.get(CACHE_AND_KEYS, []))
 
     if len(names) != X.shape[1]:
         return StdVsMeanResult(
@@ -327,10 +354,10 @@ def _std_vs_mean_split(data: AnalysisData, y: NDArray) -> StdVsMeanResult:
 
 
 def _topic_controlled_effect_sizes(data: AnalysisData, y: NDArray) -> CohensDPerTopicResult:
-    """Cohen's d per topic: within-mode vs between-mode distances on T2+T2.5."""
+    """Cohen's d per topic: within-mode vs between-mode distances on attention and cache."""
     from scipy.spatial.distance import pdist
 
-    X = data.get_tier("T2+T2.5")
+    X = data.get_block(ATTENTION_AND_CACHE)
     scaler = StandardScaler()
     X_std = scaler.fit_transform(X)
     topics = data.topics

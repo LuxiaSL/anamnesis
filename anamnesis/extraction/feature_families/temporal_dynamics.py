@@ -1,4 +1,4 @@
-"""Temporal decomposition of core T2/T2.5 metrics.
+"""Temporal decomposition of the attention and cache-read metrics.
 
 Takes the per-step time series that state_extractor collapses to mean/std
 and instead applies windowed statistics + STFT to capture temporal structure.
@@ -251,7 +251,7 @@ def extract_temporal_dynamics(
     n_windows: int = 4,
     include_stft: bool = True,
 ) -> FeatureFamilyResult:
-    """Extract temporal decomposition of core T2/T2.5 metrics.
+    """Extract the temporal decomposition of the attention and cache-read metrics.
 
     For each sampled layer, computes per-step time series of 5 metrics
     and applies windowed statistics + STFT temporal operators.

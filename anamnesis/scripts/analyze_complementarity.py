@@ -1,10 +1,10 @@
 """Read several banked gauntlet results and report what sits between them.
 
 Seven readings that only exist across runs and across families: cross-run
-consistency, pairwise resolution by difficulty, the complementarity of tiers' hard-pair
-profiles, feature importance grouped by family and sub-family, each tier's hardest
-confusion, whether the historical tier ordering holds, and what the engineered families
-add over the baseline composites.
+consistency, pairwise resolution by difficulty, the complementarity of blocks' hard-pair
+profiles, feature importance grouped by family and sub-family, each block's hardest
+confusion, whether the registered accuracy ordering of the core blocks holds, and what
+the engineered families add over the unions of the core blocks.
 
 Nothing here runs a classifier. It re-reads results that were expensive to produce,
 which is the whole reason the cross-run questions are cheap to ask.

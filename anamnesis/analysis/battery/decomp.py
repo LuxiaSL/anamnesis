@@ -3,8 +3,8 @@
 Generalizes kv-rotation/experiments/exp11_family_decomp.py over feature_map cells:
 for each (source × method × dynamic × depth) cell, an arm effect COUNTS only if
 ≥ k× the matching floor in that cell (floor-ruler), with per-cell feature-mass
-correction so big cells can't win by size. Localization speaks feature_map only —
-no tier vocabulary. The visibility map records BLINDNESS rows (N4) alongside
+correction so big cells can't win by size. Localization speaks feature_map only: a
+cell, never a coarse feature block. The visibility map records BLINDNESS rows (N4) alongside
 carrier rows: "moves symmetrically / fails the ruler" is a result, not a miss.
 """
 from __future__ import annotations

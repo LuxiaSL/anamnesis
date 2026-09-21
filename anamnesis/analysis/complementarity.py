@@ -4,21 +4,22 @@ Every other analysis here reads signatures. This one reads *results* — the
 gauntlet's own banked JSON, several runs of it at once — and asks the questions
 that only exist between runs and between families:
 
-1. **Consistency.** The same tier, the same modes, two corpora. A tier whose
+1. **Consistency.** The same block, the same modes, two corpora. A block whose
    accuracy moves by more than five points between them is flagged, because a
-   tier that is not stable across corpora is not a property of the model.
+   block that is not stable across corpora is not a property of the model.
 2. **Resolution.** Pairwise accuracy split by how hard the pair is. The
    format-controlled five are the hard pairs; anything involving a
    format-free mode is easier and averaging the two hides it.
-3. **Complementarity.** Two tiers' accuracy *profiles* over the hard pairs,
+3. **Complementarity.** Two blocks' accuracy *profiles* over the hard pairs,
    correlated. A low correlation means they fail on different pairs, which is what
    makes them worth combining; a high one means one of them is redundant. Easy
    pairs are excluded because their shared ceiling dominates the correlation, and a
-   tier at ceiling on every hard pair has no profile at all and is dropped by name.
+   block at ceiling on every hard pair has no profile at all and is dropped by name.
 4. **Sub-family importance.** The banked feature importances, grouped by family and
    by sub-family, so importance is read at the resolution the names support.
-5. **Confusion.** Which pair each tier finds hardest, off its own confusion matrix.
-6. **Ordering.** Whether the historical tier ordering holds in each run.
+5. **Confusion.** Which pair each block finds hardest, off its own confusion matrix.
+6. **Ordering.** Whether the registered accuracy ordering of the core blocks holds
+   in each run: cache-and-keys above attention-and-deltas above norms-and-output-stats.
 7. **Value-add.** The engineered families and composites against the baseline
    composites, on the mode subset the two corpora share.
 
@@ -27,9 +28,9 @@ is the point of the separation: the gauntlet is expensive and its results are
 banked, so the cross-run questions are answered by re-reading rather than by
 re-running.
 
-The tier and family names in these tables are the record's own, because they are
-the keys in banked result files. The taxonomy sweep renames the code, never the
-keys on disk.
+The block and family labels in these tables are the keys banked result files use. They
+are addresses into those files, so a label is read as "this column range" and never as a
+claim about what the columns measure.
 """
 
 from __future__ import annotations
@@ -42,7 +43,27 @@ from typing import Any
 
 import numpy as np
 
-from anamnesis.analysis.gauntlet.schemas import ClassificationResult, TierAblationResult
+from anamnesis.analysis.gauntlet.schemas import (
+    ClassificationResult,
+    LegacyBinReadoutResult,
+    migrate_banked_results,
+)
+from anamnesis.analysis.gauntlet.signature_io import (
+    ALL_CORE,
+    ALL_FAMILIES,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
+    ATTENTION_AND_DELTAS,
+    ATTENTION_FLOW,
+    CACHE_AND_KEYS,
+    CONTRASTIVE_PROJECTION,
+    EVERYTHING,
+    GATE_FEATURES,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+    RESIDUAL_TRAJECTORY,
+    TEMPORAL_DYNAMICS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +82,12 @@ SUBSET_RUNS: tuple[str, ...] = ("8b_v2_5way", "3b_v2_5way")
 """The mode-subset passes, read when present — they are what make an engineered
 corpus comparable to a five-mode baseline."""
 
-BASELINE_TIER_ORDER: tuple[str, ...] = ("T1", "T2", "T2.5", "T3", "T2+T2.5", "combined")
-"""Reading order for the consistency table. The names are banked keys."""
+CORE_BLOCK_ORDER: tuple[str, ...] = (
+    NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA,
+    ATTENTION_AND_CACHE, ALL_CORE,
+)
+"""Reading order for the consistency table: the four blocks the numeric anchor
+builds, then the two unions over them."""
 
 CONSISTENCY_PAIRS: tuple[tuple[str, str, str], ...] = (
     ("8b_baseline", "8b_v2_5way", "8B: baseline vs engineered (five modes)"),
@@ -70,55 +95,58 @@ CONSISTENCY_PAIRS: tuple[tuple[str, str, str], ...] = (
 )
 
 DIVERGENCE_BAR = 0.05
-"""Accuracy difference at which two corpora are called divergent for a tier."""
+"""Accuracy difference at which two corpora are called divergent for a block."""
 
 COMPLEMENTARY_BAR = 0.30
 REDUNDANT_BAR = 0.60
-"""Profile-correlation bars: below the first two tiers are complementary, above the
+"""Profile-correlation bars: below the first two blocks are complementary, above the
 second they are redundant, between them moderate."""
 
 ZERO_VARIANCE = 1e-10
 
-COMPOSITE_TIERS: frozenset[str] = frozenset(
-    {"T2+T2.5", "combined", "engineered", "combined_v2", "T2+T2.5+engineered"}
-)
-"""Tiers that are unions of others. They belong in the correlation matrix but not in
+BLOCK_UNION_LABELS: frozenset[str] = frozenset({
+    ATTENTION_AND_CACHE, ALL_CORE, ALL_FAMILIES, EVERYTHING,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
+})
+"""Blocks that are unions of others. They belong in the correlation matrix but not in
 the per-pair table, where they would double-count their members."""
 
 NEW_FAMILIES: tuple[str, ...] = (
-    "residual_trajectory",
-    "attention_flow",
-    "gate_features",
-    "temporal_dynamics",
-    "contrastive_projection",
+    RESIDUAL_TRAJECTORY,
+    ATTENTION_FLOW,
+    GATE_FEATURES,
+    TEMPORAL_DYNAMICS,
+    CONTRASTIVE_PROJECTION,
 )
-V2_COMPOSITES: tuple[str, ...] = ("engineered", "T2+T2.5+engineered", "combined_v2")
+V2_COMPOSITES: tuple[str, ...] = (
+    ALL_FAMILIES, ATTENTION_AND_CACHE_WITH_FAMILIES, EVERYTHING,
+)
 
 FAMILY_BY_PREFIX: dict[str, str] = {
-    "cp": "contrastive_projection",
-    "af": "attention_flow",
-    "td": "temporal_dynamics",
-    "rt": "residual_trajectory",
-    "gf": "gate_features",
+    "cp": CONTRASTIVE_PROJECTION,
+    "af": ATTENTION_FLOW,
+    "td": TEMPORAL_DYNAMICS,
+    "rt": RESIDUAL_TRAJECTORY,
+    "gf": GATE_FEATURES,
 }
-"""Engineered families carry a two-letter prefix. The baseline blocks do not, which
-is why the fallback below reads their signal names instead."""
+"""Engineered families carry a two-letter prefix. The core blocks do not, which is
+why the fallback below reads their signal names instead."""
 
-BASELINE_BLOCK_BY_SIGNAL: tuple[tuple[str, str], ...] = (
-    ("lookback", "T2.5"),
-    ("key_drift", "T2.5"),
-    ("key_novelty", "T2.5"),
-    ("epoch", "T2.5"),
-    ("attn_entropy", "T2"),
-    ("head_agree", "T2"),
-    ("residual", "T2"),
-    ("pca_", "T3"),
-    ("act_norm", "T1"),
-    ("logit", "T1"),
-    ("token", "T1"),
-    ("delta", "T1"),
+CORE_BLOCK_BY_SIGNAL: tuple[tuple[str, str], ...] = (
+    ("lookback", CACHE_AND_KEYS),
+    ("key_drift", CACHE_AND_KEYS),
+    ("key_novelty", CACHE_AND_KEYS),
+    ("epoch", CACHE_AND_KEYS),
+    ("attn_entropy", ATTENTION_AND_DELTAS),
+    ("head_agree", ATTENTION_AND_DELTAS),
+    ("residual", ATTENTION_AND_DELTAS),
+    ("pca_", RESIDUAL_PCA),
+    ("act_norm", NORMS_AND_OUTPUT_STATS),
+    ("logit", NORMS_AND_OUTPUT_STATS),
+    ("token", NORMS_AND_OUTPUT_STATS),
+    ("delta", NORMS_AND_OUTPUT_STATS),
 )
-"""Which baseline block a feature name belongs to, by the signal it names. Order
+"""Which core block a feature name belongs to, by the signal it names. Order
 matters: the more specific signals are matched first."""
 
 
@@ -153,13 +181,13 @@ def load_results(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = migrate_banked_results(json.loads(path.read_text(encoding="utf-8")))
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning(f"{path}: unreadable ({exc})")
         return None
     for key, model in (
         ("classification", ClassificationResult),
-        ("tier_ablation", TierAblationResult),
+        ("legacy_bin_readout", LegacyBinReadoutResult),
     ):
         if isinstance(raw.get(key), dict):
             try:
@@ -189,16 +217,16 @@ def load_report_inputs(
     return loaded
 
 
-def _by_tier(results: Mapping[str, Any] | None) -> dict[str, Any]:
-    """A run's per-tier classification, or empty where the section is untyped."""
+def _by_block(results: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A run's per-block classification, or empty where the section is untyped."""
     if not results:
         return {}
     section = results.get("classification")
-    return section.by_tier if isinstance(section, ClassificationResult) else {}
+    return section.by_block if isinstance(section, ClassificationResult) else {}
 
 
-def _accuracy(by_tier: Mapping[str, Any], tier: str) -> float | None:
-    entry = by_tier.get(tier)
+def _accuracy(by_block: Mapping[str, Any], block: str) -> float | None:
+    entry = by_block.get(block)
     return entry.rf_5way.accuracy if entry is not None else None
 
 
@@ -206,23 +234,23 @@ def analyze_consistency(
     results: Mapping[str, Mapping[str, Any]],
     *,
     pairs: Sequence[tuple[str, str, str]] = CONSISTENCY_PAIRS,
-    tiers: Sequence[str] = BASELINE_TIER_ORDER,
+    blocks: Sequence[str] = CORE_BLOCK_ORDER,
 ) -> dict[str, Any]:
-    """The same tier across two corpora, with the divergent ones flagged."""
+    """The same block across two corpora, with the divergent ones flagged."""
     comparisons: list[dict[str, Any]] = []
     for run_a, run_b, label in pairs:
         left, right = results.get(run_a), results.get(run_b)
         if not left or not right:
             logger.info(f"  {label}: skipped (missing {run_a if not left else run_b})")
             continue
-        a_tiers, b_tiers = _by_tier(left), _by_tier(right)
-        entry: dict[str, Any] = {"label": label, "tiers": {}}
-        for tier in tiers:
-            acc_a, acc_b = _accuracy(a_tiers, tier), _accuracy(b_tiers, tier)
+        a_blocks, b_blocks = _by_block(left), _by_block(right)
+        entry: dict[str, Any] = {"label": label, "blocks": {}}
+        for block in blocks:
+            acc_a, acc_b = _accuracy(a_blocks, block), _accuracy(b_blocks, block)
             if acc_a is None or acc_b is None:
                 continue
             difference = acc_b - acc_a
-            entry["tiers"][tier] = {
+            entry["blocks"][block] = {
                 "run_a": acc_a,
                 "run_b": acc_b,
                 "diff": difference,
@@ -235,20 +263,20 @@ def analyze_consistency(
 def analyze_resolution(
     results: Mapping[str, Mapping[str, Any]], *, runs: Sequence[str] = ("8b_v2", "3b_v2")
 ) -> dict[str, Any]:
-    """Pairwise accuracy per tier, bucketed by pair difficulty."""
+    """Pairwise accuracy per block, bucketed by pair difficulty."""
     out: dict[str, Any] = {}
     for run in runs:
-        by_tier = _by_tier(results.get(run))
-        if not by_tier:
+        by_block = _by_block(results.get(run))
+        if not by_block:
             continue
-        per_tier: dict[str, dict[str, Any]] = {}
-        for tier in sorted(t for t, v in by_tier.items() if v.pairwise_binary):
+        per_block: dict[str, dict[str, Any]] = {}
+        for block in sorted(t for t, v in by_block.items() if v.pairwise_binary):
             buckets: dict[str, list[float]] = {"hard": [], "cross": [], "easy-easy": []}
-            for pair, entry in by_tier[tier].pairwise_binary.items():
+            for pair, entry in by_block[block].pairwise_binary.items():
                 bucket = pair_difficulty(pair)
                 if bucket in buckets:
                     buckets[bucket].append(entry.accuracy)
-            per_tier[tier] = {
+            per_block[block] = {
                 bucket: {
                     "mean": float(np.mean(values)) if values else None,
                     "min": float(np.min(values)) if values else None,
@@ -257,40 +285,40 @@ def analyze_resolution(
                 }
                 for bucket, values in buckets.items()
             }
-        out[run] = per_tier
+        out[run] = per_block
     return out
 
 
 def analyze_complementarity(
     results: Mapping[str, Mapping[str, Any]], *, runs: Sequence[str] = ("8b_v2",)
 ) -> dict[str, Any]:
-    """Correlate tiers' hard-pair accuracy profiles; lower means complementary.
+    """Correlate blocks' hard-pair accuracy profiles; lower means complementary.
 
-    A tier absent from a pair is read at chance (0.5) rather than dropped, so every
-    tier's profile spans the same pairs and the correlation is over one index.
+    A block absent from a pair is read at chance (0.5) rather than dropped, so every
+    block's profile spans the same pairs and the correlation is over one index.
     """
     out: dict[str, Any] = {}
     for run in runs:
-        by_tier = _by_tier(results.get(run))
-        if not by_tier:
+        by_block = _by_block(results.get(run))
+        if not by_block:
             continue
-        tiers = [t for t, v in by_tier.items() if v.pairwise_binary and t != "combined_v2"]
-        pairs = sorted({p for t in tiers for p in by_tier[t].pairwise_binary})
-        profile = np.full((len(tiers), len(pairs)), 0.5, dtype=np.float64)
-        for i, tier in enumerate(tiers):
+        blocks = [t for t, v in by_block.items() if v.pairwise_binary and t != EVERYTHING]
+        pairs = sorted({p for t in blocks for p in by_block[t].pairwise_binary})
+        profile = np.full((len(blocks), len(pairs)), 0.5, dtype=np.float64)
+        for i, block in enumerate(blocks):
             for j, pair in enumerate(pairs):
-                entry = by_tier[tier].pairwise_binary.get(pair)
+                entry = by_block[block].pairwise_binary.get(pair)
                 if entry is not None:
                     profile[i, j] = entry.accuracy
 
         hard_columns = [j for j, pair in enumerate(pairs) if pair_difficulty(pair) == "hard"]
-        if len(tiers) <= 1 or not hard_columns:
+        if len(blocks) <= 1 or not hard_columns:
             continue
         hard = profile[:, hard_columns]
-        keep = [i for i in range(len(tiers)) if np.std(hard[i]) > ZERO_VARIANCE]
-        for i in range(len(tiers)):
+        keep = [i for i in range(len(blocks)) if np.std(hard[i]) > ZERO_VARIANCE]
+        for i in range(len(blocks)):
             if i not in keep:
-                logger.info(f"  ({tiers[i]} skipped — no variance over the hard pairs)")
+                logger.info(f"  ({blocks[i]} skipped — no variance over the hard pairs)")
 
         ranked: list[dict[str, Any]] = []
         if len(keep) > 1:
@@ -302,8 +330,8 @@ def analyze_complementarity(
                         continue
                     ranked.append(
                         {
-                            "tier_a": tiers[keep[a]],
-                            "tier_b": tiers[keep[b]],
+                            "block_a": blocks[keep[a]],
+                            "block_b": blocks[keep[b]],
                             "r": float(value),
                             "reading": (
                                 "COMPLEMENTARY" if value < COMPLEMENTARY_BAR
@@ -315,9 +343,9 @@ def analyze_complementarity(
             ranked.sort(key=lambda row: row["r"])
 
         out[run] = {
-            "tiers": tiers,
+            "blocks": blocks,
             "hard_pairs": [pairs[j] for j in hard_columns],
-            "individual_tiers": [t for t in tiers if t not in COMPOSITE_TIERS],
+            "individual_blocks": [t for t in blocks if t not in BLOCK_UNION_LABELS],
             "pairs_by_correlation": ranked,
         }
     return out
@@ -328,7 +356,7 @@ def feature_family(name: str) -> str:
     prefix = name.split("_")[0] if "_" in name else name
     if prefix in FAMILY_BY_PREFIX:
         return FAMILY_BY_PREFIX[prefix]
-    for signal, block in BASELINE_BLOCK_BY_SIGNAL:
+    for signal, block in CORE_BLOCK_BY_SIGNAL:
         if name.startswith(signal):
             return block
     return f"unknown({name[:20]})"
@@ -403,8 +431,8 @@ def analyze_subfamily_importance(
         entry = results.get(run)
         if not entry:
             continue
-        ablation = entry.get("tier_ablation")
-        if not isinstance(ablation, TierAblationResult) or not ablation.top_features_rf:
+        ablation = entry.get("legacy_bin_readout")
+        if not isinstance(ablation, LegacyBinReadoutResult) or not ablation.top_features_rf:
             logger.info(f"  {run}: no banked feature importance")
             continue
         row: dict[str, Any] = {
@@ -412,9 +440,9 @@ def analyze_subfamily_importance(
             "subfam_importance": _sum_importance(ablation.top_features_rf, feature_subfamily),
             "n_features_ranked": len(ablation.top_features_rf),
         }
-        if ablation.top_features_rf_t2t25:
-            row["subfam_importance_t2t25"] = _sum_importance(
-                ablation.top_features_rf_t2t25[:top_n], feature_subfamily
+        if ablation.top_features_rf_attention_and_cache:
+            row["subfam_importance_attention_and_cache"] = _sum_importance(
+                ablation.top_features_rf_attention_and_cache[:top_n], feature_subfamily
             )
         out[run] = row
     return out
@@ -423,20 +451,20 @@ def analyze_subfamily_importance(
 def analyze_confusion(
     results: Mapping[str, Mapping[str, Any]], *, runs: Sequence[str] = ("8b_v2",)
 ) -> dict[str, Any]:
-    """Each tier's hardest confusion, off its own banked confusion matrix.
+    """Each block's hardest confusion, off its own banked confusion matrix.
 
     The labels come from the matrix that carries them, which is where a confusion
     matrix's row and column order is stated. A pair's difficulty is read as the mean
     of the two modes' diagonal rates: a pair both of whose classes are recovered
-    poorly is the pair a tier cannot separate.
+    poorly is the pair a block cannot separate.
     """
     out: dict[str, Any] = {}
     for run in runs:
-        by_tier = _by_tier(results.get(run))
-        if not by_tier:
+        by_block = _by_block(results.get(run))
+        if not by_block:
             continue
         hardest: dict[str, dict[str, Any]] = {}
-        for tier, entry in sorted(by_tier.items()):
+        for block, entry in sorted(by_block.items()):
             matrix = entry.rf_5way.confusion_matrix
             labels = entry.rf_5way.labels
             if not matrix or not labels:
@@ -452,19 +480,19 @@ def analyze_confusion(
                 if i != j
             ]
             rate, first, second = min(candidates)
-            hardest[tier] = {"pair": pair_name(first, second), "mean_diagonal": float(rate)}
-            logger.info(f"    {tier:<25} hardest: {first}-{second} ({rate:.1%} diagonal)")
-        out[run] = {"tiers_analyzed": sorted(hardest), "hardest_confusion": hardest}
+            hardest[block] = {"pair": pair_name(first, second), "mean_diagonal": float(rate)}
+            logger.info(f"    {block:<25} hardest: {first}-{second} ({rate:.1%} diagonal)")
+        out[run] = {"blocks_analyzed": sorted(hardest), "hardest_confusion": hardest}
     return out
 
 
-def analyze_tier_ordering(
+def analyze_block_ordering(
     results: Mapping[str, Mapping[str, Any]],
     *,
     runs: Sequence[str] = CORE_RUNS + SUBSET_RUNS,
     topics_per_mode: int = 20,
 ) -> dict[str, Any]:
-    """Whether the historical ordering of the baseline blocks holds, per run.
+    """Whether the registered accuracy ordering of the core blocks holds, per run.
 
     The mode count is derived from the sample count and the corpus's topics per
     mode, which is what makes the row readable beside runs of different widths.
@@ -472,18 +500,25 @@ def analyze_tier_ordering(
     out: dict[str, Any] = {}
     for run in runs:
         entry = results.get(run)
-        by_tier = _by_tier(entry)
-        if not by_tier:
+        by_block = _by_block(entry)
+        if not by_block:
             continue
-        accuracies = {tier: _accuracy(by_tier, tier) for tier in ("T1", "T2", "T2.5", "T3")}
-        if any(accuracies[tier] is None for tier in ("T1", "T2", "T2.5")):
+        accuracies = {
+            block: _accuracy(by_block, block)
+            for block in (
+                NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA,
+            )
+        }
+        ranked = (CACHE_AND_KEYS, ATTENTION_AND_DELTAS, NORMS_AND_OUTPUT_STATS)
+        if any(accuracies[block] is None for block in ranked):
             continue
-        ordered = accuracies["T2.5"] > accuracies["T2"] > accuracies["T1"]
+        cache, attention, norms = (accuracies[block] for block in ranked)
+        ordered = cache > attention > norms
         n_modes = int(entry.get("n_samples", 0)) // topics_per_mode if entry else 0
         out[run] = {**accuracies, "inversion": bool(ordered), "n_modes": n_modes}
         logger.info(
-            f"  {run:<18} T1={accuracies['T1']:.1%}  T2={accuracies['T2']:.1%}  "
-            f"T2.5={accuracies['T2.5']:.1%}  ordered={ordered}  ({n_modes} modes)"
+            f"  {run:<18} norms={norms:.1%}  attention={attention:.1%}  "
+            f"cache={cache:.1%}  ordered={ordered}  ({n_modes} modes)"
         )
     return out
 
@@ -496,40 +531,40 @@ def analyze_value_add(
         ("3b_run4", "3b_v2_5way", "3B"),
     ),
 ) -> dict[str, Any]:
-    """Engineered families and composites against the baseline composites."""
+    """Engineered families and composites against the unions of the core blocks."""
     out: dict[str, Any] = {}
     for baseline_run, engineered_run, model in pairs:
         baseline, engineered = results.get(baseline_run), results.get(engineered_run)
         if not baseline or not engineered:
             logger.info(f"  {model}: skipped (missing data)")
             continue
-        base_tiers, new_tiers = _by_tier(baseline), _by_tier(engineered)
-        base_t2t25 = _accuracy(base_tiers, "T2+T2.5")
-        base_combined = _accuracy(base_tiers, "combined")
+        base_blocks, new_blocks = _by_block(baseline), _by_block(engineered)
+        base_attention_and_cache = _accuracy(base_blocks, ATTENTION_AND_CACHE)
+        base_combined = _accuracy(base_blocks, ALL_CORE)
         out[model] = {
-            "baseline_t2t25": base_t2t25,
+            "baseline_attention_and_cache": base_attention_and_cache,
             "baseline_combined": base_combined,
             "families": {
                 family: {
-                    "accuracy": _accuracy(new_tiers, family),
-                    "delta_vs_baseline_t2t25": (
-                        None if _accuracy(new_tiers, family) is None or base_t2t25 is None
-                        else _accuracy(new_tiers, family) - base_t2t25
+                    "accuracy": _accuracy(new_blocks, family),
+                    "delta_vs_baseline_attention_and_cache": (
+                        None if _accuracy(new_blocks, family) is None or base_attention_and_cache is None
+                        else _accuracy(new_blocks, family) - base_attention_and_cache
                     ),
                 }
                 for family in NEW_FAMILIES
-                if _accuracy(new_tiers, family) is not None
+                if _accuracy(new_blocks, family) is not None
             },
             "composites": {
                 composite: {
-                    "accuracy": _accuracy(new_tiers, composite),
+                    "accuracy": _accuracy(new_blocks, composite),
                     "delta_vs_baseline_combined": (
-                        None if _accuracy(new_tiers, composite) is None or base_combined is None
-                        else _accuracy(new_tiers, composite) - base_combined
+                        None if _accuracy(new_blocks, composite) is None or base_combined is None
+                        else _accuracy(new_blocks, composite) - base_combined
                     ),
                 }
                 for composite in V2_COMPOSITES
-                if _accuracy(new_tiers, composite) is not None
+                if _accuracy(new_blocks, composite) is not None
             },
         }
     return out
@@ -544,13 +579,13 @@ def complementarity_report(results: Mapping[str, Mapping[str, Any]]) -> dict[str
         "complementarity": analyze_complementarity(results),
         "subfamily_importance": analyze_subfamily_importance(results),
         "confusion": analyze_confusion(results),
-        "tier_ordering": analyze_tier_ordering(results),
+        "block_ordering": analyze_block_ordering(results),
         "value_add": analyze_value_add(results),
     }
 
 
 __all__ = [
-    "BASELINE_TIER_ORDER",
+    "CORE_BLOCK_ORDER",
     "COMPLEMENTARY_BAR",
     "CORE_RUNS",
     "DIVERGENCE_BAR",
@@ -565,7 +600,7 @@ __all__ = [
     "analyze_consistency",
     "analyze_resolution",
     "analyze_subfamily_importance",
-    "analyze_tier_ordering",
+    "analyze_block_ordering",
     "analyze_value_add",
     "complementarity_report",
     "feature_family",

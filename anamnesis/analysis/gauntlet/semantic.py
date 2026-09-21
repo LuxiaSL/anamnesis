@@ -21,7 +21,13 @@ from sklearn.model_selection import GroupKFold
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
-from .signature_io import AnalysisData
+from .signature_io import (
+    ALL_FAMILIES,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
+    EVERYTHING,
+    AnalysisData,
+)
 from .schemas import (
     ClassificationScore,
     ContrastiveProjectionComparisonEntry,
@@ -30,9 +36,9 @@ from .schemas import (
     MantelResult,
     PerModeSurfaceVsCompute,
     PerModeSurfaceVsComputeResult,
-    PerTierSemanticResult,
+    PerBlockSemanticResult,
     PromptSwapConfoundResult,
-    PromptSwapTierResult,
+    PromptSwapBlockResult,
     RetrievalFeatureSet,
     RetrievalResult,
     SemanticClassifierBundle,
@@ -254,7 +260,7 @@ def _contrastive_topic_heldout(
 
     conditions: dict[str, NDArray] = {
         "tfidf": StandardScaler().fit_transform(X_tfidf),
-        "compute_t2t25": StandardScaler().fit_transform(X_compute),
+        "compute_attention_and_cache": StandardScaler().fit_transform(X_compute),
     }
     if X_sbert is not None:
         conditions["sbert"] = StandardScaler().fit_transform(X_sbert)
@@ -302,7 +308,7 @@ def _contrastive_topic_heldout(
         )
 
     return ContrastiveProjectionComparisonResult(
-        compute_t2t25=entries.get("compute_t2t25"),
+        compute_attention_and_cache=entries.get("compute_attention_and_cache"),
         tfidf=entries.get("tfidf"),
         sbert=entries.get("sbert"),
         combined_compute_sbert=entries.get("combined_compute_sbert"),
@@ -391,7 +397,7 @@ def _run_prompt_swap_confound(
     addon_dirs: list[Path] | None = None,
 ) -> PromptSwapConfoundResult:
     """Prompt-swap confound test: train on core set, predict on prompt-swap samples."""
-    from .signature_io import TIER_KEYS, BASELINE_TIERS, ENGINEERED_TIERS
+    from .signature_io import BLOCK_NPZ_KEYS, CORE_BLOCKS, FAMILY_BLOCKS
 
     all_npz_files = sorted(signature_dir.glob("gen_*.npz"))
     if not all_npz_files:
@@ -420,25 +426,25 @@ def _run_prompt_swap_confound(
         return PromptSwapConfoundResult(error="No prompt-swap samples found")
 
     run4 = data.run4
-    test_tiers: list[str] = []
-    for tier in BASELINE_TIERS + ENGINEERED_TIERS:
-        if tier in run4.tier_features:
-            test_tiers.append(tier)
-    for group in ["T2+T2.5", "combined_v2"]:
+    test_blocks: list[str] = []
+    for block in CORE_BLOCKS + FAMILY_BLOCKS:
+        if block in run4.block_features:
+            test_blocks.append(block)
+    for group in [ATTENTION_AND_CACHE, EVERYTHING]:
         if group in run4.group_features:
-            test_tiers.append(group)
+            test_blocks.append(group)
 
-    individual_test_tiers = [t for t in test_tiers if t in TIER_KEYS]
-    swap_tier_features: dict[str, list[NDArray | None]] = {}
+    individual_test_blocks = [t for t in test_blocks if t in BLOCK_NPZ_KEYS]
+    swap_block_features: dict[str, list[NDArray | None]] = {}
 
-    # Pass 1: load individual tier features from primary npz files
+    # Pass 1: load individual block features from primary npz files
     for i, npz_path in enumerate(swap_npz_paths):
         npz_data = np.load(npz_path, allow_pickle=True)
-        for tier_name in individual_test_tiers:
-            npz_key = TIER_KEYS.get(tier_name, "")
+        for block_name in individual_test_blocks:
+            npz_key = BLOCK_NPZ_KEYS.get(block_name, "")
             if npz_key and npz_key in npz_data.files:
-                swap_tier_features.setdefault(tier_name, [None] * len(swap_npz_paths))
-                swap_tier_features[tier_name][i] = npz_data[npz_key]
+                swap_block_features.setdefault(block_name, [None] * len(swap_npz_paths))
+                swap_block_features[block_name][i] = npz_data[npz_key]
 
     # Pass 2: merge addon features
     if addon_dirs:
@@ -451,54 +457,54 @@ def _run_prompt_swap_confound(
                 addon_npz = addon_path / f"{stem}.npz"
                 if addon_npz.exists():
                     addon_data = np.load(addon_npz, allow_pickle=True)
-                    for tier_name in individual_test_tiers:
-                        npz_key = TIER_KEYS.get(tier_name, "")
+                    for block_name in individual_test_blocks:
+                        npz_key = BLOCK_NPZ_KEYS.get(block_name, "")
                         if npz_key and npz_key in addon_data.files:
-                            swap_tier_features.setdefault(tier_name, [None] * len(swap_npz_paths))
-                            if swap_tier_features[tier_name][i] is None:
-                                swap_tier_features[tier_name][i] = addon_data[npz_key]
+                            swap_block_features.setdefault(block_name, [None] * len(swap_npz_paths))
+                            if swap_block_features[block_name][i] is None:
+                                swap_block_features[block_name][i] = addon_data[npz_key]
 
-    complete_tiers = {
-        t for t, arrays in swap_tier_features.items()
+    complete_blocks = {
+        t for t, arrays in swap_block_features.items()
         if all(a is not None for a in arrays)
     }
-    swap_tier_features = {
-        t: arrays for t, arrays in swap_tier_features.items() if t in complete_tiers
+    swap_block_features = {
+        t: arrays for t, arrays in swap_block_features.items() if t in complete_blocks
     }
 
-    for group in ["T2+T2.5", "combined_v2"]:
-        if group in test_tiers and group not in swap_tier_features:
-            from .signature_io import TIER_GROUPS
-            members = TIER_GROUPS.get(group, [])
-            available_members = [m for m in members if m in complete_tiers]
+    for group in [ATTENTION_AND_CACHE, EVERYTHING]:
+        if group in test_blocks and group not in swap_block_features:
+            from .signature_io import BLOCK_UNIONS
+            members = BLOCK_UNIONS.get(group, [])
+            available_members = [m for m in members if m in complete_blocks]
             if available_members:
-                swap_tier_features[group] = [
-                    np.concatenate([swap_tier_features[m][j] for m in available_members])
+                swap_block_features[group] = [
+                    np.concatenate([swap_block_features[m][j] for m in available_members])
                     for j in range(len(swap_npz_paths))
                 ]
 
-    if not complete_tiers:
+    if not complete_blocks:
         return PromptSwapConfoundResult(
-            error="Could not load any complete tier features for swap samples",
+            error="Could not load any complete block features for swap samples",
         )
 
     sys_modes = np.array([s["system_prompt_mode"] for s in swap_info])
     exec_modes = np.array([s["execution_mode"] for s in swap_info])
 
-    per_tier: dict[str, PromptSwapTierResult] = {}
+    per_block: dict[str, PromptSwapBlockResult] = {}
 
-    for tier_name in test_tiers:
-        if tier_name not in swap_tier_features or not swap_tier_features[tier_name]:
+    for block_name in test_blocks:
+        if block_name not in swap_block_features or not swap_block_features[block_name]:
             continue
-        if len(swap_tier_features[tier_name]) != len(swap_info):
+        if len(swap_block_features[block_name]) != len(swap_info):
             continue
 
         try:
-            X_train = data.get_tier(tier_name)
+            X_train = data.get_block(block_name)
         except KeyError:
             continue
 
-        X_swap = np.stack(swap_tier_features[tier_name], axis=0)
+        X_swap = np.stack(swap_block_features[block_name], axis=0)
         y_train = data.modes
 
         scaler = StandardScaler()
@@ -532,7 +538,7 @@ def _run_prompt_swap_confound(
                 "execution_modes": exec_this.tolist(),
             }
 
-        per_tier[tier_name] = PromptSwapTierResult(
+        per_block[block_name] = PromptSwapBlockResult(
             n_features=int(X_train.shape[1]),
             follows_system_prompt=follows_system,
             follows_execution=follows_execution,
@@ -550,30 +556,30 @@ def _run_prompt_swap_confound(
     return PromptSwapConfoundResult(
         n_swap_samples=len(swap_info),
         swap_types=list(set(s["swap_name"] for s in swap_info)),
-        per_tier=per_tier,
+        per_block=per_block,
     )
 
 
-def _get_semantic_test_tiers(data: AnalysisData) -> list[str]:
-    """Discover which tiers/groups to test for semantic independence."""
-    from .signature_io import BASELINE_TIERS, ENGINEERED_TIERS
+def _get_semantic_test_blocks(data: AnalysisData) -> list[str]:
+    """Discover which blocks/groups to test for semantic independence."""
+    from .signature_io import CORE_BLOCKS, FAMILY_BLOCKS
 
     run4 = data.run4
-    tiers: list[str] = []
+    blocks: list[str] = []
 
-    for tier in BASELINE_TIERS:
-        if tier in run4.tier_features:
-            tiers.append(tier)
+    for block in CORE_BLOCKS:
+        if block in run4.block_features:
+            blocks.append(block)
 
-    for tier in ENGINEERED_TIERS:
-        if tier in run4.tier_features:
-            tiers.append(tier)
+    for block in FAMILY_BLOCKS:
+        if block in run4.block_features:
+            blocks.append(block)
 
-    for group in ["T2+T2.5", "engineered", "combined_v2", "T2+T2.5+engineered"]:
+    for group in [ATTENTION_AND_CACHE, ALL_FAMILIES, EVERYTHING, ATTENTION_AND_CACHE_WITH_FAMILIES]:
         if group in run4.group_features:
-            tiers.append(group)
+            blocks.append(group)
 
-    return tiers
+    return blocks
 
 
 def run_semantic(
@@ -599,9 +605,9 @@ def run_semantic(
     else:
         sbert_classification = SemanticClassifierBundle(error="sentence-transformers not available")
 
-    # ── Per-tier semantic orthogonality battery ──
-    test_tiers = _get_semantic_test_tiers(data)
-    print(f"    Testing semantic orthogonality for {len(test_tiers)} tiers: {test_tiers}")
+    # ── Per-block semantic orthogonality battery ──
+    test_blocks = _get_semantic_test_blocks(data)
+    print(f"    Testing semantic orthogonality for {len(test_blocks)} blocks: {test_blocks}")
 
     from scipy.spatial.distance import pdist, squareform
 
@@ -609,15 +615,15 @@ def run_semantic(
     X_sbert_std = StandardScaler().fit_transform(X_sbert) if X_sbert is not None else None
     semantic_emb = X_sbert if X_sbert is not None else X_tfidf
 
-    per_tier_semantic: dict[str, PerTierSemanticResult] = {}
+    per_block_semantic: dict[str, PerBlockSemanticResult] = {}
 
-    for tier_name in test_tiers:
-        print(f"      Tier: {tier_name}...")
+    for block_name in test_blocks:
+        print(f"      Block: {block_name}...")
         try:
-            X_compute = data.get_tier(tier_name)
+            X_compute = data.get_block(block_name)
         except KeyError:
-            per_tier_semantic[tier_name] = PerTierSemanticResult(
-                error=f"tier {tier_name} not found",
+            per_block_semantic[block_name] = PerBlockSemanticResult(
+                error=f"block {block_name} not found",
             )
             continue
 
@@ -640,7 +646,7 @@ def run_semantic(
         per_mode = _per_mode_surface_vs_compute(X_tfidf, X_compute, y, topics)
         shuffle_controls = _run_shuffle_controls(X_compute, y, topics)
 
-        per_tier_semantic[tier_name] = PerTierSemanticResult(
+        per_block_semantic[block_name] = PerBlockSemanticResult(
             n_features=int(X_compute.shape[1]),
             classification=classification,
             mantel_tfidf_cosine=mantel_tfidf_cosine,
@@ -650,10 +656,10 @@ def run_semantic(
             shuffle_controls=shuffle_controls,
         )
 
-    # ── Legacy top-level keys (T2+T2.5, backward compat) ──
-    t2t25_results = per_tier_semantic.get("T2+T2.5")
-    X_compute_main = data.get_tier("T2+T2.5")
-    compute_classification = t2t25_results.classification if t2t25_results is not None else None
+    # ── Top-level keys carrying the attention-and-cache union, as banked files hold them ──
+    attention_and_cache_results = per_block_semantic.get(ATTENTION_AND_CACHE)
+    X_compute_main = data.get_block(ATTENTION_AND_CACHE)
+    compute_classification = attention_and_cache_results.classification if attention_and_cache_results is not None else None
 
     combined_classification: SemanticClassifierBundle | None = None
     semantic_noise_classification: SemanticClassifierBundle | None = None
@@ -671,10 +677,10 @@ def run_semantic(
         )
 
     mantel_tfidf_cosine_top = (
-        t2t25_results.mantel_tfidf_cosine if t2t25_results is not None else None
+        attention_and_cache_results.mantel_tfidf_cosine if attention_and_cache_results is not None else None
     )
     mantel_sbert_cosine_top = (
-        t2t25_results.mantel_sbert_cosine if t2t25_results is not None else None
+        attention_and_cache_results.mantel_sbert_cosine if attention_and_cache_results is not None else None
     )
 
     X_comp_main_std = StandardScaler().fit_transform(X_compute_main)
@@ -688,16 +694,16 @@ def run_semantic(
 
     # Backward-compat top-level copies
     text_to_compute_r2_top = (
-        t2t25_results.text_to_compute_r2 if t2t25_results is not None else None
+        attention_and_cache_results.text_to_compute_r2 if attention_and_cache_results is not None else None
     )
     per_mode_surface_vs_compute_top = (
-        t2t25_results.per_mode_surface_vs_compute if t2t25_results is not None else None
+        attention_and_cache_results.per_mode_surface_vs_compute if attention_and_cache_results is not None else None
     )
     shuffle_controls_top = (
-        t2t25_results.shuffle_controls if t2t25_results is not None else None
+        attention_and_cache_results.shuffle_controls if attention_and_cache_results is not None else None
     )
 
-    # ── Cross-tier analyses (run once) ──
+    # ── Cross-block analyses (run once) ──
     print("    Contrastive projection comparison (topic-heldout)...")
     cpc = _contrastive_topic_heldout(X_tfidf, X_compute_main, X_sbert, y, topics)
 
@@ -713,12 +719,12 @@ def run_semantic(
             prompt_swap = _run_prompt_swap_confound(
                 data, Path(signature_dir), addon_dirs=addon_paths,
             )
-            if prompt_swap.per_tier is not None:
+            if prompt_swap.per_block is not None:
                 n_swap = prompt_swap.n_swap_samples or 0
-                print(f"      {n_swap} swap samples, {len(prompt_swap.per_tier)} tiers tested")
-                for tier_name, tier_data in prompt_swap.per_tier.items():
-                    print(f"        {tier_name}: {tier_data.signal_type} "
-                          f"(exec={tier_data.pct_execution:.0%}, sys={tier_data.pct_system:.0%})")
+                print(f"      {n_swap} swap samples, {len(prompt_swap.per_block)} blocks tested")
+                for block_name, block_data in prompt_swap.per_block.items():
+                    print(f"        {block_name}: {block_data.signal_type} "
+                          f"(exec={block_data.pct_execution:.0%}, sys={block_data.pct_system:.0%})")
             elif prompt_swap.error:
                 print(f"      Skipped: {prompt_swap.error}")
         except Exception as e:
@@ -730,7 +736,7 @@ def run_semantic(
     return SemanticResult(
         tfidf_classification=tfidf_classification,
         sbert_classification=sbert_classification,
-        per_tier_semantic=per_tier_semantic,
+        per_block_semantic=per_block_semantic,
         compute_classification=compute_classification,
         combined_classification=combined_classification,
         semantic_noise_classification=semantic_noise_classification,
@@ -778,7 +784,7 @@ def _run_retrieval_analysis(
     from sklearn.neighbors import NearestNeighbors
 
     feature_sets: dict[str, NDArray] = {
-        "compute_t2t25": StandardScaler().fit_transform(X_compute),
+        "compute_attention_and_cache": StandardScaler().fit_transform(X_compute),
         "tfidf": StandardScaler().fit_transform(X_tfidf),
     }
     if X_sbert is not None:
@@ -815,8 +821,8 @@ def _run_retrieval_analysis(
 
     jaccard_compute_tfidf: JaccardStats | None = None
     jaccard_compute_sbert: JaccardStats | None = None
-    if "compute_t2t25" in neighbor_indices and "tfidf" in neighbor_indices:
-        compute_nn = neighbor_indices["compute_t2t25"]
+    if "compute_attention_and_cache" in neighbor_indices and "tfidf" in neighbor_indices:
+        compute_nn = neighbor_indices["compute_attention_and_cache"]
         tfidf_nn = neighbor_indices["tfidf"]
         jaccards = []
         for i in range(len(y)):
@@ -830,8 +836,8 @@ def _run_retrieval_analysis(
             std=float(np.std(jaccards)),
         )
 
-    if "compute_t2t25" in neighbor_indices and "sbert" in neighbor_indices:
-        compute_nn = neighbor_indices["compute_t2t25"]
+    if "compute_attention_and_cache" in neighbor_indices and "sbert" in neighbor_indices:
+        compute_nn = neighbor_indices["compute_attention_and_cache"]
         sbert_nn = neighbor_indices["sbert"]
         jaccards = []
         for i in range(len(y)):
@@ -846,7 +852,7 @@ def _run_retrieval_analysis(
         )
 
     return RetrievalResult(
-        compute_t2t25=entries.get("compute_t2t25"),
+        compute_attention_and_cache=entries.get("compute_attention_and_cache"),
         tfidf=entries.get("tfidf"),
         sbert=entries.get("sbert"),
         combined_compute_sbert=entries.get("combined_compute_sbert"),
