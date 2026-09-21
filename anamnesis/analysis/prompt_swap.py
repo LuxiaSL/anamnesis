@@ -94,8 +94,13 @@ def load_swap_samples(
 
     A block is kept only where **every** swap sample has it: a block present for some
     samples and absent for others would train and predict over different feature
-    sets under one name. Composite groups are then built from the blocks that
-    survived, which is the same join the core loader performs.
+    sets under one name.
+
+    A union is then built only where every member it names survived that filter, which
+    is the rule the core loader joins under. A union built from the members that happen
+    to be present is a narrower feature set wearing a label that names blocks it does not
+    hold — and it is compared, under that label, against a training matrix built from all
+    of them.
     """
     signature_dir = Path(signature_dir)
     npz_paths = sorted(signature_dir.glob("gen_*.npz"))
@@ -155,12 +160,17 @@ def load_swap_samples(
         if all(array is not None for array in column)
     }
     for group, members in BLOCK_UNIONS.items():
-        available = [m for m in members if m in complete]
-        if available:
-            complete[group] = [
-                np.concatenate([complete[m][i] for m in available])
-                for i in range(len(swap_paths))
-            ]
+        missing = [m for m in members if m not in complete]
+        if missing:
+            logger.info(
+                f"  union '{group}' not built over the swap samples: {sorted(missing)} "
+                "absent, and a union built short would name blocks it does not hold"
+            )
+            continue
+        complete[group] = [
+            np.concatenate([complete[m][i] for m in members])
+            for i in range(len(swap_paths))
+        ]
     logger.info(f"{len(samples)} swap generations, {len(complete)} blocks with full coverage")
     return samples, complete
 
