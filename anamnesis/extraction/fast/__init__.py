@@ -28,6 +28,10 @@ gains it on both paths or the schema check fails:
 * :mod:`~anamnesis.extraction.fast.batch_layout` — ragged batch packing for
   cached replay. Prefixes left-padded, continuations right-padded, per-row
   absolute positions preserved, padding removed before any feature sees it.
+* :mod:`~anamnesis.extraction.fast.runtime` — the arithmetic, schema, calibration
+  and capture surface a lane pass runs against, resolved once for every entry
+  point that runs one. A lane is only worth qualifying if the configuration
+  measured is the configuration banked.
 
 This module imports none of them: addressing the layout arithmetic should not
 pull in torch.
