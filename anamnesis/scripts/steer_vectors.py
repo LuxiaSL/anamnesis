@@ -132,25 +132,11 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-def load_model(model_path: str, preset: object) -> object:
-    """A bare eager-attention model on CUDA, in the preset's dtype."""
-    import torch
-    from transformers import AutoModelForCausalLM
+def capture_model(args: argparse.Namespace) -> object:
+    """The model a capture leg reads residuals out of, in its preset's dtype."""
+    from anamnesis.extraction.model_loader import load_unhooked_model
 
-    dtype = {
-        "float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32
-    }.get(str(getattr(preset, "torch_dtype", "float16")), torch.float16)
-    return (
-        AutoModelForCausalLM.from_pretrained(model_path, dtype=dtype, attn_implementation="eager")
-        .to("cuda")
-        .eval()
-    )
-
-
-def write_json(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=1))
-    logger.info(f"wrote {path}")
+    return load_unhooked_model(args.model_path, MODEL_PRESETS[args.model].torch_dtype)
 
 
 def run_sweep(args: argparse.Namespace) -> None:
@@ -162,7 +148,7 @@ def run_sweep(args: argparse.Namespace) -> None:
     d_mean, d_sd = vectors.half_split_sweep(A, B, k_splits=args.k_splits)
     peak = int(np.argmax(np.abs(d_mean)))
     logger.info(f"peak L{peak} ({100 * peak / len(d_mean):.0f}% depth) d={d_mean[peak]:+.3f}")
-    write_json(args.out_json, {
+    readouts.write_json(args.out_json, {
         "n_prompts": len(shared), "k_splits": int(args.k_splits),
         "d_mean": d_mean.tolist(), "d_sd": d_sd.tolist(),
         "peak_layer": peak, "peak_d": float(d_mean[peak]),
@@ -176,7 +162,7 @@ def run_sweep(args: argparse.Namespace) -> None:
 def run_build(args: argparse.Namespace) -> None:
     preset = MODEL_PRESETS[args.model]
     sites = [int(s) for s in args.sites.split(",")]
-    model = load_model(args.model_path, preset)
+    model = capture_model(args)
     bank: dict[str, object] = {}
     stamps: dict[str, object] = {"model": args.model, "sites": sites}
 
@@ -237,10 +223,9 @@ def run_build(args: argparse.Namespace) -> None:
 
 
 def run_screen(args: argparse.Namespace) -> None:
-    preset = MODEL_PRESETS[args.model]
     sites = [int(s) for s in args.sites.split(",")]
     band = tuple(int(x) for x in args.band.split(","))
-    model = load_model(args.model_path, preset)
+    model = capture_model(args)
     entries = vectors.replay_entries(args.floor_run / "replay_manifest.json")
     all_ids = sorted(int(k) for k in entries)
     gen_ids = all_ids[:: max(1, len(all_ids) // max(args.n_gens, 1))][: args.n_gens]
@@ -269,12 +254,11 @@ def run_screen(args: argparse.Namespace) -> None:
             site_report["band_mass"] = screens.band_mass(bank[args.band_mass_key], spectrum, band)
         report["sites"][str(site)] = site_report
         logger.info(f"L{site}: screened {len(site_report['vectors'])} vectors over {len(rows)} positions")
-    write_json(args.out_dir / f"covariance_screen_{args.model}.json", report)
+    readouts.write_json(args.out_dir / f"covariance_screen_{args.model}.json", report)
 
 
 def run_gate(args: argparse.Namespace) -> None:
-    preset = MODEL_PRESETS[args.model]
-    model = load_model(args.model_path, preset)
+    model = capture_model(args)
     bank, stamps = vectors.load_vector_bank(args.vectors)
     entries = vectors.replay_entries(args.floor_run / "replay_manifest.json")
     pilots = gates.pilot_generations(entries, count=args.n_pilot)
@@ -287,7 +271,7 @@ def run_gate(args: argparse.Namespace) -> None:
     report["model"] = args.model
     passed = sum(1 for cell in report["cells"].values() if cell["PASS"])
     logger.info(f"{passed}/{len(report['cells'])} cells PASS")
-    write_json(args.out_json, report)
+    readouts.write_json(args.out_json, report)
 
 
 def run_null(args: argparse.Namespace) -> None:
@@ -299,7 +283,7 @@ def run_null(args: argparse.Namespace) -> None:
     )
     print(verdict)
     if args.out_json is not None:
-        write_json(args.out_json, {"key": args.key, **verdict.__dict__})
+        readouts.write_json(args.out_json, {"key": args.key, **verdict.__dict__})
 
 
 def run_lever(args: argparse.Namespace) -> None:

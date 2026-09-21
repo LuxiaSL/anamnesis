@@ -6,6 +6,9 @@ Responsibilities:
   - Load model + tokenizer with eager attention (required for attn weights)
   - Register forward hooks on k_proj linear layers to capture pre-RoPE keys
   - Provide hook lifecycle management (register, collect, clear, remove)
+  - Load a bare model for the passes that read no captured state
+    (`load_unhooked_model`): token banking, and steering captures that hook
+    their own sites
 """
 
 from __future__ import annotations
@@ -781,6 +784,49 @@ def default_sampled_layers(config: ModelConfig) -> list[int]:
     return list(resolve_preset(config.preset_name).sampled_layers)
 
 
+DTYPE_BY_NAME: dict[str, torch.dtype] = {
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+    "float32": torch.float32,
+}
+"""The weight dtypes a preset row may name, as torch spells them."""
+
+
+def resolve_dtype(name: str) -> torch.dtype:
+    """The dtype a preset's ``torch_dtype`` names, or float16 for a name not listed.
+
+    The names are fixed by the preset rows in :mod:`anamnesis.config.models`, so the
+    fallback is a floor rather than a policy: there is one table, and a row that
+    named something outside it loads in the narrowest supported precision instead of
+    silently picking a wider one.
+    """
+    return DTYPE_BY_NAME.get(str(name), torch.float16)
+
+
+def load_unhooked_model(
+    model_path: str, torch_dtype: str, *, attn_implementation: str = "eager"
+) -> PreTrainedModel:
+    """A bare causal LM on CUDA in eval mode, with no capture hooks registered.
+
+    Two passes want a model without the capture surface, and both would otherwise
+    pay for hooks they never read: a token-banking generation pass, which computes
+    no features at all, and a steering capture, which places its own hooks where it
+    needs them.
+
+    ``attn_implementation`` defaults to the eager kernel, the only one that returns
+    attention weights. A pass whose whole output is *which tokens were sampled* may
+    ask for a fused kernel instead, because it reads no attention weight; a pass that
+    featurises must not, which is why the constraint lives in
+    :class:`anamnesis.config.ModelConfig` for the hooked path rather than here.
+    """
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        dtype=resolve_dtype(torch_dtype),
+        attn_implementation=attn_implementation,
+    )
+    return model.to("cuda").eval()
+
+
 def load_model(
     config: ModelConfig,
     sampled_layers: list[int] | None = None,
@@ -826,12 +872,7 @@ def load_model(
     if sampled_layers is None:
         sampled_layers = default_sampled_layers(config)
 
-    dtype_map = {
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float32": torch.float32,
-    }
-    torch_dtype = dtype_map.get(config.torch_dtype, torch.float16)
+    torch_dtype = resolve_dtype(config.torch_dtype)
 
     logger.info(f"Loading model: {config.model_id}")
     model = AutoModelForCausalLM.from_pretrained(
