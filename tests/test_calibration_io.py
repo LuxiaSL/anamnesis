@@ -1,16 +1,20 @@
 """The one calibration reader, and what it does about absence.
 
-Two entry points each carried their own copy of this: one logged and one did not,
-and both would have drifted. The cases below pin the contract the single reader now
-holds — both banked shapes of the basis read to the same arrays, an absent artifact
-comes back as ``None`` rather than raising, and the per-layer shape is refused by the
-pooled reader rather than silently reduced to one of its layers.
+The cases below pin the contract the single reader holds: both banked shapes of the
+basis read to the same arrays, an absent artifact comes back as ``None`` rather than
+raising, the per-layer shape is refused rather than silently reduced to one of its
+layers, and a directory holding a basis under either accepted filename resolves.
 
 Absence returning ``None`` is the load-bearing part. A caller that cannot proceed
 without a calibration says so itself, which is how a pass that needs corrected
 features refuses while a pass that does not touch the residual basis still runs.
 Raising here would make the second impossible; returning zeros would make the first
 invisible.
+
+Filename resolution is the other load-bearing part, and it points both ways: a
+directory a fit just wrote and a directory carrying the other accepted spelling both
+resolve with no argument, while the plain name wins where both are present, so no
+pass silently changes which basis it projects onto.
 """
 
 from __future__ import annotations
@@ -23,11 +27,21 @@ import pytest
 
 from anamnesis.extraction.calibration import (
     PCA_MODEL_NAME,
+    PCA_MODEL_NAMES,
     POSITIONAL_MEANS_NAME,
     load_calibration,
     load_pca_model,
     load_positional_means,
+    resolve_pca_model,
 )
+
+BANKED_PCA_MODEL_NAME = "pca_model_corrected.pkl"
+"""The second accepted spelling, written out so the test states the name it pins."""
+
+
+def _write_pooled(path: Path, components: np.ndarray, mean: np.ndarray) -> None:
+    with open(path, "wb") as f:
+        pickle.dump({"components": components, "mean": mean}, f)
 
 
 class _Estimator:
@@ -115,3 +129,56 @@ def test_load_calibration_leaves_the_basis_out_when_it_is_off(calib_dir: Path) -
 
 def test_load_calibration_on_an_empty_directory_is_all_none(tmp_path: Path) -> None:
     assert load_calibration(tmp_path, enable_pca=True) == (None, None, None)
+
+
+# ── which file a directory's basis is ─────────────────────────────────────────
+
+
+def test_the_accepted_names_are_declared_and_the_written_one_leads() -> None:
+    """Named rather than spelled inline at each reader, so both halves agree."""
+    assert PCA_MODEL_NAMES[0] == PCA_MODEL_NAME
+    assert BANKED_PCA_MODEL_NAME in PCA_MODEL_NAMES
+
+
+@pytest.mark.parametrize("name", PCA_MODEL_NAMES)
+def test_either_accepted_name_resolves_on_its_own(name: str, tmp_path: Path) -> None:
+    (tmp_path / name).write_bytes(b"")
+    resolved = resolve_pca_model(tmp_path)
+    assert resolved is not None and resolved.name == name
+
+
+def test_the_written_name_wins_where_a_directory_holds_both(tmp_path: Path) -> None:
+    """Otherwise a pass would change which basis it projects onto with no argument."""
+    components, mean = np.eye(4, dtype=np.float64)[:2], np.ones(4, dtype=np.float64)
+    _write_pooled(tmp_path / PCA_MODEL_NAME, components, mean)
+    _write_pooled(tmp_path / BANKED_PCA_MODEL_NAME, components * 2.0, mean * 3.0)
+
+    resolved = resolve_pca_model(tmp_path)
+    assert resolved is not None and resolved.name == PCA_MODEL_NAME
+    _, read_components, read_mean = load_calibration(tmp_path)
+    assert read_components is not None and np.array_equal(read_components, components)
+    assert read_mean is not None and np.array_equal(read_mean, mean)
+
+
+def test_a_directory_with_no_basis_resolves_to_none(tmp_path: Path) -> None:
+    assert resolve_pca_model(tmp_path) is None
+
+
+def test_load_calibration_reads_the_banked_spelling_when_it_is_the_only_one(
+    tmp_path: Path,
+) -> None:
+    """Banked directories are not regenerated, so their spelling stays readable."""
+    components, mean = np.eye(4, dtype=np.float64)[:2], np.ones(4, dtype=np.float64)
+    _write_pooled(tmp_path / BANKED_PCA_MODEL_NAME, components, mean)
+    _, read_components, read_mean = load_calibration(tmp_path)
+    assert read_components is not None and read_components.shape == (2, 4)
+    assert read_mean is not None and read_mean.shape == (4,)
+
+
+def test_a_per_layer_basis_names_the_reader_that_takes_it(tmp_path: Path) -> None:
+    """The refusal carries where to go, because the shape is legitimate elsewhere."""
+    path = tmp_path / PCA_MODEL_NAME
+    with open(path, "wb") as f:
+        pickle.dump({14: {"components": np.eye(4)[:2], "mean": np.ones(4)}}, f)
+    with pytest.raises(KeyError, match="per layer"):
+        load_calibration(tmp_path)

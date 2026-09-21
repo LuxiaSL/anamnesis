@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from anamnesis.config import resolve_preset
+from anamnesis.extraction.calibration import PCA_MODEL_NAME, POSITIONAL_MEANS_NAME
 from anamnesis.scripts import (
     run_calibration,
     run_extraction,
@@ -246,18 +247,59 @@ def test_extraction_smoke_shortens_the_pass_without_changing_the_model() -> None
 def test_calibration_writes_beside_the_presets_directory() -> None:
     args = run_calibration.parser().parse_args(["--model", MODEL])
     preset, means_path, pca_path = run_calibration.resolve_paths(args)
-    assert means_path.name == "positional_means.npz"
-    assert pca_path.name == "pca_model_corrected.pkl", (
-        "the corrected per-layer fit is the default, and does not overwrite a pooled basis"
-    )
+    assert means_path.name == POSITIONAL_MEANS_NAME
+    assert pca_path.name == PCA_MODEL_NAME
     assert means_path.parent == pca_path.parent
     assert preset.name == resolve_preset(MODEL).name
 
 
-def test_calibration_pooled_writes_the_legacy_basis_name() -> None:
-    args = run_calibration.parser().parse_args(["--model", MODEL, "--pooled"])
+@pytest.mark.parametrize("extra", [[], ["--pooled"]])
+def test_calibration_writes_the_name_every_consumer_reads(extra: list[str]) -> None:
+    """Either basis shape lands on the filename a calibration directory is read by.
+
+    A fit that wrote elsewhere by default produced a directory that composed with
+    nothing: the recompute path, the fast lane and the in-process extractor all
+    resolve a basis by :data:`anamnesis.extraction.calibration.PCA_MODEL_NAME`.
+    """
+    args = run_calibration.parser().parse_args(["--model", MODEL, *extra])
     _, _, pca_path = run_calibration.resolve_paths(args)
-    assert pca_path.name == "pca_model.pkl"
+    assert pca_path.name == PCA_MODEL_NAME
+
+
+def test_calibration_banks_a_second_basis_under_an_asked_for_name() -> None:
+    """The two basis shapes coexist in one directory only when one is named."""
+    args = run_calibration.parser().parse_args(
+        ["--model", MODEL, "--pca-name", "pca_model_corrected.pkl"]
+    )
+    _, _, pca_path = run_calibration.resolve_paths(args)
+    assert pca_path.name == "pca_model_corrected.pkl"
+
+
+@pytest.mark.parametrize("model", ["8b", "gemma3-27b", "dsv2-lite"])
+def test_calibration_reports_the_presets_decode_policy(
+    model: str, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    """The command decodes at the model's own nucleus mass, and says so before it runs.
+
+    ``gemma3-27b`` and ``dsv2-lite`` sample at 0.95, so a literal in the command
+    would calibrate them against a distribution they are never run at — and nothing
+    downstream could see it, because a mean is a mean whatever produced it.
+    """
+    preset = resolve_preset(model)
+    run_calibration.main(["--model", model, "--out-dir", str(tmp_path), "--dry-run"])
+    printed = capsys.readouterr().out
+    assert f"top_p {preset.top_p}" in printed
+    assert f"temperature {preset.temperature}" in printed
+    assert f"tokens {preset.max_new_tokens}" in printed
+
+
+def test_calibration_refuses_to_replace_a_basis_a_directory_is_read_by(
+    tmp_path: Path,
+) -> None:
+    """The refusal comes before a checkpoint loads, and names the flag that allows it."""
+    (tmp_path / PCA_MODEL_NAME).write_bytes(b"banked")
+    with pytest.raises(SystemExit, match="--refit-basis"):
+        run_calibration.main(["--model", MODEL, "--out-dir", str(tmp_path)])
 
 
 def test_persistent_replay_drive_needs_a_roster() -> None:
