@@ -55,9 +55,11 @@ def test_the_mantel_p_value_is_the_one_the_battery_computes() -> None:
 
     The null is reproducible from the seed, so it can be rebuilt here and handed to
     the shared statistic directly. Agreement is the receipt that section 9 owns no
-    second copy of the arithmetic.
+    second copy of the arithmetic. The matrices are drawn so the observation lands
+    inside its own null: where nothing beats the observation every convention
+    agrees, and the comparison would hold no matter what the section did.
     """
-    rng = np.random.default_rng(11)
+    rng = np.random.default_rng(12)
     D_compute = distance_matrix(rng, 24)
     D_semantic = distance_matrix(rng, 24)
     n_permutations = 20
@@ -73,6 +75,11 @@ def test_the_mantel_p_value_is_the_one_the_battery_computes() -> None:
     )
     assert result.null_std == pytest.approx(float(np.std(null)))
     assert result.p_value == pytest.approx(permutation_pvalue(result.r, null))
+    hits = int((null >= result.r).sum())
+    assert 1 <= hits <= n_permutations - 1, (
+        f"the observation is inside its own null, so the comparison discriminates; "
+        f"got {hits} of {n_permutations}"
+    )
 
 
 def test_the_mantel_p_value_carries_the_add_one_correction() -> None:
