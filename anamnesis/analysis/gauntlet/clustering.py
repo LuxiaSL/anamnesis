@@ -16,7 +16,7 @@ from .schemas import (
     PerModeSilhouetteStats,
     BlockSilhouette,
 )
-from .utils import get_available_blocks
+from .utils import absence_reason, get_available_blocks
 
 
 def run_clustering(data: AnalysisData) -> ClusteringResult:
@@ -51,27 +51,34 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
             topic_silhouette=topic_score,
         )
 
-    # Per-mode silhouette decomposition (attention-and-cache union)
-    X_key = data.get_block(ATTENTION_AND_CACHE)
-    scaler = StandardScaler()
-    X_std = scaler.fit_transform(X_key)
+    # Per-mode silhouette decomposition (attention-and-cache union). The per-block
+    # silhouettes above stand without that union, so its absence costs the readings
+    # below and is recorded in each of them.
+    union_absent = absence_reason(data, ATTENTION_AND_CACHE)
 
     per_mode_by_metric: dict[str, dict[str, Any]] = {"cosine": {}, "euclidean": {}}
-    for metric in ["cosine", "euclidean"]:
-        try:
-            sample_sils = silhouette_samples(X_std, data.modes, metric=metric)
-            for mode in data.unique_modes:
-                mask = data.mode_mask(mode)
-                mode_sils = sample_sils[mask]
-                per_mode_by_metric[metric][mode] = PerModeSilhouetteStats(
-                    mean=float(np.mean(mode_sils)),
-                    std=float(np.std(mode_sils)),
-                    min=float(np.min(mode_sils)),
-                    max=float(np.max(mode_sils)),
-                    n_negative=int(np.sum(mode_sils < 0)),
-                ).model_dump(mode="json")
-        except Exception as e:
-            per_mode_by_metric[metric]["error"] = str(e)
+    if union_absent is not None:
+        for metric in ["cosine", "euclidean"]:
+            per_mode_by_metric[metric]["error"] = union_absent
+    else:
+        X_key = data.get_block(ATTENTION_AND_CACHE)
+        scaler = StandardScaler()
+        X_std = scaler.fit_transform(X_key)
+        for metric in ["cosine", "euclidean"]:
+            try:
+                sample_sils = silhouette_samples(X_std, data.modes, metric=metric)
+                for mode in data.unique_modes:
+                    mask = data.mode_mask(mode)
+                    mode_sils = sample_sils[mask]
+                    per_mode_by_metric[metric][mode] = PerModeSilhouetteStats(
+                        mean=float(np.mean(mode_sils)),
+                        std=float(np.std(mode_sils)),
+                        min=float(np.min(mode_sils)),
+                        max=float(np.max(mode_sils)),
+                        n_negative=int(np.sum(mode_sils < 0)),
+                    ).model_dump(mode="json")
+            except Exception as e:
+                per_mode_by_metric[metric]["error"] = str(e)
 
     per_mode_silhouette_cosine = per_mode_by_metric["cosine"]
     per_mode_silhouette_euclidean = per_mode_by_metric["euclidean"]
@@ -81,6 +88,10 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
     # K-Means ARI
     kmeans_ari: dict[str, float | str] = {}
     for block in [ATTENTION_AND_CACHE, ALL_CORE]:
+        block_absent = absence_reason(data, block)
+        if block_absent is not None:
+            kmeans_ari[block] = f"ABSENT: {block_absent}"
+            continue
         X = data.get_block(block)
         X_std = StandardScaler().fit_transform(X)
 
@@ -96,6 +107,18 @@ def run_clustering(data: AnalysisData) -> ClusteringResult:
 
     # UMAP / t-SNE embeddings (save coordinates for plotting)
     embeddings: dict[str, EmbeddingResult] = {}
+
+    if union_absent is not None:
+        for name in ("tsne_attention_and_cache", "umap_attention_and_cache"):
+            embeddings[name] = EmbeddingResult(error=union_absent)
+        return ClusteringResult(
+            silhouette_by_block=silhouette_by_block,
+            per_mode_silhouette=per_mode_silhouette,
+            per_mode_silhouette_cosine=per_mode_silhouette_cosine,
+            per_mode_silhouette_euclidean=per_mode_silhouette_euclidean,
+            kmeans_ari=kmeans_ari,
+            embeddings=embeddings,
+        )
 
     # t-SNE (always available via sklearn)
     from sklearn.manifold import TSNE

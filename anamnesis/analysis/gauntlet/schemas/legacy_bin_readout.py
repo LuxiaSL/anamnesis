@@ -121,7 +121,8 @@ class CohensDPerTopicResult(BaseModel):
     """Cohen's d summary across topics.
 
     When no topics produce a successful d, the summary fields are ``null``
-    on the wire (not absent). The custom serializer preserves this shape.
+    on the wire (not absent). The custom serializer preserves this shape, and
+    adds ``error`` only when the reading could not be taken at all.
     """
 
     model_config = _FORBID
@@ -134,10 +135,11 @@ class CohensDPerTopicResult(BaseModel):
     max_d: float | None
     all_positive: bool | None
     n_topics: int
+    error: str | None = None
 
     @model_serializer(mode="plain")
     def _serialize(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "per_topic": {
                 k: v.model_dump(mode="json", exclude_none=True)
                 for k, v in self.per_topic.items()
@@ -150,6 +152,9 @@ class CohensDPerTopicResult(BaseModel):
             "all_positive": self.all_positive,
             "n_topics": self.n_topics,
         }
+        if self.error is not None:
+            out["error"] = self.error
+        return out
 
 
 class LegacyBinReadoutResult(BaseModel):

@@ -48,9 +48,14 @@ class CCGPSummary(BaseModel):
 
 
 class CCGPResult(BaseModel):
-    """Section 5 result: CCGP across classifier/seed/fold variants."""
+    """Section 5 result: CCGP across classifier/seed/fold variants.
+
+    Both fields are optional so a section that could not run — the union it
+    reads is not in this corpus — round-trips as a stub carrying its reason.
+    """
 
     model_config = _FORBID
 
-    variants: dict[str, CCGPVariant]
-    summary: CCGPSummary
+    variants: dict[str, CCGPVariant] | None = None
+    summary: CCGPSummary | None = None
+    error: str | None = None
