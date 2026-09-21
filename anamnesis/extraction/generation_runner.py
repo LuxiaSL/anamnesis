@@ -539,6 +539,82 @@ def build_generation_specs(
     return specs
 
 
+def trim_per_mode(specs: list[GenerationSpec], n_per_mode: int) -> list[GenerationSpec]:
+    """The first ``n_per_mode`` specs of each mode, in order.
+
+    A spec list is built by repetitions over whole topic sets, so its per-mode
+    count lands on a multiple of the topic count. A pass that wants some other
+    count takes the leading slice of each mode rather than a random sample, so the
+    topics it covers are the same across modes and the seeds are the ones the
+    coordinates imply.
+    """
+    if n_per_mode <= 0:
+        raise ValueError(f"n_per_mode must be positive, got {n_per_mode}")
+    counts: dict[str, int] = {}
+    kept: list[GenerationSpec] = []
+    for spec in specs:
+        seen = counts.get(spec.mode, 0)
+        if seen < n_per_mode:
+            kept.append(spec)
+            counts[spec.mode] = seen + 1
+    return kept
+
+
+SWAP_SEED_MODE_INDEX = 99
+"""The mode-index slot the swap seeds are namespaced under. Swap generations are
+not one of the core modes, so their seeds are derived from a slot outside the mode
+set — frozen, because the seeds of a banked swap corpus are this constant."""
+
+SWAP_GENERATION_ID_BASE = 10000
+"""Where swap generation ids start, high enough not to collide with a pass's own."""
+
+
+def build_prompt_swap_specs(
+    config: ExperimentConfig,
+    *,
+    prompt_set: str,
+    topics: list[str] | None = None,
+    n_topics: int = 10,
+    first_gen_id: int = SWAP_GENERATION_ID_BASE,
+) -> list[GenerationSpec]:
+    """Specs for the prompt-swap confound condition, one block per swap pair.
+
+    A swap generation carries mode A's system prompt under a user directive that
+    forces mode B's execution, which is how the instrument separates *what a model
+    was told* from *how it ran*: if a signature tracked the instruction, a swap
+    would read as A.
+
+    ``mode`` names the pair rather than a core mode, and ``mode_idx`` is the pair's
+    position in the swap set — the pair, not a core mode, is what the label means.
+    """
+    from anamnesis.modes.prompt_swap import PROMPT_SWAP_PAIRS
+
+    with open(config.prompts_path) as f:
+        prompts_file = json.load(f)
+    if topics is None:
+        topics = [*prompts_file["topics"]["set_a"], *prompts_file["topics"]["set_b"]]
+    template = prompts_file.get("user_prompt_template", "Write about: {topic}")
+
+    specs: list[GenerationSpec] = []
+    gen_id = first_gen_id
+    for pair_idx, pair in enumerate(PROMPT_SWAP_PAIRS):
+        for topic_idx, topic in enumerate(topics[: min(n_topics, len(topics))]):
+            specs.append(GenerationSpec(
+                generation_id=gen_id,
+                prompt_set=prompt_set,
+                topic=topic,
+                topic_idx=topic_idx,
+                mode=f"swap_{pair.label}",
+                mode_idx=pair_idx,
+                system_prompt=pair.get_system_prompt(),
+                user_prompt=pair.format_user_prompt(topic, template),
+                seed=make_seed(topic_idx, SWAP_SEED_MODE_INDEX, 0, f"SWAP_{pair.label}"),
+                repetition=0,
+            ))
+            gen_id += 1
+    return specs
+
+
 def find_completed_ids(signatures_dir: Path) -> set[int]:
     """Scan signatures directory for already-completed generations.
 

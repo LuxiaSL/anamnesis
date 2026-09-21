@@ -38,7 +38,7 @@
       "capability": "GPU fan-out launchers",
       "module": "anamnesis/orchestration/launch.py",
       "justification": "consolidation",
-      "ported_consumers": null,
+      "ported_consumers": 2,
       "donor_total": 1387,
       "donors": {
         "anamnesis/scripts/parallel_generate.py": 219,
