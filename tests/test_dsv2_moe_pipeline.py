@@ -5,10 +5,18 @@ Catches the class of dim-mismatch / None-surface crashes that the GPU onboard-sm
 L0 gate (intermediate_size 10944) vs MoE shared_experts gate (moe_intermediate*n_shared 2816)
 broke gate_features' cross-layer cosine — so M6 capture gates the MoE shared branch only.
 
+One documentation property rides along, because it is about these fields and nothing
+else checks it: what a banked router vector holds is stated in the comments on
+`RawGenerationData` and fixed by the capture hook, so no per-run stamp names it. A
+comment promising a stamp would send a reader looking through run metadata for a key
+no artifact carries.
+
 Pure-CPU (synthetic RawGenerationData); no GPU/model. Run: `python -m pytest tests/test_dsv2_moe_pipeline.py`
 or `python tests/test_dsv2_moe_pipeline.py`.
 """
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 
@@ -94,8 +102,28 @@ def test_dsv2_full_v2_pipeline_runs_clean() -> None:
         assert m in xrt_methods, f"xrt missing method {m}: has {xrt_methods}"
 
 
+def test_no_router_stamp_is_promised_that_nothing_writes() -> None:
+    """A described stamp needs a writer, or it is a dead end for whoever looks.
+
+    The name is assembled here rather than written out, so that this test is not
+    itself the hit a search over the package finds.
+    """
+    phantom = "router" + "_granularity"
+    package = Path(__file__).resolve().parent.parent / "anamnesis"
+    named_in = sorted(
+        str(path.relative_to(package.parent))
+        for path in package.rglob("*.py")
+        if phantom in path.read_text(encoding="utf-8")
+    )
+    assert named_in == [], (
+        f"{named_in} name a {phantom} stamp; nothing in the package writes one, so "
+        "what a banked router vector holds is said in the comment and in the hook"
+    )
+
+
 if __name__ == "__main__":
     test_dsv2_full_v2_pipeline_runs_clean()
+    test_no_router_stamp_is_promised_that_nothing_writes()
     r, _ = _run_full_v2_pipeline()
     xn = sum(1 for n in r.feature_names if n.startswith("xrt_"))
     print(f"PASS — {len(r.features)} features, {xn} xrt (v2.1), all finite, 0 unclassified, "
