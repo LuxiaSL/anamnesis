@@ -34,13 +34,11 @@ def run_integrity_checks(data: AnalysisData) -> IntegrityResult:
 
     available_blocks, _ = get_available_blocks(data)
 
-    # Feature dimensions
-    block_dims: dict[str, int] = {}
-    for block in available_blocks:
-        try:
-            block_dims[block] = data.get_block(block).shape[1]
-        except KeyError:
-            block_dims[block] = 0
+    # Every block below comes from `get_available_blocks`, which reads the loaded
+    # matrices, so each one is present by construction and is read without a guard.
+    block_dims: dict[str, int] = {
+        block: data.get_block(block).shape[1] for block in available_blocks
+    }
     total_features = sum(
         block_dims.get(t, 0) for t in [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA]
     )
@@ -49,29 +47,23 @@ def run_integrity_checks(data: AnalysisData) -> IntegrityResult:
     nan_inf: dict[str, NanInfCount] = {}
     all_clean = True
     for block in available_blocks:
-        try:
-            X = data.get_block(block)
-            nan_count = int(np.sum(np.isnan(X)))
-            inf_count = int(np.sum(np.isinf(X)))
-            nan_inf[block] = NanInfCount(nan=nan_count, inf=inf_count)
-            if nan_count > 0 or inf_count > 0:
-                all_clean = False
-        except KeyError:
-            nan_inf[block] = NanInfCount(nan=-1, inf=-1, error="block not found")
+        X = data.get_block(block)
+        nan_count = int(np.sum(np.isnan(X)))
+        inf_count = int(np.sum(np.isinf(X)))
+        nan_inf[block] = NanInfCount(nan=nan_count, inf=inf_count)
+        if nan_count > 0 or inf_count > 0:
+            all_clean = False
 
     # Per-feature variance (detect constant features)
     variance_report: dict[str, BlockVarianceReport] = {}
     for block in available_blocks:
-        try:
-            X = data.get_block(block)
-            var = X.var(axis=0)
-            variance_report[block] = BlockVarianceReport(
-                n_features=int(X.shape[1]),
-                n_constant=int(np.sum(var < 1e-12)),
-                n_near_constant=int(np.sum(var < 1e-6)),
-            )
-        except KeyError:
-            pass
+        X = data.get_block(block)
+        var = X.var(axis=0)
+        variance_report[block] = BlockVarianceReport(
+            n_features=int(X.shape[1]),
+            n_constant=int(np.sum(var < 1e-12)),
+            n_near_constant=int(np.sum(var < 1e-6)),
+        )
 
     # Generation length distribution by mode
     length_by_mode: dict[str, LengthByModeStats] | None = None
@@ -100,20 +92,17 @@ def run_integrity_checks(data: AnalysisData) -> IntegrityResult:
     # Feature value range summary per block
     value_ranges: dict[str, BlockValueRange] = {}
     for block in available_blocks:
-        try:
-            X = data.get_block(block)
-            value_ranges[block] = BlockValueRange(
-                global_mean=float(np.mean(X)),
-                global_std=float(np.std(X)),
-                global_min=float(np.min(X)),
-                global_max=float(np.max(X)),
-                feature_mean_range=[
-                    float(np.min(X.mean(axis=0))),
-                    float(np.max(X.mean(axis=0))),
-                ],
-            )
-        except KeyError:
-            pass
+        X = data.get_block(block)
+        value_ranges[block] = BlockValueRange(
+            global_mean=float(np.mean(X)),
+            global_std=float(np.std(X)),
+            global_min=float(np.min(X)),
+            global_max=float(np.max(X)),
+            feature_mean_range=[
+                float(np.min(X.mean(axis=0))),
+                float(np.max(X.mean(axis=0))),
+            ],
+        )
 
     return IntegrityResult(
         n_samples=data.n_samples,

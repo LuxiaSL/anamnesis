@@ -49,7 +49,14 @@ from .schemas import (
     TopologyMetricSummary,
     TopologyResult,
 )
-from .utils import absence_reason, standardize, remove_constant, get_available_blocks
+from .utils import (
+    InsufficientTopicsError,
+    absence_reason,
+    get_available_blocks,
+    remove_constant,
+    standardize,
+    topic_fold_partition,
+)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -270,16 +277,26 @@ def _block_convergence(
 def _generate_topic_folds(
     topics: list[str], n_folds: int, rng: np.random.Generator,
 ) -> list[tuple[list[str], list[str]]]:
+    """``n_folds`` (train topics, held-out topics) splits covering every topic once.
+
+    The partition is :func:`anamnesis.analysis.gauntlet.utils.topic_fold_partition`,
+    which is also what section 8 holds out by, so a CCGP number and a contrastive
+    number over the same seed are over the same folds.
+
+    Raises
+    ------
+    InsufficientTopicsError
+        When more folds are asked for than there are topics.
+    """
     topics_arr = np.array(topics)
-    n = len(topics_arr)
-    fold_size = n // n_folds
-    perm = rng.permutation(n)
-    folds = []
-    for i in range(n_folds):
-        test_idx = perm[i * fold_size : (i + 1) * fold_size]
-        train_idx = np.setdiff1d(perm, test_idx)
-        folds.append((topics_arr[train_idx].tolist(), topics_arr[test_idx].tolist()))
-    return folds
+    held_out = topic_fold_partition(len(topics_arr), n_folds, rng)
+    return [
+        (
+            topics_arr[np.setdiff1d(np.arange(len(topics_arr)), test_idx)].tolist(),
+            topics_arr[test_idx].tolist(),
+        )
+        for test_idx in held_out
+    ]
 
 
 def _ccgp_variant(
@@ -409,37 +426,50 @@ def run_ccgp(data: AnalysisData) -> CCGPResult:
         return CCGPResult(error=f"CCGP reads {absent}")
 
     variants: dict[str, CCGPVariant] = {}
+    refused: dict[str, str] = {}
     block = ATTENTION_AND_CACHE
     X = data.get_block(block)
 
+    def take(key: str, matrix: NDArray, n_folds: int, seed: int, clf_name: str) -> None:
+        """One variant, or its refusal recorded under the same key.
+
+        A fold count larger than the topic count cannot be a partition, and the
+        variant is then not a number that came out low — it is a reading this
+        corpus cannot support, so it is reported as one.
+        """
+        print(f"    CCGP: {key}")
+        try:
+            variants[key] = _ccgp_variant(
+                matrix, data.modes, data.topics,
+                n_folds=n_folds, seed=seed, clf_name=clf_name,
+            )
+        except InsufficientTopicsError as refusal:
+            print(f"      refused: {refusal}")
+            refused[key] = str(refusal)
+
     # Primary: kNN k=3, multiple seeds
     for seed in [42, 123, 777]:
-        key = f"knn3_seed{seed}_5fold"
-        print(f"    CCGP: {key}")
-        variants[key] = _ccgp_variant(
-            X, data.modes, data.topics, n_folds=5, seed=seed, clf_name="knn3",
-        )
+        take(f"knn3_seed{seed}_5fold", X, 5, seed, "knn3")
 
     for clf_name in ["knn5", "linearsvc", "rf"]:
-        key = f"{clf_name}_seed42_5fold"
-        print(f"    CCGP: {key}")
-        variants[key] = _ccgp_variant(
-            X, data.modes, data.topics, n_folds=5, seed=42, clf_name=clf_name,
-        )
+        take(f"{clf_name}_seed42_5fold", X, 5, 42, clf_name)
 
     for n_folds in [4, 10, 20]:
-        key = f"knn3_seed42_{n_folds}fold"
-        print(f"    CCGP: {key}")
-        variants[key] = _ccgp_variant(
-            X, data.modes, data.topics, n_folds=n_folds, seed=42, clf_name="knn3",
-        )
+        take(f"knn3_seed42_{n_folds}fold", X, n_folds, 42, "knn3")
 
     for block_name in [ATTENTION_AND_DELTAS, CACHE_AND_KEYS, ALL_CORE]:
-        X_t = data.get_block(block_name)
-        key = f"knn3_seed42_5fold_{block_name}"
-        print(f"    CCGP: {key}")
-        variants[key] = _ccgp_variant(
-            X_t, data.modes, data.topics, n_folds=5, seed=42, clf_name="knn3",
+        take(
+            f"knn3_seed42_5fold_{block_name}",
+            data.get_block(block_name), 5, 42, "knn3",
+        )
+
+    if not variants:
+        return CCGPResult(
+            refused_variants=refused,
+            error=(
+                "no CCGP variant is available on this corpus: "
+                f"{'; '.join(dict.fromkeys(refused.values()))}"
+            ),
         )
 
     ccgp_scores = [v.ccgp_score for v in variants.values()]
@@ -449,7 +479,11 @@ def run_ccgp(data: AnalysisData) -> CCGPResult:
         all_perfect=all(s == 1.0 for s in ccgp_scores),
     )
 
-    return CCGPResult(variants=variants, summary=summary)
+    return CCGPResult(
+        variants=variants,
+        summary=summary,
+        refused_variants=refused or None,
+    )
 
 
 # ──────────────────────────────────────────────────────────────

@@ -30,6 +30,12 @@ class ScorecardPrediction(BaseModel):
     importance: str
     outcome: str
 
+    # Why the row could not be scored, when ``outcome`` is INSUFFICIENT_DATA:
+    # which upstream section did not run, and the reason it carried. A prediction
+    # whose evidence is absent is unscored, never scored WRONG — a missing
+    # measurement is not a failed one.
+    unscorable_because: str | None = None
+
     # Per-prediction evidence fields (at most a subset per row)
     metric: str | None = None
     surprise_threshold: str | None = None  # P1
@@ -66,9 +72,17 @@ class ScorecardSummary(BaseModel):
 
 
 class ScorecardResult(BaseModel):
-    """Section 10 result: pre-registered 8B prediction evaluation."""
+    """Section 10 result: pre-registered 8B prediction evaluation.
+
+    Every row is always present, so the scorecard is a complete answer about all
+    nine predictions whatever the upstream sections managed: a row whose evidence
+    is absent reads INSUFFICIENT_DATA and says which section it was waiting on.
+    ``error`` is set only when *no* row could be scored, which is the case where
+    the section produced nothing and the pass is short by it.
+    """
 
     model_config = _FORBID
 
     predictions: list[ScorecardPrediction]
     summary: ScorecardSummary
+    error: str | None = None

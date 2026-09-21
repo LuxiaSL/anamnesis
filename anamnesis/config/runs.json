@@ -32,6 +32,13 @@
         "runs/3b_fat_01/signatures_v2_contrastive"
       ],
       "description": "3B feature pipeline with the contrastive addon."
+    },
+    "synthetic_demo": {
+      "name": "synthetic_demo",
+      "root": "outputs",
+      "signature_dir": "runs/synthetic_demo/signatures",
+      "addon_dirs": [],
+      "description": "Drawn, not measured: the bank anamnesis.scripts.make_synthetic_bank writes. The only run here a fresh checkout can produce, and no reading of it is a finding about a model."
     }
   }
 }

@@ -275,14 +275,23 @@ def _contrastive_topic_heldout(
     """
     from anamnesis.analysis.contrastive_mlp import embed, train_embedding
 
-    from .contrastive import HAS_TORCH, build_topic_folds
+    from .contrastive import HAS_TORCH, N_TOPIC_FOLDS, build_topic_folds
 
     if not HAS_TORCH:
         return ContrastiveProjectionComparisonResult(
             error="torch is not installed, so no contrastive projection can be fitted",
         )
 
-    folds = build_topic_folds(topics, n_folds=5, seed=seed)
+    n_topics = len(set(topics))
+    if n_topics < N_TOPIC_FOLDS:
+        return ContrastiveProjectionComparisonResult(
+            error=(
+                f"the comparison holds out {N_TOPIC_FOLDS} topic folds and this "
+                f"corpus has {n_topics} topics"
+            ),
+        )
+
+    folds = build_topic_folds(topics, n_folds=N_TOPIC_FOLDS, seed=seed)
 
     conditions: dict[str, NDArray] = {
         "tfidf": StandardScaler().fit_transform(X_tfidf),
@@ -527,10 +536,9 @@ def _run_prompt_swap_confound(
         if len(swap_block_features[block_name]) != len(swap_info):
             continue
 
-        try:
-            X_train = data.get_block(block_name)
-        except KeyError:
-            continue
+        # `test_blocks` was built from the blocks and unions this corpus holds, so
+        # the training matrix for one of them is there.
+        X_train = data.get_block(block_name)
 
         X_swap = np.stack(swap_block_features[block_name], axis=0)
         y_train = data.modes
@@ -647,13 +655,7 @@ def run_semantic(
 
     for block_name in test_blocks:
         print(f"      Block: {block_name}...")
-        try:
-            X_compute = data.get_block(block_name)
-        except KeyError:
-            per_block_semantic[block_name] = PerBlockSemanticResult(
-                error=f"block {block_name} not found",
-            )
-            continue
+        X_compute = data.get_block(block_name)
 
         classification = SemanticClassifierBundle(
             rf=_classify_condition(X_compute, y, topics, clf_name="rf"),

@@ -36,6 +36,13 @@ into a pile of near-duplicates, which is what it grew into once.
 * `judge_likert.py` — the other judging paradigm: rate one text on every mode at
   once, which is what yields purity and the cross-channel correlation.
 
+**A corpus without a device.**
+
+* `make_synthetic_bank.py` — write a bank of the right shape from a seed, so everything
+  below can be run before there is a model to run it on. The numbers are drawn and mean
+  nothing about any model; `anamnesis.synthetic_bank` states what the construction does
+  and does not put in them.
+
 **Reading a bank.**
 
 * `run_gauntlet.py` — the eleven standing analyses over one corpus.

@@ -83,7 +83,7 @@ from .schemas import (
     TopologyResult,
     migrate_banked_results,
 )
-from .utils import clean_for_json
+from .utils import clean_for_json, error_stub_reason, is_error_stub, section_reading
 
 
 @dataclass(frozen=True)
@@ -199,15 +199,6 @@ SECTION_MODELS: dict[str, type[BaseModel]] = {
 }
 
 
-def _is_error_value(value: object) -> bool:
-    """True if a result dict/model carries an error stub (skip-on-resume)."""
-    if isinstance(value, BaseModel):
-        return bool(getattr(value, "error", None))
-    if isinstance(value, dict):
-        return bool(value.get("error"))
-    return False
-
-
 def default_output_dir(run_name: str) -> Path:
     """Where a pass writes when its caller names no directory.
 
@@ -216,15 +207,6 @@ def default_output_dir(run_name: str) -> Path:
     convention and the two would drift.
     """
     return outputs_root() / "analysis" / run_name
-
-
-def _error_message(value: object) -> str:
-    """The message an error stub carries, however the stub is spelled."""
-    if isinstance(value, BaseModel):
-        return str(getattr(value, "error", "") or "no reason recorded")
-    if isinstance(value, dict):
-        return str(value.get("error") or "no reason recorded")
-    return "no reason recorded"
 
 
 def section_shortfall(
@@ -260,8 +242,8 @@ def section_shortfall(
         value = getattr(results, spec.key, None)
         if value is None:
             continue
-        if _is_error_value(value):
-            failures[spec.key] = _error_message(value)
+        if is_error_stub(value):
+            failures[spec.key] = error_stub_reason(value)
             continue
         produced.append(spec.key)
     return Shortfall(
@@ -284,7 +266,7 @@ def _rehydrate_section(key: str, value: object) -> object:
     model_cls = SECTION_MODELS.get(key)
     if model_cls is None or not isinstance(value, dict):
         return value
-    if _is_error_value(value):
+    if is_error_stub(value):
         return value
     try:
         return model_cls.model_validate(value)
@@ -329,7 +311,7 @@ def _detect_completed_sections(checkpoint: dict) -> set[int]:
         if spec.always_rerun:
             continue
         if spec.key in checkpoint and checkpoint[spec.key] is not None:
-            if _is_error_value(checkpoint[spec.key]):
+            if is_error_stub(checkpoint[spec.key]):
                 continue
             completed.add(spec.number)
     return completed
@@ -539,19 +521,27 @@ def _print_summary(results: dict) -> None:
             print(f"  Block convergence (max diff): {id_data.block_convergence.max_pairwise_diff:.1f}")
 
     # CCGP
-    ccgp = results.get("ccgp")
-    if isinstance(ccgp, CCGPResult):
-        summary = ccgp.summary
-        print(f"\n  CCGP: min={summary.min_ccgp}, all_perfect={summary.all_perfect}")
+    ccgp, ccgp_gap = section_reading(results, "ccgp", CCGPResult)
+    if ccgp is not None and ccgp.summary is not None:
+        print(f"\n  CCGP: min={ccgp.summary.min_ccgp}, all_perfect={ccgp.summary.all_perfect}")
+        if ccgp.refused_variants:
+            for variant, reason in sorted(ccgp.refused_variants.items()):
+                print(f"    {variant}: refused — {reason}")
+    elif ccgp_gap is not None:
+        print(f"\n  CCGP: {ccgp_gap}")
 
     # Topology
-    topo = results.get("topology")
-    if isinstance(topo, TopologyResult):
-        euc = topo.topology_summary.get("euclidean")
+    topo, topo_gap = section_reading(results, "topology", TopologyResult)
+    if topo is not None:
+        euc = (topo.topology_summary or {}).get("euclidean")
         if euc is not None:
             print(f"\n  Topology: nearest={euc.nearest_pair}, "
                   f"outgroup_ratio={euc.analogical_outgroup_ratio:.2f}")
-        print(f"  Delta-hyperbolicity: delta_rel={topo.gromov_delta_euclidean.delta_relative:.3f}")
+        if topo.gromov_delta_euclidean is not None:
+            print(f"  Delta-hyperbolicity: delta_rel="
+                  f"{topo.gromov_delta_euclidean.delta_relative:.3f}")
+    elif topo_gap is not None:
+        print(f"\n  Topology: {topo_gap}")
 
     # Semantic orthogonality
     semantic = results.get("semantic")

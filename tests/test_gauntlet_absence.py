@@ -45,7 +45,11 @@ from anamnesis.analysis.gauntlet.signature_io import (
     AnalysisData,
     load_analysis_data,
 )
-from anamnesis.analysis.gauntlet.utils import absence_reason, get_available_blocks
+from anamnesis.analysis.gauntlet.utils import (
+    absence_reason,
+    get_available_blocks,
+    is_error_stub,
+)
 from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
 
 FAMILY_WIDTHS = {
@@ -203,3 +207,35 @@ def test_the_semantic_section_reports_the_absence(families_only: AnalysisData) -
     # union it would then have read is the next thing it cannot have.
     result = run_semantic(families_only)
     assert result.error is not None
+
+
+def test_the_scorecard_reads_this_corpus_own_stubs_without_dying(
+    families_only: AnalysisData,
+) -> None:
+    """The consuming section, over the stubs the real sections actually produced.
+
+    `tests/test_section_consumers.py` pins the rule against hand-built stubs; this
+    is the same rule against the ones this corpus makes, which is what a pass over
+    it hands to section 10.
+    """
+    from anamnesis.analysis.gauntlet.scorecard import run_scorecard
+
+    produced = {
+        "integrity": run_integrity_checks(families_only),
+        "legacy_bin_readout": run_legacy_bin_readout(families_only),
+        "intrinsic_dimension": run_intrinsic_dimension(families_only),
+        "ccgp": run_ccgp(families_only),
+        "topology": run_topology(families_only),
+        "clustering": run_clustering(families_only),
+        "manifold_geometry": run_manifold_geometry(families_only),
+    }
+    for key in ("ccgp", "topology", "manifold_geometry"):
+        assert is_error_stub(produced[key]), f"{key} should have stubbed on this corpus"
+
+    scorecard = run_scorecard(produced)
+    assert len(scorecard.predictions) == 9
+    for row in scorecard.predictions:
+        assert row.outcome == "INSUFFICIENT_DATA", row.prediction
+        assert row.unscorable_because is not None, row.prediction
+    assert scorecard.summary.wrong == 0, "a missing measurement is not a failed prediction"
+    assert scorecard.error is not None and "no prediction could be scored" in scorecard.error

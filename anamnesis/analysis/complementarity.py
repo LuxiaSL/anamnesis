@@ -64,6 +64,7 @@ from anamnesis.analysis.gauntlet.signature_io import (
     RESIDUAL_TRAJECTORY,
     TEMPORAL_DYNAMICS,
 )
+from anamnesis.analysis.gauntlet.utils import error_stub_reason, is_error_stub
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,12 @@ def load_results(path: Path) -> dict[str, Any] | None:
     fatal. A section that fails validation is left as the raw mapping and warned
     about: the rest of the file is still readable, and a reader who needs that
     section gets nothing rather than something mis-shaped.
+
+    An error stub is not such a failure. A section that could not run banks its
+    reason in place of its numbers, and that is a value the section is allowed to
+    have, so it is reported at info and left as the mapping it is — a warning there
+    would say a file is malformed when it is only incomplete, and the readings
+    below already skip an untyped section.
     """
     path = Path(path)
     if not path.exists():
@@ -189,11 +196,15 @@ def load_results(path: Path) -> dict[str, Any] | None:
         ("classification", ClassificationResult),
         ("legacy_bin_readout", LegacyBinReadoutResult),
     ):
-        if isinstance(raw.get(key), dict):
-            try:
-                raw[key] = model.model_validate(raw[key])
-            except ValueError as exc:
-                logger.warning(f"{path}: {key} does not validate ({exc})")
+        if not isinstance(raw.get(key), dict):
+            continue
+        if is_error_stub(raw[key]):
+            logger.info(f"{path}: {key} did not run ({error_stub_reason(raw[key])})")
+            continue
+        try:
+            raw[key] = model.model_validate(raw[key])
+        except ValueError as exc:
+            logger.warning(f"{path}: {key} does not validate ({exc})")
     return raw
 
 
