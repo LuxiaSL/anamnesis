@@ -4,9 +4,15 @@ Positional decomposition needs per-position means to subtract, and the residual
 PCA needs a fitted basis to project onto. Both are model-specific files written
 once per model by :mod:`anamnesis.extraction.calibration_fit`, and both are read
 by every path that computes features: the in-process extraction pass, the replay
-worker, the fast lane, and the offline recompute. The filenames live here, beside
-the reader, so that the pass that writes an artifact and the passes that read it
-cannot disagree about what to call it.
+worker, the fast lane, and the offline recompute.
+
+The filenames themselves are :data:`anamnesis.config.experiment.PCA_MODEL_NAME` and
+its siblings, imported here rather than spelled again. They sit in the
+configuration layer because that layer builds the paths as well, and because it is
+the base of this package and imports nothing else in it — the other direction would
+put numpy behind every import of a run's description. What lives here is the
+resolution: which of the accepted names a directory answers with, and what each file
+turns into.
 
 Two on-disk shapes for the PCA model are both accepted, because both are banked:
 a plain mapping with ``components`` and ``mean`` keys, and a pickled scikit-learn
@@ -40,30 +46,30 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from anamnesis.config.experiment import (
+    PCA_MODEL_NAME,
+    PCA_MODEL_NAMES,
+    POSITIONAL_MEANS_NAME,
+)
+
 F32 = NDArray[np.float32]
 
 logger = logging.getLogger(__name__)
-
-POSITIONAL_MEANS_NAME = "positional_means.npz"
-"""Per-position, per-layer means, under the ``positional_means`` array key."""
-
-PCA_MODEL_NAME = "pca_model.pkl"
-"""The fitted residual-stream PCA, and the only name a fit writes."""
-
-PCA_MODEL_NAMES: tuple[str, ...] = (PCA_MODEL_NAME, "pca_model_corrected.pkl")
-"""Basis filenames a calibration directory may hold, in resolution order.
-
-The first is what a fit writes. The second is a name banked directories carry, and
-it resolves only when the first is absent: where both exist, the plain name is the
-artifact every consumer of the directory already reads, so moving a pass onto the
-other one would change features without changing any argument.
-"""
 
 POSITIONAL_MEANS_KEY = "positional_means"
 """The array key inside the positional-means archive."""
 
 POSITION_COUNTS_KEY = "pos_counts"
 """How many states each position's mean was taken over, in the same archive."""
+
+CALIBRATION_ARTIFACT_NAMES: tuple[str, ...] = (POSITIONAL_MEANS_NAME, PCA_MODEL_NAME)
+"""The pair a provenance digest over a calibration directory hashes.
+
+The written names, not :data:`anamnesis.config.experiment.PCA_MODEL_NAMES`: a digest
+names the bytes it read, so a directory that answers :func:`resolve_pca_model` under
+the other accepted spelling has no digest under this one and the pass that wanted a
+provenance stamp fails on the missing file rather than stamping a different set.
+"""
 
 
 def resolve_pca_model(calib_dir: Path) -> Path | None:
