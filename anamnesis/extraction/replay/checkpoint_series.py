@@ -27,6 +27,11 @@ refuses to run without it.
 series builder refuses a directory whose checkpoints carry no adapter configuration,
 and says which path to use instead: a full-weight series is replayed one model load
 per checkpoint, which is the cost of what it is.
+
+The wrapper is ``peft``'s, imported at the point of use rather than at module
+import: the schema, the enumeration and the pristine-restore refusal are all
+readable and testable where it is not installed, and only the two functions that
+touch a wrapped model need it.
 """
 
 from __future__ import annotations
