@@ -29,6 +29,13 @@ A full pass is long enough that losing it to a crash in section 9 would matter,
 so results are checkpointed after each section completes and ``resume`` reads
 the checkpoint back, validates each section against its schema, and skips what
 is already there. An error stub does not count as completed.
+
+A section that fails writes an error stub and the pass continues, because the
+other ten sections are still worth having and the results file is still worth
+reading. What must not happen is a command reporting a complete pass over that
+file: :func:`section_shortfall` states the pass as expected-versus-produced —
+sections asked for, sections that landed, sections carrying a stub and the reason
+— and the command layer refuses on it.
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, ValidationError
 
 from anamnesis.config.paths import outputs_root
+from anamnesis.shortfall import Shortfall
 
 from .signature_io import (
     ALL_CORE,
@@ -197,6 +205,73 @@ def _is_error_value(value: object) -> bool:
     return False
 
 
+def default_output_dir(run_name: str) -> Path:
+    """Where a pass writes when its caller names no directory.
+
+    One definition, because a command that has to know where the results landed —
+    to put a receipt beside them — would otherwise carry a second copy of this
+    convention and the two would drift.
+    """
+    return outputs_root() / "analysis" / run_name
+
+
+def _error_message(value: object) -> str:
+    """The message an error stub carries, however the stub is spelled."""
+    if isinstance(value, BaseModel):
+        return str(getattr(value, "error", "") or "no reason recorded")
+    if isinstance(value, dict):
+        return str(value.get("error") or "no reason recorded")
+    return "no reason recorded"
+
+
+def section_shortfall(
+    results: AnalysisResults,
+    *,
+    output_dir: Path,
+    command: str,
+    skip_sections: set[int] | None = None,
+) -> Shortfall:
+    """State a gauntlet pass as sections asked for versus sections that landed.
+
+    A section is produced when its entry is populated and carries no error stub,
+    which is the same reading :func:`_detect_completed_sections` gives a
+    checkpoint — so a resumed pass whose sections came back from the checkpoint
+    has produced them and is complete. Sections named in ``skip_sections`` are
+    excluded rather than requested: a pass narrowed on purpose is complete when it
+    produced the narrowed set, and a stub left in the checkpoint for a section this
+    pass was told to skip is not this pass's failure.
+
+    The error stub's own message is carried through as the reason, so a refusal
+    says which section and what went wrong rather than only how many are absent.
+    """
+    skip = set(skip_sections) if skip_sections else set()
+    requested: list[str] = []
+    excluded: dict[str, str] = {}
+    failures: dict[str, str] = {}
+    produced: list[str] = []
+    for spec in SECTIONS:
+        if spec.number in skip:
+            excluded[spec.key] = f"section {spec.number} named in --skip"
+            continue
+        requested.append(spec.key)
+        value = getattr(results, spec.key, None)
+        if value is None:
+            continue
+        if _is_error_value(value):
+            failures[spec.key] = _error_message(value)
+            continue
+        produced.append(spec.key)
+    return Shortfall(
+        command=command,
+        unit="section",
+        target=output_dir,
+        requested=tuple(requested),
+        produced=tuple(produced),
+        excluded=excluded,
+        failures=failures,
+    )
+
+
 def _rehydrate_section(key: str, value: object) -> object:
     """Validate a checkpointed dict into its typed model when a schema exists.
 
@@ -298,7 +373,7 @@ def run_full_analysis(
     skip = set(skip_sections) if skip_sections else set()
 
     if output_dir is None:
-        output_dir = outputs_root() / "analysis" / run_name
+        output_dir = default_output_dir(run_name)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "figures").mkdir(exist_ok=True)

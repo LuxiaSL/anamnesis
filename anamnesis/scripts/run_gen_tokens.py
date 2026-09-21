@@ -16,11 +16,22 @@ Three ways to run it, and one thing to do afterwards:
   once and walks them, re-arming each cell's intervention.
 * **Assembly** — ``--assemble`` turns a directory of banked records into a run:
   ``metadata.json`` plus the replay manifest replay reads. It is safe to re-run
-  and is run automatically at the end of a generating pass.
+  and it runs at the end of a generating pass that produced every spec it was
+  given. A short pass refuses before assembling, so a manifest is never stamped
+  over a corpus in the same breath as the report that it is incomplete;
+  ``--assemble`` on its own, with no specs, assembles whatever is there.
 
 Per-generation seeding is what licenses all of this: a generation's output is a
 function of its own coordinates, so a worker's identity and a cell's position in a
 roster cannot reach it.
+
+**This command fails closed.** A cell that banked fewer records than it had specs
+exits ``anamnesis.shortfall.EXIT_SHORT``, naming the generation ids that are
+missing and the ones that raised; ``--allow-partial`` accepts the short cell and
+exits ``anamnesis.shortfall.EXIT_SHORT_SANCTIONED`` instead, still non-zero. Either
+way a receipt lands in the records directory it describes. A resumed pass that
+generates three records because seventeen were already banked has produced twenty
+and exits zero, and so does a worker that produced exactly its share of the specs.
 """
 
 from __future__ import annotations
@@ -86,6 +97,12 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="Pin the chat template's rendered date, so prompt tokens are not a function of "
              "the wall clock across a pass",
+    )
+    p.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Accept a cell short of its specs; the receipt is written either way and "
+             "the status stays non-zero",
     )
     p.add_argument("--label", default="w")
     p.add_argument("--inject-npz", default=None, help="Vector bank for a residual write")
@@ -167,6 +184,8 @@ def _generation_worker_command(args: argparse.Namespace, *, label: str, **overri
         "--max-new-tokens", str(policy.max_new_tokens),
         "--attn", args.attn, "--label", label,
     ]
+    if args.allow_partial:
+        cmd.append("--allow-partial")
     if policy.repetition_penalty != 1.0:
         cmd += ["--repetition-penalty", str(policy.repetition_penalty)]
     if policy.date_string:
@@ -286,7 +305,12 @@ def _cell_specs(row: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def generate(args: argparse.Namespace) -> None:
-    """Load the model once and generate one cell's specs, or a roster of them."""
+    """Load the model once and generate one cell's specs, or a roster of them.
+
+    Each cell's accounting is collected and the verdict comes at the end, so an
+    invocation over a roster names every short cell rather than dying on the first
+    one and leaving the rest ungenerated.
+    """
     import os
 
     # Pin the numeric thread pools before torch is imported. A launcher already
@@ -307,7 +331,8 @@ def generate(args: argparse.Namespace) -> None:
         attach_perturbation,
         resolve_injection,
     )
-    from anamnesis.extraction.token_generation import generate_specs
+    from anamnesis.extraction.token_generation import generate_specs, generation_shortfall
+    from anamnesis.shortfall import Shortfall, refuse_unless_complete
 
     preset = resolve_preset(args.model)
     dtype = {
@@ -335,12 +360,12 @@ def generate(args: argparse.Namespace) -> None:
         perturb: dict[str, Any] | None,
         penalty: float | None,
         label: str,
-    ) -> None:
+    ) -> Shortfall:
         injection = resolve_injection(None, fields=fields)
         handle = attach_injection(model, injection, label)
         perturb_handle = attach_perturbation(model, perturb, label)
         try:
-            generate_specs(
+            result = generate_specs(
                 model, tokenizer, specs, out_dir,
                 policy.with_repetition_penalty(penalty),
                 pad_token_id=pad_id,
@@ -353,26 +378,33 @@ def generate(args: argparse.Namespace) -> None:
             for armed in (handle, perturb_handle):
                 if armed is not None:
                     armed.remove()
+        return generation_shortfall(result, command=MODULE, label=label)
 
     if args.jobs_file is not None:
-        for index, job in enumerate(json.loads(args.jobs_file.read_text())):
+        shortfalls = [
             run_one(
                 list(job["specs"]), Path(job["out_dir"]),
                 {k: v for k, v in job.items() if k.startswith("inject_")},
                 job.get("perturb"), job.get("repetition_penalty"),
                 f"{args.label}c{index}",
             )
+            for index, job in enumerate(json.loads(args.jobs_file.read_text()))
+        ]
+        refuse_unless_complete(shortfalls, allow_partial=args.allow_partial)
         return
 
     if args.spec_file is None or args.out_dir is None:
         raise SystemExit("generating needs --spec-file and --out-dir (or --jobs-file)")
     perturb = json.loads(args.perturb_json.read_text()) if args.perturb_json else None
-    run_one(
-        json.loads(args.spec_file.read_text()), args.out_dir,
-        injection_fields(
-        args.inject_npz, args.inject_key, args.inject_layer,
-        args.inject_alpha, args.inject_alpha_frac,
-    ), perturb, None, args.label,
+    refuse_unless_complete(
+        [run_one(
+            json.loads(args.spec_file.read_text()), args.out_dir,
+            injection_fields(
+                args.inject_npz, args.inject_key, args.inject_layer,
+                args.inject_alpha, args.inject_alpha_frac,
+            ), perturb, None, args.label,
+        )],
+        allow_partial=args.allow_partial,
     )
 
 

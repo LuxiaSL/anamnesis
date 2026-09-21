@@ -23,6 +23,16 @@ resident-worker path is checked byte-for-byte against this one by
 ``run_persistent_replay.py --parity``, and the single-cell guard refuses a roster
 being walked one invocation at a time — the arrangement that quietly pays a model
 load per cell.
+
+**This command fails closed.** Every cell it walks reports what it was asked for
+and what landed, and a cell short of its request exits
+``anamnesis.shortfall.EXIT_SHORT`` naming the generations that are missing and the
+ones that raised. ``--allow-partial`` accepts the short cell and exits
+``anamnesis.shortfall.EXIT_SHORT_SANCTIONED`` instead, still non-zero; either way
+a receipt lands in the signature directory it describes. A resumed pass that
+computes three signatures because seventeen were already on disk has produced
+twenty and exits zero, and so does a worker that produced exactly its ``--gen-ids``
+share.
 """
 
 from __future__ import annotations
@@ -74,6 +84,12 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-pca", action="store_true", help="Skip the residual-PCA features")
     p.add_argument("--no-resume", action="store_true", help="Recompute existing signatures")
+    p.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Accept a cell short of its manifest; the receipt is written either way and "
+             "the status stays non-zero",
+    )
     p.add_argument("--label", default="w", help="Worker label carried into the logs")
     p.add_argument("--adapter-path", default=None, help="Adapter merged before hooks are placed")
     p.add_argument("--inject-npz", type=Path, default=None, help="Vector bank for a residual write")
@@ -111,6 +127,7 @@ def _replay_worker_command(args: argparse.Namespace, *, label: str, **overrides:
         ("--no-raw", args.no_raw),
         ("--no-pca", args.no_pca),
         ("--no-resume", args.no_resume),
+        ("--allow-partial", args.allow_partial),
         ("--inject-from-metadata", args.inject_from_metadata),
     ):
         if present:
@@ -134,7 +151,13 @@ def _replay_worker_command(args: argparse.Namespace, *, label: str, **overrides:
 
 
 def fan_out_replay(args: argparse.Namespace) -> None:
-    """Partition the work over devices and re-invoke this command per worker."""
+    """Partition the work over devices and re-invoke this command per worker.
+
+    A worker that came up short exits with a shortfall status rather than
+    crashing, and ``LaunchResult.raise_on_failure`` inherits that status, so a
+    fan-out whose workers were all short is short rather than generically failed.
+    """
+    from anamnesis.extraction.replay.cell import signature_on_disk
     from anamnesis.orchestration.gpu import enforce_single_cell_guard
     from anamnesis.orchestration.launch import Cell, LaunchPlan, launch, plan_multicell, write_worker_inputs
 
@@ -178,9 +201,9 @@ def fan_out_replay(args: argparse.Namespace) -> None:
         raise SystemExit("fanning out one cell needs --run-dir and --manifest, or --cells-json")
     ids = _manifest_ids({"manifest": args.manifest, "gen_ids": args.gen_ids})
     sig_dir = args.run_dir / args.sig_subdir
-    todo = ids if args.no_resume else [
-        g for g in ids if not (sig_dir / f"gen_{g:03d}.json").exists()
-    ]
+    # The same predicate a worker resumes on, so the fan-out cannot call a cell
+    # finished that a worker would have found work in.
+    todo = ids if args.no_resume else [g for g in ids if not signature_on_disk(sig_dir, g)]
     if not todo:
         print(f"all {len(ids)} generations already have signatures in {sig_dir}")
         return
@@ -218,7 +241,12 @@ def _manifest_ids(cell: dict[str, Any]) -> list[int]:
 
 
 def replay(args: argparse.Namespace) -> None:
-    """Load the model once and replay one cell, or a roster of them."""
+    """Load the model once and replay one cell, or a roster of them.
+
+    Each cell's accounting is collected and the verdict comes at the end, so an
+    invocation over a roster names every short cell rather than dying on the
+    first one and leaving the rest unattempted.
+    """
     from anamnesis.config import resolve_preset
     from anamnesis.extraction.calibration import load_calibration
     from anamnesis.extraction.interventions import (
@@ -226,7 +254,8 @@ def replay(args: argparse.Namespace) -> None:
         attach_perturbation,
         resolve_injection,
     )
-    from anamnesis.extraction.replay.cell import load_replay_model, replay_cell
+    from anamnesis.extraction.replay.cell import cell_shortfall, load_replay_model, replay_cell
+    from anamnesis.shortfall import Shortfall, refuse_unless_complete
 
     surface = load_replay_model(
         resolve_preset(args.model),
@@ -244,12 +273,12 @@ def replay(args: argparse.Namespace) -> None:
         from_metadata: bool,
         perturb: dict[str, Any] | None,
         label: str,
-    ) -> None:
+    ) -> Shortfall:
         injection = resolve_injection(run_dir, from_metadata=from_metadata, fields=fields)
         handle = attach_injection(surface.loaded, injection, label)
         perturb_handle = attach_perturbation(surface.loaded.model, perturb, label)
         try:
-            replay_cell(
+            result = replay_cell(
                 surface, calibration, run_dir, manifest,
                 gen_ids=gen_ids,
                 signatures_subdir=args.sig_subdir,
@@ -266,10 +295,11 @@ def replay(args: argparse.Namespace) -> None:
             for armed in (handle, perturb_handle):
                 if armed is not None:
                     armed.remove()
+        return cell_shortfall(result, manifest, command=MODULE, label=label)
 
     if args.jobs_file is not None:
         jobs = json.loads(args.jobs_file.read_text())
-        for index, job in enumerate(jobs):
+        shortfalls = [
             run_one(
                 Path(job["run_dir"]), Path(job["manifest"]), job.get("gen_ids"),
                 {k: v for k, v in job.items() if k.startswith("inject_")},
@@ -277,16 +307,22 @@ def replay(args: argparse.Namespace) -> None:
                 job.get("perturb"),
                 f"{args.label}c{index}",
             )
+            for index, job in enumerate(jobs)
+        ]
+        refuse_unless_complete(shortfalls, allow_partial=args.allow_partial)
         return
 
     if args.run_dir is None or args.manifest is None:
         raise SystemExit("replaying one cell needs --run-dir and --manifest (or --jobs-file)")
-    run_one(
-        args.run_dir, args.manifest, args.gen_ids, injection_fields(
-            args.inject_npz, args.inject_key, args.inject_layer,
-            args.inject_alpha, args.inject_alpha_frac,
-        ),
-        args.inject_from_metadata, None, args.label,
+    refuse_unless_complete(
+        [run_one(
+            args.run_dir, args.manifest, args.gen_ids, injection_fields(
+                args.inject_npz, args.inject_key, args.inject_layer,
+                args.inject_alpha, args.inject_alpha_frac,
+            ),
+            args.inject_from_metadata, None, args.label,
+        )],
+        allow_partial=args.allow_partial,
     )
 
 

@@ -332,7 +332,13 @@ def test_assembly_and_a_replay_partition_meet_on_the_same_manifest(
 def test_a_replay_fan_out_over_a_finished_cell_does_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Resume is the default, so re-running a finished cell spawns no workers."""
+    """Resume is the default, so re-running a finished cell spawns no workers.
+
+    A finished generation is both files a signature is written as, the vector and
+    its metadata: `anamnesis.extraction.replay.cell.signature_on_disk` is the one
+    predicate the fan-out and a worker's resume filter share, and a fixture that
+    laid down only the metadata would be asserting over half a signature.
+    """
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     run_dir = _bank_a_cell(tmp_path)
     run_gen_tokens.main([
@@ -342,6 +348,7 @@ def test_a_replay_fan_out_over_a_finished_cell_does_nothing(
     sig_dir.mkdir()
     for gen_id in range(5):
         (sig_dir / f"gen_{gen_id:03d}.json").write_text("{}")
+        (sig_dir / f"gen_{gen_id:03d}.npz").write_bytes(b"")
 
     run_replay.main([
         "--model", MODEL, "--model-path", "/models/x", "--calib-dir", str(tmp_path / "calib"),

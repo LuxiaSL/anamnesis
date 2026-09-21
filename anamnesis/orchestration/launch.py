@@ -58,6 +58,7 @@ from anamnesis.extraction.replay.manifest import (
     write_replay_manifest,
 )
 from anamnesis.orchestration.gpu import resolve_physical_gpus, worker_environment
+from anamnesis.shortfall import worker_shortfall_code
 
 logger = logging.getLogger(__name__)
 
@@ -188,14 +189,30 @@ class LaunchResult(BaseModel):
         over an incomplete corpus, which is the one failure mode a downstream
         contrast cannot detect.
 
+        A worker that came up short of its share exits with one of
+        :mod:`anamnesis.shortfall`'s statuses rather than crashing, and that
+        verdict is inherited rather than flattened: a fan-out all of whose
+        failures are shortfalls exits with the shortfall status, so a wrapper
+        reading the status of the fan-out learns the same thing it would learn
+        from the status of one worker.
+
         Raises
         ------
         SystemExit
-            When at least one worker exited non-zero.
+            When at least one worker exited non-zero. The status is the workers'
+            shared shortfall status when they all reported one, and otherwise a
+            message naming the logs to read.
         """
         if self.ok:
             return
         logs = ", ".join(str(self.log_paths[w]) for w in self.failed)
+        inherited = worker_shortfall_code(self.returncodes)
+        if inherited is not None:
+            logger.error(
+                f"{len(self.failed)} of {self.n_workers} workers came up short "
+                f"(rc={[self.returncodes[w] for w in self.failed]}); see {logs}"
+            )
+            raise SystemExit(inherited)
         raise SystemExit(
             f"{len(self.failed)} of {self.n_workers} workers failed "
             f"(rc={[self.returncodes[w] for w in self.failed]}); see {logs}"

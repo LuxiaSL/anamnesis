@@ -16,10 +16,12 @@ feature families still consume the preset's sampled layers, so the vector is
 unchanged and the extra layers are banked raw — depth stays available as an axis
 to measure later without re-running a pass.
 
-A generation that fails is counted and logged with its traceback, and the loop
-continues; a cell reports how many succeeded and how many did not. A caller that
-cannot accept a partial cell — the persistent worker, whose job must be retried
-rather than silently half-done — checks the count and fails on it.
+A generation that fails is logged with its traceback and named in the result, and
+the loop continues; a cell reports what it was asked for, what landed, and which
+ids raised. No caller may accept a partial cell silently: the persistent worker
+fails its job so the job stays queued for retry, and the command layer turns the
+same result into a :class:`anamnesis.shortfall.Shortfall` — see
+:func:`cell_shortfall` — and refuses with it.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, ModelConfi
 from anamnesis.extraction.interventions import InjectionSpec, check_injection_gating
 from anamnesis.extraction.replay_config import native_replay_configs
 from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
+from anamnesis.shortfall import Shortfall, ids_present
 
 F32 = NDArray[np.float32]
 
@@ -102,16 +105,89 @@ def load_replay_model(
 
 @dataclass
 class CellResult:
-    """How a cell went: what landed, and what did not."""
+    """How a cell went: what it was asked for, what landed, and what did not.
+
+    ``requested`` is the whole slice the call was asked for, including the
+    generations a resume skipped because their signature was already on disk —
+    the asked-for corpus, not the work this pass did, so a resumed cell is
+    complete rather than short. ``failed`` maps a generation id to the message
+    its exception carried, which is what lets a refusal name the id rather than
+    only count it.
+    """
 
     n_done: int
-    n_failed: int
+    failed: dict[int, str]
+    requested: tuple[int, ...]
     signatures_dir: Path
     seconds: float
 
     @property
+    def n_failed(self) -> int:
+        return len(self.failed)
+
+    @property
     def ok(self) -> bool:
         return self.n_failed == 0
+
+
+def signature_on_disk(signatures_dir: Path, gen_id: int) -> bool:
+    """True when both files a signature consists of are present for this id.
+
+    One definition, read by three callers that must agree: the resume filter in
+    :func:`replay_cell`, the fan-out's decision about what is left to do, and
+    :func:`cell_shortfall`'s reading of what the pass produced. A resume that
+    skipped on the metadata alone would step over a generation whose vector never
+    landed — a crash between the two writes
+    :func:`anamnesis.extraction.feature_pipeline.save_features` makes — and then
+    the accounting would report it missing every time while no re-run ever redid
+    it. Both files, everywhere.
+    """
+    return all(
+        (signatures_dir / f"gen_{gen_id:03d}{suffix}").exists()
+        for suffix in (".npz", ".json")
+    )
+
+
+def cell_shortfall(
+    result: CellResult,
+    manifest_path: Path,
+    *,
+    command: str,
+    label: str = "",
+) -> Shortfall:
+    """State a replayed cell as expected-versus-produced, for a command to refuse on.
+
+    Produced means a signature on disk for a requested id, so a resume that
+    computed three of twenty because seventeen were already there is complete. A
+    signature is both files :func:`anamnesis.extraction.feature_pipeline.save_features`
+    writes — the vector and its metadata — which is at least as strict as the
+    predicate ``resume`` skips on, so a resumed id counts as produced exactly
+    when the pass was right to skip it.
+
+    Generations the manifest flags as unreplayable are read off the manifest and
+    reported as exclusions: the manifest already accounts for them, and a count
+    that called them failures would refuse every pass over a flagged bank.
+    """
+    document = json.loads(Path(manifest_path).read_text())
+    excluded = {
+        str(row["gen_id"]): str(row.get("reason", "flagged by the manifest"))
+        for row in document.get("flagged", [])
+        if int(row["gen_id"]) not in set(result.requested)
+    }
+    requested = tuple(str(gen_id) for gen_id in result.requested)
+    return Shortfall(
+        command=command,
+        unit="generation",
+        target=result.signatures_dir,
+        requested=requested,
+        produced=ids_present(
+            requested,
+            lambda name: signature_on_disk(result.signatures_dir, int(name)),
+        ),
+        excluded=excluded,
+        failures={str(gen_id): reason for gen_id, reason in result.failed.items()},
+        label=label,
+    )
 
 
 def _source_metadata(run_dir: Path) -> dict[int, dict[str, Any]]:
@@ -163,6 +239,13 @@ def replay_cell(
     length — where the prompt ends is a property of the sequence — and after each
     forward the gating is checked against the number of generated tokens, unless
     the magnitude is zero.
+
+    Returns
+    -------
+    CellResult
+        The asked-for slice, the count that landed, and every id that raised with
+        the message its exception carried. A caller turns that into a refusal
+        through :func:`cell_shortfall`; nothing here decides the pass's fate.
     """
     from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data, save_features
     from anamnesis.extraction.raw_saver import save_raw_tensors_v3
@@ -181,15 +264,21 @@ def replay_cell(
 
     available = sorted(int(k) for k in entries)
     wanted = None if gen_ids is None else set(int(g) for g in gen_ids)
-    todo = [g for g in available if wanted is None or g in wanted]
-    if resume:
-        todo = [g for g in todo if not (sig_dir / f"gen_{g:03d}.json").exists()]
+    # The asked-for slice, kept whole: it is what the result reports as requested,
+    # and a resume narrows the work without narrowing the request.
+    requested = [g for g in available if wanted is None or g in wanted]
+    todo = (
+        [g for g in requested if not signature_on_disk(sig_dir, g)]
+        if resume
+        else list(requested)
+    )
     logger.info(
         f"[{label}] {len(todo)} generations to process -> {sig_dir} "
         f"({len(available)} in the manifest)"
     )
 
-    n_done = n_failed = 0
+    n_done = 0
+    failed: dict[int, str] = {}
     started = time.time()
     for index, gen_id in enumerate(todo):
         try:
@@ -240,10 +329,14 @@ def replay_cell(
                     f"{len(result.features)} features, {elapsed:.0f}s, ETA {eta:.0f}s"
                 )
         except Exception as exc:  # noqa: BLE001 — one generation's failure is not the cell's
-            n_failed += 1
+            failed[gen_id] = f"{type(exc).__name__}: {exc}"
             logger.error(f"[{label}] gen_{gen_id:03d} FAILED: {exc}", exc_info=True)
     seconds = time.time() - started
-    logger.info(f"[{label}] cell done: {n_done} ok, {n_failed} failed in {seconds:.0f}s")
+    logger.info(f"[{label}] cell done: {n_done} ok, {len(failed)} failed in {seconds:.0f}s")
     return CellResult(
-        n_done=n_done, n_failed=n_failed, signatures_dir=sig_dir, seconds=seconds
+        n_done=n_done,
+        failed=failed,
+        requested=tuple(requested),
+        signatures_dir=sig_dir,
+        seconds=seconds,
     )

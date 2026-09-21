@@ -15,6 +15,15 @@ Usage:
     # Or use programmatically:
     from anamnesis.extraction.feature_pipeline import recompute_all_features
     recompute_all_features(raw_dir, output_dir, config)
+
+A sample that raises is named in the `RecomputeCount` this returns and the pass
+continues, because one unreadable tensor file is not a reason to abandon the rest
+of the bank. The command above fails closed on that count: a pass that wrote four
+vectors for five raw tensors exits `anamnesis.shortfall.EXIT_SHORT` naming the
+missing generation, and `--allow-partial` exits
+`anamnesis.shortfall.EXIT_SHORT_SANCTIONED` instead — non-zero either way, with a
+receipt in the output directory. The alternative is a signature directory one
+vector short of the bank it was computed from, which nothing downstream can see.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ import os
 import pickle
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -43,8 +53,11 @@ from anamnesis.extraction.state_extractor import (
     RawGenerationData,
     extract_all_features,
 )
+from anamnesis.shortfall import Shortfall, ids_present
 
 logger = logging.getLogger(__name__)
+
+MODULE = "anamnesis.extraction.feature_pipeline"
 
 F32 = NDArray[np.float32]
 
@@ -470,6 +483,56 @@ def _process_one_sample(args: tuple) -> tuple[int, int | None, str | None]:
         return (gen_id, None, str(e))
 
 
+@dataclass
+class RecomputeCount:
+    """How a recompute went: the tensors asked for, and which of them raised.
+
+    ``requested`` is every generation the raw directory offered, which is the whole
+    set this pass was asked for — a recompute reads the bank it is pointed at
+    rather than a subset of it. ``failed`` maps a generation id to the message its
+    exception carried, which is what lets a refusal say *which* vector is absent
+    instead of leaving a reader to infer it from a count.
+    """
+
+    requested: tuple[int, ...]
+    n_done: int
+    failed: dict[int, str]
+    output_dir: Path
+    seconds: float
+
+    @property
+    def n_failed(self) -> int:
+        return len(self.failed)
+
+    @property
+    def ok(self) -> bool:
+        return self.n_failed == 0
+
+
+def recompute_shortfall(
+    result: RecomputeCount, *, command: str, label: str = ""
+) -> Shortfall:
+    """State a recompute as expected-versus-produced, for a command to refuse on.
+
+    Produced means a vector npz on disk for a requested generation, so a pass that
+    wrote four of five vectors reports four of five rather than reporting nothing
+    at all.
+    """
+    requested = tuple(str(gen_id) for gen_id in result.requested)
+    return Shortfall(
+        command=command,
+        unit="generation",
+        target=result.output_dir,
+        requested=requested,
+        produced=ids_present(
+            requested,
+            lambda name: (result.output_dir / f"gen_{int(name):03d}.npz").exists(),
+        ),
+        failures={str(gen_id): reason for gen_id, reason in result.failed.items()},
+        label=label,
+    )
+
+
 def _default_n_workers() -> int:
     """Sensible parallel default for recompute_all_features.
 
@@ -508,7 +571,7 @@ def recompute_all_features(
     family_config: FeaturePipelineConfig | None = None,
     n_workers: int | None = None,
     positional_means: F32 | None = None,
-) -> list[int]:
+) -> RecomputeCount:
     """Recompute features for all raw tensor files in a directory.
 
     This is the core iteration loop: change feature config → run this →
@@ -538,15 +601,26 @@ def recompute_all_features(
 
     Returns
     -------
-    List of generation IDs that were successfully processed.
+    RecomputeCount
+        The generations the raw directory offered, the count that landed, and each
+        id that raised with the reason. One sample's failure does not stop the
+        pass — the other four hundred vectors are worth having — so the caller
+        decides the pass's fate, through :func:`recompute_shortfall`.
     """
     if n_workers is None:
         n_workers = _default_n_workers()
 
+    t_start = time.perf_counter()
     gen_ids = list_raw_tensor_ids(raw_dir)
     if not gen_ids:
         logger.warning(f"No raw tensor files found in {raw_dir}")
-        return []
+        return RecomputeCount(
+            requested=(),
+            n_done=0,
+            failed={},
+            output_dir=output_dir,
+            seconds=time.perf_counter() - t_start,
+        )
 
     # Try to find metadata json files
     if metadata_dir is None:
@@ -554,7 +628,6 @@ def recompute_all_features(
         metadata_dir = raw_dir.parent / "signatures"
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    t_start = time.perf_counter()
 
     use_v2 = family_config is not None
     label = "v2" if use_v2 else "v1 (core blocks only)"
@@ -586,12 +659,14 @@ def recompute_all_features(
     ]
 
     processed: list[int] = []
+    failed: dict[int, str] = {}
 
     if n_workers <= 1:
-        # Sequential path (original behavior)
+        # Sequential path
         for i, args in enumerate(work_args):
             gen_id, n_features, error = _process_one_sample(args)
             if error:
+                failed[gen_id] = error
                 logger.error(f"Failed to process gen_{gen_id:03d}: {error}")
             else:
                 processed.append(gen_id)
@@ -621,10 +696,15 @@ def recompute_all_features(
                 try:
                     gen_id_result, n_features, error = future.result()
                     if error:
+                        failed[gen_id_result] = error
                         logger.error(f"Failed gen_{gen_id_result:03d}: {error}")
                     else:
                         processed.append(gen_id_result)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — a dead worker is one sample's loss
+                    # A worker that died in the pool never returned a row, so the
+                    # accounting has to be made here or the sample would vanish
+                    # from both the successes and the failures.
+                    failed[gen_id] = f"{type(e).__name__}: {e}"
                     logger.error(f"Worker exception for gen_{gen_id:03d}: {e}")
 
                 done_count += 1
@@ -643,7 +723,13 @@ def recompute_all_features(
         f"Done: {len(processed)}/{len(gen_ids)} processed in {elapsed:.1f}s"
     )
 
-    return processed
+    return RecomputeCount(
+        requested=tuple(gen_ids),
+        n_done=len(processed),
+        failed=failed,
+        output_dir=output_dir,
+        seconds=elapsed,
+    )
 
 
 def _load_pca_model(
@@ -757,6 +843,11 @@ def main() -> None:
              "pass 1 to force sequential). Each worker uses ~300 MB RAM for "
              "loading raw tensors; BLAS is pinned to 1 thread per worker.",
     )
+    parser.add_argument(
+        "--allow-partial", action="store_true",
+        help="Accept fewer vectors than there are raw tensors; the receipt is written "
+             "either way and the status stays non-zero",
+    )
 
     args = parser.parse_args()
 
@@ -787,7 +878,9 @@ def main() -> None:
         }
         family_config = FeaturePipelineConfig.from_preset(args.model, **family_kwargs)
 
-    recompute_all_features(
+    from anamnesis.shortfall import refuse_unless_complete
+
+    result = recompute_all_features(
         raw_dir=args.raw_dir,
         output_dir=args.output_dir,
         config=config,
@@ -796,6 +889,10 @@ def main() -> None:
         metadata_dir=args.metadata_dir,
         family_config=family_config,
         n_workers=args.workers,
+    )
+    refuse_unless_complete(
+        [recompute_shortfall(result, command=MODULE)],
+        allow_partial=args.allow_partial,
     )
 
 

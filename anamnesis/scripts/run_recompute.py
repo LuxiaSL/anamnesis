@@ -15,6 +15,14 @@ The arithmetic belongs to :mod:`anamnesis.extraction.feature_pipeline` and stays
 there. This command chooses a model's layer plan and a family set and hands them
 over; it computes nothing itself, which is what keeps a recomputed vector
 comparable with a banked one.
+
+**This command fails closed.** A recompute that wrote fewer vectors than the raw
+directory holds tensors exits ``anamnesis.shortfall.EXIT_SHORT``, naming each
+generation that is missing and the reason it raised; ``--allow-partial`` accepts
+the short pass and exits ``anamnesis.shortfall.EXIT_SHORT_SANCTIONED`` instead,
+still non-zero. Either way a receipt lands in the output directory. The refusal
+matters most here: a signature directory short of the bank it came from looks like
+any other, and every contrast over it silently drops the difference.
 """
 
 from __future__ import annotations
@@ -24,6 +32,8 @@ import logging
 from pathlib import Path
 
 from anamnesis.config import MODEL_PRESETS, ExtractionConfig, FeaturePipelineConfig, resolve_preset
+
+MODULE = "anamnesis.scripts.run_recompute"
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +57,12 @@ def parser() -> argparse.ArgumentParser:
         help="Signatures whose per-generation metadata the new ones inherit",
     )
     p.add_argument("--workers", type=int, default=48, help="Processes over the tensor files")
+    p.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Accept fewer vectors than there are raw tensors; the receipt is written "
+             "either way and the status stays non-zero",
+    )
     return p
 
 
@@ -83,7 +99,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parser().parse_args(argv)
 
     from anamnesis.extraction.calibration import load_positional_means
-    from anamnesis.extraction.feature_pipeline import _load_pca_model, recompute_all_features
+    from anamnesis.extraction.feature_pipeline import (
+        _load_pca_model,
+        recompute_all_features,
+        recompute_shortfall,
+    )
+    from anamnesis.shortfall import refuse_unless_complete
 
     extraction, families = configs(args.model)
     positional_means = load_positional_means(args.calib_dir)
@@ -98,7 +119,7 @@ def main(argv: list[str] | None = None) -> None:
         f"PCA: {pca_path.name} ({'per-layer' if isinstance(components, dict) else 'pooled'})"
     )
 
-    recompute_all_features(
+    result = recompute_all_features(
         raw_dir=args.run_dir / args.raw_subdir,
         output_dir=args.run_dir / args.out_subdir,
         config=extraction,
@@ -108,6 +129,10 @@ def main(argv: list[str] | None = None) -> None:
         family_config=families,
         n_workers=args.workers,
         positional_means=positional_means,
+    )
+    refuse_unless_complete(
+        [recompute_shortfall(result, command=MODULE)],
+        allow_partial=args.allow_partial,
     )
     logger.info(f"recompute done -> {args.run_dir / args.out_subdir}")
 
