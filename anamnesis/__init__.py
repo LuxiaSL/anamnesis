@@ -16,6 +16,9 @@ one is imported for what it holds:
 * :mod:`anamnesis.optimize` — black-box search in high dimensions, and the probe
   that says whether a budget is worth spending. Domain-free numerics: a caller
   with a fitness function and a dimension is its whole audience.
+* :mod:`anamnesis.shortfall` — expected-versus-produced accounting and the
+  refusal a command makes when it produced fewer units than it was asked for,
+  which is how a partial corpus stops being reported as a complete one.
 
 The package directory also ships :mod:`anamnesis.config`'s run registry and the
 prompt-set data, so a checkout is enough to describe a run without reaching for
