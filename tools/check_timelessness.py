@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """G3 — documentation timelessness: code says what is true now, not what changed.
 
-Three rules, all mechanical:
+The gate targets documentation, which here means comments and docstrings. Every
+other string literal is data — a fixture, a log line, an error message, a JSON
+payload — and data is free to carry a date or a phrase that prose may not; a
+checker that policed it would cry wolf on ported code. `documentation_lines`
+draws that boundary, and all three rules apply only inside it:
 
   1. **Marker comments.** A comment opening with one of the three deferral
      markers is a note to a future reader that the code does not keep.
   2. **Changelog phrasing.** Prose that narrates an edit rather than the state.
-     Matched only on documentation lines — comments and string literals — so an
-     identifier never trips it. The phrase set lives in `CHANGELOG_RULES`.
+     The phrase set lives in `CHANGELOG_RULES`.
   3. **Dated comments.** A date in a comment, unless the line also carries a
      citation marker from `timelessness_allowlist.txt`. A date on evidence
      stays; a date on an edit goes. The allowlist is versioned in the repo
@@ -152,12 +155,18 @@ def iter_python_files(root: Path) -> list[Path]:
     return out
 
 
-def documentation_lines(path: Path, source: str) -> set[int]:
-    """Line numbers occupied by a comment or a string literal.
+DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
-    Comments come from the tokenizer, string spans from the parse tree; an
-    f-string contributes the lines its whole expression covers, which is how a
-    phrase inside an interpolated message is still seen as prose.
+
+def documentation_lines(path: Path, source: str) -> set[int]:
+    """Line numbers that hold documentation: a comment, or a docstring.
+
+    Comments come from the tokenizer, docstrings from the parse tree — the
+    first-statement string of a module, class or function. Every other string
+    literal is data: a fixture, a log message, a JSON payload, an error string.
+    Data may legitimately contain a date or a phrase this checker forbids in
+    prose, so the rules stop at the documentation boundary the tokenizer and the
+    parse tree draw between them.
     """
     lines: set[int] = set()
     try:
@@ -172,14 +181,16 @@ def documentation_lines(path: Path, source: str) -> set[int]:
     except SyntaxError as exc:
         raise TimelessnessError(f"{path}: syntax error at line {exc.lineno} ({exc.msg})") from exc
     for node in ast.walk(tree):
-        is_string = isinstance(node, ast.Constant) and isinstance(node.value, str)
-        if not (is_string or isinstance(node, ast.JoinedStr)):
+        if not isinstance(node, DOCSTRING_OWNERS):
             continue
-        start = getattr(node, "lineno", None)
-        end = getattr(node, "end_lineno", None) or start
-        if start is None or end is None:
+        body = node.body
+        if not body or not isinstance(body[0], ast.Expr):
             continue
-        lines.update(range(start, end + 1))
+        value = body[0].value
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        end = value.end_lineno or value.lineno
+        lines.update(range(value.lineno, end + 1))
     return lines
 
 
@@ -201,24 +212,25 @@ def scan_source(path: Path, source: str, allowlist: Sequence[re.Pattern[str]]) -
     exempted: list[Violation] = []
     file_str = str(path)
     for number, raw in enumerate(source.splitlines(), start=1):
+        if number not in doc_lines:
+            continue
         text = raw.rstrip("\n")
         marker = MARKER_RE.search(text)
         if marker is not None:
             violations.append(
                 Violation(rule=MARKER_RULE, file=file_str, line=number, match=marker.group(0), text=text.strip())
             )
-        if number in doc_lines:
-            for rule, pattern in CHANGELOG_RULES:
-                found = pattern.search(text)
-                if found is not None:
-                    violations.append(
-                        Violation(rule=rule, file=file_str, line=number, match=found.group(0), text=text.strip())
-                    )
-            phrase = used_to_violation(text)
-            if phrase is not None:
+        for rule, pattern in CHANGELOG_RULES:
+            found = pattern.search(text)
+            if found is not None:
                 violations.append(
-                    Violation(rule=USED_TO_RULE, file=file_str, line=number, match=phrase, text=text.strip())
+                    Violation(rule=rule, file=file_str, line=number, match=found.group(0), text=text.strip())
                 )
+        phrase = used_to_violation(text)
+        if phrase is not None:
+            violations.append(
+                Violation(rule=USED_TO_RULE, file=file_str, line=number, match=phrase, text=text.strip())
+            )
         dated = DATE_COMMENT_RE.search(text)
         if dated is not None:
             record = Violation(

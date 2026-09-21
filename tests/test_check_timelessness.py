@@ -74,16 +74,87 @@ def test_changelog_phrases_in_comments_and_docstrings(tmp_path: Path) -> None:
     }
 
 
-def test_changelog_phrase_inside_an_f_string_is_flagged(tmp_path: Path) -> None:
+def test_string_data_is_not_documentation(tmp_path: Path) -> None:
+    """Fixtures, log lines and error messages carry text the rules do not police."""
     write(
         tmp_path / "pkg" / "mod.py",
-        """
-        def report(n: int) -> str:
+        '''
+        FIXTURE = "# TODO: tighten this\\nVALUE = 1\\n"
+        LOG = "we now cache the matrix; the split is no longer identical"
+        BANNER = "rewrote the loader 2026-07-18"
+        PAYLOAD = {"note": "the family used to host these", "when": "2026-07-18"}
+
+
+        def message(n: int) -> str:
             return f"{n} paths dropped - split no longer identical to the bank"
-        """,
+        ''',
     )
     report = build_report([tmp_path / "pkg"])
-    assert rules_hit(report) == {"changelog-no-longer"}
+    assert report.violations == []
+    assert report.exempted == []
+    assert report.passed is True
+
+
+def test_the_same_text_in_a_comment_or_docstring_is_flagged(tmp_path: Path) -> None:
+    """The counterpart of the string-data test: prose gets no exemption."""
+    write(
+        tmp_path / "pkg" / "mod.py",
+        '''
+        """We now cache the matrix once per generation."""
+
+        # TODO: tighten this
+        # rewrote the loader 2026-07-18
+        VALUE = 1
+
+
+        def f() -> None:
+            """The split is no longer identical to the banked one."""
+            return None
+        ''',
+    )
+    report = build_report([tmp_path / "pkg"])
+    assert rules_hit(report) == {
+        "changelog-we-now",
+        "changelog-no-longer",
+        "marker-comment",
+        "dated-comment",
+    }
+
+
+def test_only_the_first_statement_string_counts_as_a_docstring(tmp_path: Path) -> None:
+    write(
+        tmp_path / "pkg" / "mod.py",
+        '''
+        """The real docstring."""
+        VALUE = 1
+        """A loose string the parser does not treat as documentation: we now cache."""
+        ''',
+    )
+    report = build_report([tmp_path / "pkg"])
+    assert report.violations == []
+
+
+def test_class_and_method_docstrings_are_documentation(tmp_path: Path) -> None:
+    write(
+        tmp_path / "pkg" / "mod.py",
+        '''
+        class Thing:
+            """Holds what the loader previously rebuilt per generation."""
+
+            def run(self) -> None:
+                """No longer identical to the banked split."""
+                return None
+        ''',
+    )
+    report = build_report([tmp_path / "pkg"])
+    assert rules_hit(report) == {"changelog-prior-state", "changelog-no-longer"}
+
+
+def test_a_marker_inside_a_string_on_a_commented_line(tmp_path: Path) -> None:
+    """A line's comment is what the marker rule reads, and the line qualifies."""
+    write(tmp_path / "pkg" / "mod.py", 'VALUE = "plain"  # FIXME: tighten this\n')
+    report = build_report([tmp_path / "pkg"])
+    assert rules_hit(report) == {"marker-comment"}
 
 
 def test_changed_in_is_flagged(tmp_path: Path) -> None:

@@ -24,8 +24,8 @@ jobs:
       - name: G3 documentation timelessness
         run: |
           mkdir -p receipts
-          roots="tools"
-          if [ -d anamnesis ]; then roots="anamnesis tools"; fi
+          roots="tools tests"
+          if [ -d anamnesis ]; then roots="anamnesis $roots"; fi
           python tools/check_timelessness.py --root $roots --json receipts/g3.json
 
       - name: G4 import closure
