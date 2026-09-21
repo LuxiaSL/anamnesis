@@ -17,12 +17,14 @@ is the off-by-one that would corrupt every layer-indexed number downstream.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from anamnesis.config import ModelPreset, resolve_preset
+from anamnesis.config.paths import prompts_path
 from anamnesis.extraction.calibration import (
     PCA_MODEL_NAME,
     POSITION_COUNTS_KEY,
@@ -31,11 +33,12 @@ from anamnesis.extraction.calibration import (
     load_calibration,
 )
 from anamnesis.extraction.calibration_fit import (
-    CALIBRATION_PROMPTS,
+    CALIBRATION_PROMPT_SET,
     POSITION_COUNT_FLOOR,
     PROMPT_HEADROOM,
     CalibrationFitError,
     PromptStates,
+    calibration_prompts,
     fit_calibration,
     generation_settings,
     means_from_totals,
@@ -85,9 +88,28 @@ def test_a_calibration_asks_for_hidden_states_only() -> None:
     assert settings.output_attentions is False and settings.output_logits is False
 
 
-def test_the_prompt_set_is_the_fixed_ruler_it_claims_to_be() -> None:
-    assert len(CALIBRATION_PROMPTS) == 50
-    assert len(set(CALIBRATION_PROMPTS)) == 50
+def test_the_shipped_ruler_is_fifty_distinct_prompts() -> None:
+    """The count and the distinctness; the bytes are pinned in test_prompt_sets.py."""
+    prompts = calibration_prompts()
+    assert len(prompts) == 50 and len(set(prompts)) == 50
+    assert prompts_path(CALIBRATION_PROMPT_SET).is_file()
+
+
+def test_a_ruler_that_repeats_a_prompt_is_refused(tmp_path: Path) -> None:
+    """A prompt counted twice is weighted twice in every position's mean."""
+    path = tmp_path / CALIBRATION_PROMPT_SET
+    path.write_text(json.dumps({"prompts": ["one", "one"]}), encoding="utf-8")
+    with pytest.raises(CalibrationFitError, match="repeats a prompt"):
+        calibration_prompts(path)
+
+
+def test_an_empty_or_absent_ruler_is_refused(tmp_path: Path) -> None:
+    empty = tmp_path / "empty.json"
+    empty.write_text(json.dumps({"prompts": []}), encoding="utf-8")
+    with pytest.raises(CalibrationFitError, match="is empty"):
+        calibration_prompts(empty)
+    with pytest.raises(CalibrationFitError, match="no usable calibration prompt set"):
+        calibration_prompts(tmp_path / "absent.json")
 
 
 # ── the arithmetic ────────────────────────────────────────────────────────────

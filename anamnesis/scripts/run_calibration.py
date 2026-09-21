@@ -117,11 +117,11 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parser().parse_args(argv)
     preset, means_path, basis_path = resolve_paths(args)
-    prompts = (
-        calibration_fit.CALIBRATION_PROMPTS
-        if args.num_prompts is None
-        else calibration_fit.CALIBRATION_PROMPTS[: args.num_prompts]
-    )
+    try:
+        ruler = calibration_fit.calibration_prompts()
+    except calibration_fit.CalibrationFitError as exc:
+        raise SystemExit(str(exc)) from exc
+    prompts = ruler if args.num_prompts is None else ruler[: args.num_prompts]
     settings = calibration_fit.generation_settings(
         preset, max_new_tokens=args.max_new_tokens
     )

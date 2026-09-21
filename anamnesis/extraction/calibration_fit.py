@@ -29,10 +29,14 @@ that it happened, because a mean is a mean whatever produced it.
 An explicit argument overrides one, which is how a shortened trial pass asks for
 fewer tokens.
 
-The prompt set is fixed and lives here. It is not a corpus, it is a ruler: fifty
-prompts spread across science, history, craft, economics and mechanics, whose only
-job is to wash content out of the average so that what remains is position.
-Changing it changes every number downstream of it.
+The prompt set is data, in ``anamnesis/prompts/calibration_prompts.json`` beside
+the topic sets, read by :func:`calibration_prompts`. It is not a corpus, it is a
+ruler: prompts spread across science, history, craft, economics and mechanics, whose
+only job is to wash content out of the average so that what remains is position. Its
+exact contents are load-bearing — every banked positional mean was fitted over them
+and every corrected feature subtracts those means — so the file's bytes are pinned by
+digest in ``tests/test_prompt_sets.py`` rather than left to be edited under a fit
+that has already run.
 
 The fit takes an iterable of :class:`PromptStates` rather than a loaded model, so
 the arithmetic runs — and is tested — on a machine with no weights on it.
@@ -43,6 +47,7 @@ is where the model runtime is imported.
 from __future__ import annotations
 
 import gc
+import json
 import logging
 import pickle
 from dataclasses import dataclass
@@ -54,6 +59,7 @@ from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 
 from anamnesis.config import GenerationConfig, ModelPreset, resolve_preset
+from anamnesis.config.paths import prompts_path
 from anamnesis.extraction.calibration import (
     POSITION_COUNTS_KEY,
     POSITIONAL_MEANS_KEY,
@@ -76,58 +82,11 @@ PROMPT_HEADROOM = 200
 """Positions reserved above the token budget for the prompt itself, since a
 position is absolute and a generated token sits after its prompt."""
 
-CALIBRATION_PROMPTS: tuple[str, ...] = (
-    "Explain how photosynthesis works in plants.",
-    "What are the main causes of the French Revolution?",
-    "Describe the process of making traditional Japanese ramen.",
-    "How do electric vehicles compare to gasoline cars?",
-    "What is the significance of the Rosetta Stone?",
-    "Explain the concept of supply and demand in economics.",
-    "How does the human immune system fight infections?",
-    "Describe the architecture of Gothic cathedrals.",
-    "What are the principles of object-oriented programming?",
-    "How do tides work and what causes them?",
-    "Explain the theory of plate tectonics.",
-    "What makes a good leader?",
-    "How do birds navigate during migration?",
-    "Describe the water cycle and its importance.",
-    "What is quantum entanglement?",
-    "How do vaccines work?",
-    "Explain the causes and effects of inflation.",
-    "What are the different types of clouds?",
-    "How does a combustion engine work?",
-    "Describe the life cycle of a star.",
-    "What is machine learning and how does it differ from traditional programming?",
-    "How do earthquakes happen?",
-    "Explain the basics of music theory.",
-    "What are renewable energy sources?",
-    "How does the stock market work?",
-    "Describe the process of fermentation.",
-    "What are the effects of sleep deprivation?",
-    "How do submarines work?",
-    "Explain the concept of natural selection.",
-    "What is the significance of pi in mathematics?",
-    "How do 3D printers work?",
-    "Describe the history of the internet.",
-    "What causes aurora borealis?",
-    "How do computers store and retrieve data?",
-    "Explain the process of osmosis.",
-    "What are the major types of rocks?",
-    "How do airplanes fly?",
-    "Describe the structure of DNA.",
-    "What is cryptocurrency and how does blockchain work?",
-    "How do telescopes work?",
-    "Explain the greenhouse effect.",
-    "What are the stages of grief?",
-    "How does sonar work?",
-    "Describe the Silk Road and its importance.",
-    "What is dark matter?",
-    "How do coral reefs form?",
-    "Explain the basics of game theory.",
-    "What are the layers of the atmosphere?",
-    "How does a nuclear reactor work?",
-    "Describe the process of cheese making.",
-)
+CALIBRATION_PROMPT_SET = "calibration_prompts.json"
+"""The prompt-set file the ruler is read from, shipped in the package."""
+
+CALIBRATION_PROMPTS_KEY = "prompts"
+"""The list of prompt strings inside that file."""
 
 
 class CalibrationFitError(RuntimeError):
@@ -136,6 +95,39 @@ class CalibrationFitError(RuntimeError):
     Raised rather than returned: an empty basis is not a partial result, it is a
     file that would make every residual-PCA feature downstream of it zero.
     """
+
+
+def calibration_prompts(path: Path | None = None) -> tuple[str, ...]:
+    """The ruler, read from the prompt-set file the package ships.
+
+    The package copy is the answer, rather than
+    :func:`anamnesis.config.paths.resolve_prompts_path`'s fallback to a Phase-0 tree:
+    the ruler's bytes are pinned by digest, and a set that varied with which data
+    tree was mounted would move every positional mean fitted against it.
+
+    Raises
+    ------
+    CalibrationFitError
+        When the file is absent, unreadable, or holds a set that is empty or repeats
+        a prompt. A repeat is a refusal rather than a shrug because a prompt counted
+        twice is weighted twice in every position's mean.
+    """
+    source = prompts_path(CALIBRATION_PROMPT_SET) if path is None else Path(path)
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        prompts = tuple(str(text) for text in payload[CALIBRATION_PROMPTS_KEY])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise CalibrationFitError(
+            f"no usable calibration prompt set at {source}: {exc}"
+        ) from exc
+    if not prompts:
+        raise CalibrationFitError(f"the calibration prompt set at {source} is empty")
+    if len(set(prompts)) != len(prompts):
+        raise CalibrationFitError(
+            f"the calibration prompt set at {source} repeats a prompt, which would "
+            "weight it twice in every position's mean"
+        )
+    return prompts
 
 
 def generation_settings(
