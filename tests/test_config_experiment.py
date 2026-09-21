@@ -10,6 +10,9 @@ from pydantic import ValidationError
 
 from anamnesis.config import paths
 from anamnesis.config.experiment import (
+    PCA_MODEL_NAME,
+    PCA_MODEL_NAMES,
+    POSITIONAL_MEANS_NAME,
     CalibrationConfig,
     ExperimentConfig,
     ExtractionConfig,
@@ -18,6 +21,7 @@ from anamnesis.config.experiment import (
     GenerationSpec,
 )
 from anamnesis.config.models import EAGER_ATTENTION, UnknownPresetError, resolve_preset
+from anamnesis.extraction import calibration
 
 
 @pytest.fixture
@@ -153,9 +157,25 @@ def test_path_signature_sites_are_unique() -> None:
 def test_calibration_artifacts_sit_in_the_presets_directory(data_roots: Path) -> None:
     config = CalibrationConfig.from_preset("8b")
     directory = resolve_preset("8b").resolved_calibration_dir()
-    assert config.positional_means_path == directory / "positional_means.npz"
-    assert config.pca_model_path == directory / "pca_model.pkl"
+    assert config.positional_means_path == directory / POSITIONAL_MEANS_NAME
+    assert config.pca_model_path == directory / PCA_MODEL_NAME
     assert config.artifact_paths() == (config.positional_means_path, config.pca_model_path)
+
+
+def test_the_artifact_names_are_the_ones_the_reader_resolves() -> None:
+    """One home for the two filenames, read by the path builders and by the reader.
+
+    Configuration is the base layer of this package and imports nothing else in it,
+    so the names sit here and :mod:`anamnesis.extraction.calibration` reads them —
+    not the other way round, which would put numpy behind every import of a run's
+    description.
+    """
+    assert (POSITIONAL_MEANS_NAME, PCA_MODEL_NAME) == (
+        calibration.POSITIONAL_MEANS_NAME,
+        calibration.PCA_MODEL_NAME,
+    )
+    assert PCA_MODEL_NAMES is calibration.PCA_MODEL_NAMES
+    assert PCA_MODEL_NAMES[0] == PCA_MODEL_NAME
 
 
 def test_legacy_calibration_is_reached_through_the_hatch(data_roots: Path) -> None:
@@ -167,9 +187,8 @@ def test_legacy_calibration_is_reached_through_the_hatch(data_roots: Path) -> No
 
 def test_calibration_can_be_pointed_at_an_explicit_directory(tmp_path: Path) -> None:
     config = CalibrationConfig.in_directory(tmp_path)
-    assert config.pca_model_path == tmp_path / "pca_model.pkl"
-    assert config.num_calibration_prompts == 50
-    assert config.calibration_max_tokens == 512
+    assert config.pca_model_path == tmp_path / PCA_MODEL_NAME
+    assert config.positional_means_path == tmp_path / POSITIONAL_MEANS_NAME
 
 
 def test_experiment_config_assembles_one_agreeing_whole(data_roots: Path) -> None:
@@ -211,13 +230,13 @@ def test_experiment_overrides_reach_each_section(data_roots: Path, tmp_path: Pat
         model_overrides={"device_map": "cuda:0"},
         generation_overrides={"max_new_tokens": 100},
         extraction_overrides={"save_raw_tensors": True},
-        calibration_overrides={"num_calibration_prompts": 5},
+        calibration_overrides={"pca_model_path": tmp_path / "basis.pkl"},
         prompts_path=tmp_path / "prompts.json",
     )
     assert config.model.device_map == "cuda:0"
     assert config.generation.max_new_tokens == 100
     assert config.extraction.save_raw_tensors
-    assert config.calibration.num_calibration_prompts == 5
+    assert config.calibration.pca_model_path == tmp_path / "basis.pkl"
     assert config.prompts_path == tmp_path / "prompts.json"
 
 

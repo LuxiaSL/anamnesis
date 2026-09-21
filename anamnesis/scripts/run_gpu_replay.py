@@ -78,7 +78,7 @@ def main():
         )
     import torch
     from anamnesis.config import MODEL_PRESETS, ModelConfig
-    from anamnesis.extraction.calibration import load_calibration
+    from anamnesis.extraction.calibration import CALIBRATION_ARTIFACT_NAMES, load_calibration
     from anamnesis.extraction.model_loader import load_model
     from anamnesis.extraction.replay_config import native_replay_configs
     from anamnesis.extraction.fast.schema import resolve_gpu_schema
@@ -103,7 +103,7 @@ def main():
         raise ValueError("source metadata is missing selected generation IDs")
     files = {
         name: file_sha(args.calib_dir / name)
-        for name in ("positional_means.npz", "pca_model.pkl")
+        for name in CALIBRATION_ARTIFACT_NAMES
     }
     model_root = Path(args.model_path)
     weights = sorted(model_root.glob("*.safetensors"))

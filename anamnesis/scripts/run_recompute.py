@@ -47,7 +47,7 @@ def parser() -> argparse.ArgumentParser:
         "--pca-model",
         type=Path,
         default=None,
-        help="A basis other than the calibration directory's pca_model.pkl",
+        help="A basis other than the one the calibration directory is read by",
     )
     p.add_argument("--raw-subdir", default="raw_tensors_v3")
     p.add_argument("--out-subdir", default="signatures_v3_c5", help="Where the new vectors land")
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parser().parse_args(argv)
 
-    from anamnesis.extraction.calibration import load_positional_means
+    from anamnesis.extraction.calibration import PCA_MODEL_NAME, load_positional_means
     from anamnesis.extraction.feature_pipeline import (
         _load_pca_model,
         recompute_all_features,
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
             f"recompute needs the positional means the tensors were banked against; "
             f"none at {args.calib_dir}"
         )
-    pca_path = args.pca_model or (args.calib_dir / "pca_model.pkl")
+    pca_path = args.pca_model or (args.calib_dir / PCA_MODEL_NAME)
     components, mean = _load_pca_model(pca_path)
     logger.info(
         f"PCA: {pca_path.name} ({'per-layer' if isinstance(components, dict) else 'pooled'})"

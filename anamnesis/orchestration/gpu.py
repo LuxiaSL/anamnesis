@@ -73,27 +73,26 @@ def resolve_physical_gpus(requested: Iterable[str]) -> list[str]:
     """Map logical device slots onto the scheduler's assignment.
 
     With no ``CUDA_VISIBLE_DEVICES`` in the environment the slots are already
-    physical indices and are returned unchanged. With one, slot *i* resolves to
-    its *i*-th entry.
+    physical indices and come back as themselves. With one, slot *i* resolves to
+    its *i*-th entry. Either way the result is one device string per slot, in the
+    order asked for.
 
     Raises
     ------
     ValueError
-        When a slot is not an integer, or names a slot beyond the assignment —
-        which is a request for devices the job was not given, and is refused
-        rather than silently narrowed.
+        When a slot is not a non-negative integer, or names a slot beyond the
+        assignment — which is a request for devices the job was not given, and is
+        refused rather than silently narrowed. A slot is validated whether or not
+        the job carries an assignment, because the same typo is the same mistake on
+        bare metal and would otherwise be caught on one box and not another.
     """
-    wanted = [str(item) for item in requested]
+    wanted = [_slot_index(item) for item in requested]
     parent = os.environ.get(VISIBLE_DEVICES_ENV, "").strip()
     if not parent:
-        return wanted
+        return [str(index) for index in wanted]
     visible = [g.strip() for g in parent.split(",") if g.strip()]
     out: list[str] = []
-    for slot in wanted:
-        try:
-            index = int(slot)
-        except ValueError as exc:
-            raise ValueError(f"device slot {slot!r} is not an integer") from exc
+    for index in wanted:
         if index >= len(visible):
             raise ValueError(
                 f"device slot {index} exceeds the scheduler assignment "
@@ -103,6 +102,26 @@ def resolve_physical_gpus(requested: Iterable[str]) -> list[str]:
         out.append(visible[index])
     logger.info(f"device slots {wanted} -> physical {out} ({VISIBLE_DEVICES_ENV}={parent!r})")
     return out
+
+
+def _slot_index(slot: object) -> int:
+    """One ``--gpus`` entry as the index it has to be.
+
+    Negative indices are refused rather than allowed to mean what they mean in
+    Python: ``-1`` would select the last device of the assignment, so a fleet asked
+    for slots ``0,-1`` would put two workers on one device and report two.
+    """
+    text = str(slot).strip()
+    try:
+        index = int(text)
+    except ValueError as exc:
+        raise ValueError(f"device slot {text!r} is not an integer") from exc
+    if index < 0:
+        raise ValueError(
+            f"device slot {index} is negative; a slot is a position in the job's device "
+            f"assignment, counted from 0"
+        )
+    return index
 
 
 def worker_environment(

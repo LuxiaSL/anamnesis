@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, ClassVar, Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -371,45 +371,52 @@ class FeaturePipelineConfig(BaseModel):
         return cls(**fields)
 
 
+POSITIONAL_MEANS_NAME = "positional_means.npz"
+"""Per-position, per-layer means, under the ``positional_means`` array key."""
+
+PCA_MODEL_NAME = "pca_model.pkl"
+"""The fitted residual-stream PCA, and the only name a calibration pass writes."""
+
+PCA_MODEL_NAMES: tuple[str, ...] = (PCA_MODEL_NAME, "pca_model_corrected.pkl")
+"""Basis filenames a calibration directory may hold, in resolution order.
+
+The first is what a fit writes. The second is a name banked directories carry, and
+it resolves only when the first is absent: where both exist, the plain name is the
+artifact every consumer of the directory already reads, so moving a pass onto the
+other one would change features without changing any argument.
+
+These three names live here, in the layer both the path builders and
+:mod:`anamnesis.extraction.calibration` can read, because configuration is the base
+layer of this package and imports nothing else in it. The reader that resolves them
+against a directory is :func:`anamnesis.extraction.calibration.resolve_pca_model`.
+"""
+
+
 class CalibrationConfig(BaseModel):
     """The two artifacts positional decomposition reads.
 
     Positional means subtract the position-driven part of a state; the PCA model
-    projects what is left. Both belong to one model, so both paths are required.
+    projects what is left. Both belong to one model, so both paths are required,
+    and both are named by the constants above rather than by a literal here.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    num_calibration_prompts: int = Field(
-        default=50, gt=0, description="Prompts the calibration pass generates over"
-    )
-    calibration_max_tokens: int = Field(
-        default=512, gt=0, description="Token budget per calibration generation"
-    )
     positional_means_path: Path = Field(description="Per-position means to subtract")
     pca_model_path: Path = Field(description="Fitted residual-stream PCA")
-
-    POSITIONAL_MEANS_NAME: ClassVar[str] = "positional_means.npz"
-    PCA_MODEL_NAME: ClassVar[str] = "pca_model.pkl"
 
     @classmethod
     def from_preset(cls, preset: str | ModelPreset, **overrides: Any) -> CalibrationConfig:
         """The calibration artifacts of a preset, at the directory it declares."""
         row = resolve_preset(preset)
-        directory = row.resolved_calibration_dir()
-        fields: dict[str, Any] = {
-            "positional_means_path": directory / cls.POSITIONAL_MEANS_NAME,
-            "pca_model_path": directory / cls.PCA_MODEL_NAME,
-        }
-        fields.update(overrides)
-        return cls(**fields)
+        return cls.in_directory(row.resolved_calibration_dir(), **overrides)
 
     @classmethod
     def in_directory(cls, directory: Path, **overrides: Any) -> CalibrationConfig:
         """The calibration artifacts at an explicit directory."""
         fields: dict[str, Any] = {
-            "positional_means_path": directory / cls.POSITIONAL_MEANS_NAME,
-            "pca_model_path": directory / cls.PCA_MODEL_NAME,
+            "positional_means_path": directory / POSITIONAL_MEANS_NAME,
+            "pca_model_path": directory / PCA_MODEL_NAME,
         }
         fields.update(overrides)
         return cls(**fields)

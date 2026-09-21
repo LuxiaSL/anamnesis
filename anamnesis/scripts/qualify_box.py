@@ -60,7 +60,7 @@ from anamnesis.extraction.equivalence.path_floor import (
     first_position_coordinates,
 )
 from anamnesis.extraction.replay_config import native_replay_configs
-from anamnesis.extraction.calibration import load_calibration
+from anamnesis.extraction.calibration import CALIBRATION_ARTIFACT_NAMES, load_calibration
 from anamnesis.provenance import digest_of_shas, file_sha
 
 ANCHOR_LANE = "numpy-anchor"
@@ -135,7 +135,7 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
     calibration_sha256 = digest_of_shas(
         {
             name: file_sha(args.calib_dir / name)
-            for name in ("positional_means.npz", "pca_model.pkl")
+            for name in CALIBRATION_ARTIFACT_NAMES
         }
     )
 
