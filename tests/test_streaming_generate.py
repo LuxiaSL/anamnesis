@@ -13,24 +13,25 @@ every token including that first one; and the hooks registered on the model's mo
 fire during it exactly as they do under the framework's loop, since they are attached
 to modules rather than to a generation call.
 
-The calibration variant runs the same loop and accumulates into caller-owned arrays
-instead of returning states, which is what lets a calibration pass over hundreds of
-generations not hold them all.
+Generating is all the module does, and the last test here is what keeps it that way: a
+calibration pass belongs to `anamnesis.extraction.calibration_fit`, which takes every
+decode value from the preset row, and a second loop carrying decode defaults of its own
+is the defect that test names.
 
 No checkpoint: see `synthetic_runtime`.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
-import pytest
 import torch
 
+from anamnesis.extraction import calibration_fit, streaming_generate as streaming_module
 from anamnesis.extraction.streaming_generate import (
     StreamingOutput,
     _sample_top_p,
-    compute_pca_step_indices,
-    streaming_calibrate,
     streaming_generate,
 )
 from synthetic_runtime import HookPlan, TinyCausalLM, loaded_tiny_model
@@ -114,9 +115,9 @@ def test_attention_is_not_collected_unless_it_is_asked_for() -> None:
     assert out.attentions == []
 
 
-def test_the_prefill_states_are_collected_only_for_calibration() -> None:
-    """The prompt's own states are what positional means are built from, and they are
-    not part of a generation's feature vector, so they are collected on request."""
+def test_the_prompts_own_states_are_collected_only_on_request() -> None:
+    """No feature of a generation reads the prompt's own positions, and collecting them
+    is the one transfer that grows with the prompt, so they are off unless asked for."""
     model = TinyCausalLM(num_layers=3, hidden_size=16)
     without = greedy(model, max_new_tokens=3)
     assert without.prefill_hidden_states is None
@@ -176,92 +177,34 @@ def test_hooks_registered_on_the_modules_fire_through_the_loop() -> None:
     assert loaded.hook_state.pre_rope_keys[0][1].shape[-2] == 1
 
 
-# ── the calibration variant ───────────────────────────────────────────────────
+# ── one calibration pass, not two ─────────────────────────────────────────────
 
 
-def test_calibration_accumulates_the_prompt_span_and_each_generated_position() -> None:
-    """Positional means are per absolute position, so the prefill contributes to every
-    prompt position at once and each later step to exactly one."""
-    model = TinyCausalLM(num_layers=3, hidden_size=16)
-    n_layers_plus_embed = 4
-    max_positions = 32
-    pos_sums = np.zeros((n_layers_plus_embed, max_positions, 16), dtype=np.float64)
-    pos_counts = np.zeros((n_layers_plus_embed, max_positions), dtype=np.int64)
-    pca_samples: list[np.ndarray] = []
+CALIBRATION_ACCUMULATORS = ("pos_sums", "pos_counts", "pca_samples", "pca_layers")
+"""The caller-owned arrays a calibration pass accumulates into. Their names appearing
+in this module would mean a second pass had grown back inside the generation loop."""
 
-    torch.manual_seed(3)
-    generated = streaming_calibrate(
-        model, PROMPT, max_new_tokens=6, temperature=1.0, top_p=1e-6,
-        pos_sums=pos_sums, pos_counts=pos_counts, pca_samples=pca_samples,
-        pca_layers=[1, 2],
+
+def test_this_module_offers_no_calibration_pass() -> None:
+    """A calibration is fitted in one place, and this is not it.
+
+    `anamnesis.extraction.calibration_fit` takes every decode value from the preset
+    row the checkpoint is characterised at. A calibration loop here would carry
+    decode defaults of its own, and a pass that samples at a nucleus mass or a
+    temperature the checkpoint is never run at fits a mean and a basis over a
+    distribution no signature is computed over — invisible afterwards, because a mean
+    is a mean whatever produced it, and every corrected feature is computed through
+    both artifacts.
+    """
+    assert [name for name in vars(streaming_module) if "calibrat" in name.lower()] == [], (
+        "a calibration entry point has grown back in the generation module"
     )
-
-    assert generated == 6
-    # Every prompt position saw the prefill exactly once.
-    assert pos_counts[:, :PROMPT_LENGTH].tolist() == [[1] * PROMPT_LENGTH] * n_layers_plus_embed
-    # Generation step i lands at absolute position prompt_length + i - 1, so the five
-    # post-prefill steps cover positions 4..8.
-    assert pos_counts[0, PROMPT_LENGTH:PROMPT_LENGTH + 5].tolist() == [1] * 5
-    assert pos_counts[0, PROMPT_LENGTH + 5] == 0
-
-
-def test_calibration_leaves_positions_past_the_table_alone() -> None:
-    """A generation longer than the calibrated span must not write past the table."""
-    model = TinyCausalLM(num_layers=3, hidden_size=16)
-    pos_sums = np.zeros((4, PROMPT_LENGTH + 2, 16), dtype=np.float64)
-    pos_counts = np.zeros((4, PROMPT_LENGTH + 2), dtype=np.int64)
-    streaming_calibrate(
-        model, PROMPT, max_new_tokens=8, temperature=1.0, top_p=1e-6,
-        pos_sums=pos_sums, pos_counts=pos_counts, pca_samples=[], pca_layers=[],
+    source = Path(streaming_module.__file__).read_text(encoding="utf-8")
+    for accumulator in CALIBRATION_ACCUMULATORS:
+        assert accumulator not in source, (
+            f"{accumulator} is a calibration accumulator, and this module generates"
+        )
+    assert callable(calibration_fit.fit_calibration), "the one pass is calibration_fit"
+    assert callable(calibration_fit.generation_settings), (
+        "the pass reads its decode policy from the preset row rather than a default"
     )
-    assert pos_counts[0].tolist() == [1, 1, 1, 1, 1, 1]
-
-
-def test_calibration_samples_the_residual_stream_for_the_projection() -> None:
-    model = TinyCausalLM(num_layers=3, hidden_size=16)
-    pos_sums = np.zeros((4, 64, 16), dtype=np.float64)
-    pos_counts = np.zeros((4, 64), dtype=np.int64)
-    pca_samples: list[np.ndarray] = []
-    streaming_calibrate(
-        model, PROMPT, max_new_tokens=8, temperature=1.0, top_p=1e-6,
-        pos_sums=pos_sums, pos_counts=pos_counts, pca_samples=pca_samples,
-        pca_layers=[1, 2],
-    )
-    assert pca_samples, "no residual-stream samples were taken for the projection"
-    assert all(sample.shape == (16,) for sample in pca_samples)
-
-
-def test_calibration_takes_no_samples_when_no_layers_are_named() -> None:
-    model = TinyCausalLM(num_layers=3, hidden_size=16)
-    pca_samples: list[np.ndarray] = []
-    streaming_calibrate(
-        model, PROMPT, max_new_tokens=4, temperature=1.0, top_p=1e-6,
-        pos_sums=np.zeros((4, 64, 16)), pos_counts=np.zeros((4, 64), dtype=np.int64),
-        pca_samples=pca_samples, pca_layers=[],
-    )
-    assert pca_samples == []
-
-
-def test_calibration_stops_at_an_end_of_sequence_token() -> None:
-    model = TinyCausalLM(num_layers=3, hidden_size=16)
-    torch.manual_seed(3)
-    tokens = streaming_generate(
-        model, PROMPT, max_new_tokens=6, temperature=1.0, top_p=1e-6
-    ).generated_token_ids
-    generated = streaming_calibrate(
-        model, PROMPT, max_new_tokens=6, temperature=1.0, top_p=1e-6,
-        pos_sums=np.zeros((4, 64, 16)), pos_counts=np.zeros((4, 64), dtype=np.int64),
-        pca_samples=[], pca_layers=[], eos_token_ids=[tokens[1]],
-    )
-    assert generated == 2
-
-
-@pytest.mark.parametrize("budget", [4, 100, 512])
-def test_the_projection_sample_steps_span_the_generation(budget: int) -> None:
-    """Beginning, middle and end, from the token budget rather than the realized length,
-    because the length is not known when the loop starts."""
-    steps = compute_pca_step_indices(budget)
-    assert 1 in steps
-    assert budget in steps
-    assert all(step >= 1 for step in steps)
-    assert len(steps) <= 5

@@ -1,26 +1,30 @@
 """Streaming generation with efficient internal state collection.
 
-Replaces HuggingFace's model.generate() for our use case. HF's generate()
-with output_hidden_states=True creates ~17,000 individual tensor objects for
-a 512-token generation on a 32-layer model (steps × layers), adding ~10×
-overhead vs normal generation. This module runs the same computation but
-collects states efficiently via per-step GPU stacking and single transfers.
+:func:`streaming_generate` stands in for the framework's ``model.generate()``
+because of cost, not behaviour: asking that loop for hidden states builds one
+tensor object per step per layer — roughly 17,000 of them for a 512-token
+generation on a 32-layer model, and about ten times the overhead of a plain
+generation. This loop runs the same computation and hands back pre-stacked numpy
+arrays.
 
-Two interfaces:
-  streaming_generate() — returns pre-stacked numpy arrays for experiment use
-  streaming_calibrate() — accumulates positional means on-the-fly for calibration
+Where it differs from the framework's loop:
+  - One model() call per step (which is what generate() does internally)
+  - States are stacked on the device per step → one .cpu() transfer per step
+  - No tuple-of-tuples accumulation — numpy list appends
+  - k_proj hooks fire normally (they are registered on modules, not on a call)
 
-Both use the same core autoregressive loop. The key difference from HF generate:
-  - One model() call per step (same as generate internally)
-  - States are stacked on GPU per step → single .cpu() transfer per step
-  - No tuple-of-tuples accumulation — just numpy list appends
-  - k_proj hooks fire normally (registered on modules, not on generate)
+Generation is all this module does. The calibration pass — positional means and a
+residual basis — is :mod:`anamnesis.extraction.calibration_fit`, which generates at
+the decode policy its preset row states. A second loop here with decode defaults of
+its own would calibrate a checkpoint at a nucleus mass or a temperature it is never
+run at, and nothing downstream could see that it happened, because a mean is a mean
+whatever produced it.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -53,7 +57,7 @@ class StreamingOutput:
     logits: list[F32]                          # (N-1) × [vocab_size]
     generated_token_ids: list[int]             # N tokens (all generated, including first)
     prompt_length: int
-    prefill_hidden_states: F32 | None = None   # [n_layers+1, prompt_len, hidden_dim] (calibration only)
+    prefill_hidden_states: F32 | None = None   # [n_layers+1, prompt_len, hidden_dim], on request
 
 
 def _sample_top_p(
@@ -117,8 +121,9 @@ def streaming_generate(
         eos_token_ids: Token IDs that signal end of generation
         output_hidden_states: Collect per-step hidden states
         output_attentions: Collect per-step attention weights
-        collect_prefill_hidden_states: Also collect prefill hidden states
-            (needed for calibration positional means, not for experiment)
+        collect_prefill_hidden_states: Also collect the prompt's own states,
+            which are the one capture whose cost scales with the prompt rather
+            than with a step, and which no feature of a generation reads
 
     Returns:
         StreamingOutput with pre-stacked numpy arrays
@@ -226,138 +231,3 @@ def streaming_generate(
         prompt_length=prompt_length,
         prefill_hidden_states=prefill_hs,
     )
-
-
-def streaming_calibrate(
-    model: Any,
-    input_ids: torch.Tensor,
-    *,
-    max_new_tokens: int = 512,
-    temperature: float = 0.6,
-    top_p: float = 0.9,
-    eos_token_ids: list[int] | None = None,
-    pos_sums: np.ndarray,
-    pos_counts: np.ndarray,
-    pca_samples: list[np.ndarray],
-    pca_layers: list[int],
-    pca_sample_positions: list[int] | None = None,
-) -> int:
-    """Generate tokens and accumulate calibration data on-the-fly.
-
-    Instead of storing all hidden states and post-processing, this accumulates
-    positional means directly during generation. Much more memory-efficient
-    and avoids the massive tensor storage overhead.
-
-    Args:
-        model: HuggingFace causal LM
-        input_ids: [1, prompt_len] input token IDs
-        max_new_tokens: Maximum tokens to generate
-        temperature: Sampling temperature
-        top_p: Nucleus sampling threshold
-        eos_token_ids: EOS token IDs
-        pos_sums: [n_layers+1, max_positions, hidden_dim] float64 accumulator (MUTATED)
-        pos_counts: [n_layers+1, max_positions] int64 count (MUTATED)
-        pca_samples: List to append PCA sample arrays to (MUTATED)
-        pca_layers: Layer indices for PCA sampling
-        pca_sample_positions: Which generation steps to sample for PCA.
-            If None, will be computed from num_gen_steps after generation.
-
-    Returns:
-        Number of tokens generated
-    """
-    device = input_ids.device
-    eos_set = set(eos_token_ids or [])
-    prompt_length = input_ids.shape[1]
-    max_positions = pos_sums.shape[1]
-    n_layers_plus_embed = pos_sums.shape[0]
-
-    past_key_values = None
-    current_input = input_ids
-    num_generated = 0
-    generated_ids: list[int] = []
-
-    # Pre-compute PCA sample steps (estimates based on max_new_tokens)
-    pca_step_indices = compute_pca_step_indices(max_new_tokens) if pca_layers else set()
-
-    with torch.no_grad():
-        for step_idx in range(max_new_tokens):
-            outputs = model(
-                input_ids=current_input,
-                past_key_values=past_key_values,
-                use_cache=True,
-                output_hidden_states=True,
-                output_attentions=False,
-            )
-
-            # Sample next token
-            step_logits = outputs.logits[0, -1]
-            next_token_id = _sample_top_p(step_logits, temperature, top_p)
-            generated_ids.append(next_token_id)
-            num_generated += 1
-
-            if step_idx == 0:
-                # PREFILL: accumulate hidden states for all prompt positions
-                n_layers = min(len(outputs.hidden_states), n_layers_plus_embed)
-                # Stack all layers: [n_layers, prompt_len, hidden_dim]
-                prefill_stacked = torch.stack([
-                    outputs.hidden_states[l][0]
-                    for l in range(n_layers)
-                ]).cpu().float().numpy()
-
-                n_pos = min(prefill_stacked.shape[1], max_positions)
-                pos_sums[:n_layers, :n_pos] += prefill_stacked[:, :n_pos].astype(np.float64)
-                pos_counts[:n_layers, :n_pos] += 1
-                del prefill_stacked
-
-            else:
-                # GENERATION STEP: accumulate hidden state at this position
-                abs_pos = prompt_length + step_idx - 1
-                if abs_pos < max_positions:
-                    n_layers = min(len(outputs.hidden_states), n_layers_plus_embed)
-                    # Stack layers: [n_layers, hidden_dim]
-                    hs_stacked = torch.stack([
-                        outputs.hidden_states[l][0, -1]
-                        for l in range(n_layers)
-                    ]).cpu().float().numpy()
-
-                    pos_sums[:n_layers, abs_pos] += hs_stacked.astype(np.float64)
-                    pos_counts[:n_layers, abs_pos] += 1
-                    del hs_stacked
-
-                # Collect PCA samples at designated steps
-                if step_idx in pca_step_indices:
-                    for l_idx in pca_layers:
-                        if l_idx + 1 < len(outputs.hidden_states):
-                            h = outputs.hidden_states[l_idx + 1][0, -1].cpu().float().numpy()
-                            pca_samples.append(h)
-
-            # Advance state
-            past_key_values = outputs.past_key_values
-            current_input = torch.tensor(
-                [[next_token_id]], device=device, dtype=input_ids.dtype
-            )
-            del outputs
-
-            # Check EOS
-            if next_token_id in eos_set:
-                break
-
-    return num_generated
-
-
-def compute_pca_step_indices(max_new_tokens: int) -> set[int]:
-    """Pre-compute which generation steps to sample for PCA.
-
-    Uses the same heuristic as the original calibration: beginning, middle, end.
-    Since we don't know the actual generation length upfront, we estimate
-    based on max_new_tokens (most generations hit 400-512 tokens).
-    """
-    estimated_len = max_new_tokens
-    positions = {
-        1,
-        max(1, estimated_len // 4),
-        max(1, estimated_len // 2),
-        max(1, 3 * estimated_len // 4),
-        estimated_len,
-    }
-    return positions
