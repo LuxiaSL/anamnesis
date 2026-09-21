@@ -28,7 +28,14 @@ from anamnesis.analysis.battery.floors import (
     compute_faithfulness_floors,
     compute_stochastic_floors,
 )
-from anamnesis.analysis.battery.stats import ResultStamp, StampedValue, bh_fdr, permutation_pvalue
+from anamnesis.analysis.battery.stats import (
+    ResultStamp,
+    StampedValue,
+    bh_fdr,
+    bh_fdr_by_key,
+    permutation_pvalue,
+    permutation_resolution,
+)
 
 __all__ = [
     "ALPHA_GRID",
@@ -43,7 +50,9 @@ __all__ = [
     "ResultStamp",
     "StampedValue",
     "bh_fdr",
+    "bh_fdr_by_key",
     "compute_faithfulness_floors",
     "compute_stochastic_floors",
     "permutation_pvalue",
+    "permutation_resolution",
 ]

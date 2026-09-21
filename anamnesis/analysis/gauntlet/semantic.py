@@ -1,4 +1,12 @@
-"""Section 9: Semantic independence — compute vs text content signal."""
+"""Section 9: Semantic independence — compute vs text content signal.
+
+The Mantel p-value this section reports comes from ``permutation_pvalue`` in
+``anamnesis.analysis.battery.stats``, which is the package's one home for the
+statistic: a Mantel test is a permutation test, so it is read under the same
+convention as every other one here. The p carries the add-one correction,
+``(hits + 1) / (n + 1)``, so it is never zero and never finer than
+``1 / (n_permutations + 1)``.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +28,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import GroupKFold
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
+
+from anamnesis.analysis.battery.stats import permutation_pvalue
 
 from .signature_io import (
     ALL_FAMILIES,
@@ -172,7 +182,15 @@ def _classifier_bundle(
 def _mantel_test(
     D_compute: NDArray, D_semantic: NDArray, n_permutations: int = 1000, seed: int = 42,
 ) -> MantelResult:
-    """Mantel test between two distance matrices."""
+    """Mantel test between two distance matrices.
+
+    The two matrices' upper triangles are correlated, and the null is built by
+    permuting the rows and columns of ``D_semantic`` together — relabelling the
+    objects rather than the pair distances, which is what keeps the permuted matrix
+    a distance matrix over the same objects. The reported ``p_value`` is
+    ``permutation_pvalue``: add-one corrected, so it is never zero and never finer
+    than ``1 / (n_permutations + 1)``.
+    """
     n = D_compute.shape[0]
     idx = np.triu_indices(n, k=1)
     x = D_compute[idx]
@@ -189,11 +207,10 @@ def _mantel_test(
         null_rs.append(float(np.corrcoef(x, y_perm)[0, 1]))
 
     null_arr = np.array(null_rs)
-    p_value = float(np.mean(null_arr >= observed_r))
 
     return MantelResult(
         r=observed_r,
-        p_value=max(p_value, 1.0 / (n_permutations + 1)),
+        p_value=permutation_pvalue(observed_r, null_arr),
         null_mean=float(np.mean(null_arr)),
         null_std=float(np.std(null_arr)),
     )

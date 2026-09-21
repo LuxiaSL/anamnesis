@@ -111,8 +111,14 @@ def decomposed_magnitude(
         ma, mb = med_obs[cname]
         obs_ratio[cname] = (mb / ma) if (ma and ma > 1e-12) else float("inf")
 
-    # permutation null: shuffle labels WITHIN class, preserving group sizes
-    ge_shift = {c: 1 for c in cell_names}          # +1 correction included via init
+    # Permutation null: shuffle labels WITHIN class, preserving group sizes.
+    # Three statistics share one pass over the permutations, so the hits are counted
+    # as they arrive rather than held as three null arrays and handed to
+    # anamnesis.analysis.battery.stats.permutation_pvalue. The arithmetic is that
+    # function's: counters start at 1 and the denominator below is n_perm + 1, which
+    # is the add-one correction written out — the observation counts as one of its
+    # own permutations, and no p here can be zero.
+    ge_shift = {c: 1 for c in cell_names}
     ge_wider = {c: 1 for c in cell_names}
     ge_narrower = {c: 1 for c in cell_names}
     for _ in range(n_perm):

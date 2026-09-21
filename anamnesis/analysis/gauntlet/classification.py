@@ -1,12 +1,25 @@
 """Section 2: Classification — 5-way mode discrimination.
 
 2026-07-11 sweep: topic-grouped CV (StratifiedGroupKFold) is the DEFAULT for every
-number this module reports — the pre-v3 ungrouped StratifiedKFold allowed same-topic
-samples to straddle train/test (topic leakage in the headline rf_5way). The ungrouped
-path survives only as a fallback when no topic labels exist, and is labeled as legacy
-in the printed output. Permutation p-values are BH-FDR-corrected across the per-block
-family (q_value on PermutationTestResult). Pairwise-binary accuracies carry no p-values;
-read them against the fold-noise law (diffs <15pp at n=100 are noise — v3 delta memo).
+number this module reports — ungrouped StratifiedKFold lets same-topic samples
+straddle train/test, and every repetition of a topic shares its prompt, so a
+classifier can recognise the topic and be scored as if it had recognised the mode.
+That leak is what the grouped default exists to prevent. The ungrouped path survives
+only as a fallback when no topic labels exist, and is labeled as legacy in the
+printed output. Pairwise-binary accuracies carry no p-values, and the ten-pair grid
+is one family read off one set of signatures rather than ten findings: at n=100 the
+spread between folds is of the same order as the spread between pairs, so a gap
+under roughly 15pp is fold noise. ``cv_stability`` on the key blocks measures that
+spread directly — its ``std`` and 95% interval are what a pairwise gap should be
+weighed against.
+
+The two family-level statistics this module reports — the permutation p-value and
+the BH-FDR adjustment across the per-block permutation family (q_value on
+PermutationTestResult) — come from ``anamnesis.analysis.battery.stats``, which is
+their one home in the package. The convention that follows from that, and which
+every number here is read under: a permutation p-value carries the add-one
+correction, ``(hits + 1) / (n + 1)``, so it is never zero and never finer than
+``1 / (n_permutations + 1)``.
 """
 
 from __future__ import annotations
@@ -21,6 +34,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import GroupKFold, StratifiedGroupKFold, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
+
+from anamnesis.analysis.battery.stats import bh_fdr_by_key, permutation_pvalue
 
 from .signature_io import AnalysisData
 from .schemas import (
@@ -174,7 +189,15 @@ def _run_permutation_test(
     X: NDArray, y: NDArray, n_permutations: int = 500, seed: int = 42,
     groups: NDArray | None = None,
 ) -> PermutationTestResult:
-    """Permutation test for RF accuracy, parallelized."""
+    """Permutation test for RF accuracy, parallelized.
+
+    The labels are shuffled ``n_permutations`` times and the whole cross-validation
+    rerun on each shuffle, so the null carries the same fold structure and the same
+    grouping as the observed number. The reported ``p_value`` is
+    ``permutation_pvalue`` from ``anamnesis.analysis.battery.stats``: add-one
+    corrected, so it is never zero and never finer than
+    ``1 / (n_permutations + 1)``.
+    """
     observed = float(
         _run_rf_cv(X, y, seed=seed, return_confusion=False, groups=groups).accuracy
     )
@@ -193,11 +216,10 @@ def _run_permutation_test(
             null_accs.append(f.result())
 
     null_arr = np.array(null_accs)
-    p_value = float(np.mean(null_arr >= observed))
 
     return PermutationTestResult(
         observed_accuracy=observed,
-        p_value=max(p_value, 1.0 / (n_permutations + 1)),
+        p_value=permutation_pvalue(observed, null_arr),
         null_mean=float(np.mean(null_arr)),
         null_std=float(np.std(null_arr)),
         null_max=float(np.max(null_arr)),
@@ -276,20 +298,6 @@ def _run_linear_probe(
     )
 
 
-def _bh_fdr(pvals: dict[str, float]) -> dict[str, float]:
-    """Benjamini–Hochberg q-values across a family of tests (2026-07-11 sweep)."""
-    items = sorted(pvals.items(), key=lambda kv: kv[1])
-    m = len(items)
-    qs: dict[str, float] = {}
-    prev = 1.0
-    for rank_from_end, (key, p) in enumerate(reversed(items)):
-        i = m - rank_from_end
-        q = min(prev, p * m / i)
-        qs[key] = q
-        prev = q
-    return qs
-
-
 def run_classification(data: AnalysisData) -> ClassificationResult:
     """Run all classification analyses across feature groups."""
     y = data.modes
@@ -340,14 +348,16 @@ def run_classification(data: AnalysisData) -> ClassificationResult:
         )
         print(f"    Done: {block} RF={rf_5way.accuracy:.1%}")
 
-    # BH-FDR across the per-group permutation family (2026-07-11 sweep).
+    # BH-FDR across the per-block permutation family: the blocks are nested reads of
+    # one set of signatures, so their p-values are one family and not independent
+    # findings. A single block has nothing to correct against and keeps q_value None.
     perm_ps = {
         t: r.permutation_test.p_value
         for t, r in by_block.items()
         if r.permutation_test is not None
     }
     if len(perm_ps) > 1:
-        for t, q in _bh_fdr(perm_ps).items():
+        for t, q in bh_fdr_by_key(perm_ps).items():
             r = by_block[t]
             by_block[t] = r.model_copy(
                 update={

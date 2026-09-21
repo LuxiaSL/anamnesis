@@ -274,3 +274,15 @@ def test_cli_exits_two_when_the_check_cannot_run(
 def test_rule_names_are_distinct() -> None:
     names = list(rule_names())
     assert len(names) == len(set(names)) == 4
+
+
+def test_a_version_tagged_document_title_written_with_spaces_flags(tree: Path) -> None:
+    """A title a reader cannot open is flagged spaced as well as hyphenated."""
+    hits = check(tree, '"""Read the gap against the v3 delta memo."""\n')
+    assert any(rule == PRIVATE_RULE for rule, _ in hits), hits
+
+
+def test_prose_naming_no_document_does_not_flag(tree: Path) -> None:
+    """A bare noun names nothing openable, so it reads as prose rather than a title."""
+    hits = check(tree, '"""Kept because the note in the header explains the bound."""\n')
+    assert hits == []

@@ -51,6 +51,7 @@ from sklearn.model_selection import GroupKFold, StratifiedKFold
 
 from anamnesis.analysis.audit_lib import residualize_all
 from anamnesis.analysis.battery.floors import load_signature_matrix
+from anamnesis.analysis.battery.stats import permutation_pvalue
 
 logger = logging.getLogger(__name__)
 
@@ -246,8 +247,9 @@ def permutation_band(
 ) -> NullBand:
     """Shuffle the labels, keep the folds, and see what the folds alone can do.
 
-    The p-value is ``(hits + 1) / (nperm + 1)``, which cannot report zero: the
-    permutation resolution is a floor on what a permutation test can say.
+    The p-value is ``permutation_pvalue`` from ``anamnesis.analysis.battery.stats``:
+    ``(hits + 1) / (nperm + 1)``, which cannot report zero, because the permutation
+    resolution is a floor on what a permutation test can say.
     """
     rng = np.random.default_rng(seed)
     observed = grouped_accuracy(X, y, groups, columns)
@@ -260,7 +262,7 @@ def permutation_band(
         null_p50=round(float(np.percentile(null, 50)), 4),
         null_p95_bar=round(bar, 4),
         null_p975=round(float(np.percentile(null, 97.5)), 4),
-        perm_p=round(float((np.sum(null >= observed) + 1) / (nperm + 1)), 4),
+        perm_p=round(permutation_pvalue(observed, null), 4),
         nperm=nperm,
         clears_band=bool(observed > bar),
     )

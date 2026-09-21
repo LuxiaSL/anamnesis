@@ -105,6 +105,17 @@ DOC_KEYWORD_RE = re.compile(
     r"-[A-Za-z0-9][A-Za-z0-9._-]*"
 )
 MEMO_NAME_RE = re.compile(r"\b[A-Za-z0-9][A-Za-z0-9-]*-mem[o]\b")
+#: A document title written with spaces rather than hyphens, tagged by a version-ish
+#: token: ``v3 delta mem[o]``, ``a5 arm not[e]``. The version token is what separates a
+#: title from ordinary prose — a bare noun names no document a reader could open, while a
+#: version-tagged phrase does. A title carrying no such token reads exactly like prose to
+#: a regular expression, so it is a reviewer's catch rather than this check's; the module
+#: docstring says so. The examples above bracket a letter so this file does not match
+#: itself, the same guard the timelessness patterns use.
+SPACED_DOC_NAME_RE = re.compile(
+    r"\b[a-z]*\d[a-z0-9]*(?:\s+[a-z]+){0,2}\s+(?:mem[o]|not[e]|pla[n]|spe[c]|handof[f])\b",
+    re.IGNORECASE,
+)
 
 ALLOW_SECTION = "allow"
 DEFER_SECTION = "defer"
@@ -388,7 +399,13 @@ def scan_private(text: str, index: TreeIndex) -> list[tuple[str, str]]:
     for pattern in (RESEARCH_TREE_RE, HOME_RELATIVE_RE):
         for match in pattern.finditer(text):
             record(match.group(0))
-    for pattern in (ABSOLUTE_PATH_RE, DOC_NAME_RE, DOC_KEYWORD_RE, MEMO_NAME_RE):
+    for pattern in (
+        ABSOLUTE_PATH_RE,
+        DOC_NAME_RE,
+        DOC_KEYWORD_RE,
+        MEMO_NAME_RE,
+        SPACED_DOC_NAME_RE,
+    ):
         for match in pattern.finditer(text):
             if index.contains(strip_edges(match.group(0))):
                 continue

@@ -9,8 +9,15 @@ matter live — so they are tested directly:
   * the split helper is topic-grouped by default and falls back to plain
     stratified folds only when there are no groups, which is the leak-proof
     default the corpus of record was rerun under;
-  * the permutation p-value cannot report zero, because with N permutations the
-    smallest resolvable p is 1/(N+1);
+  * the grouped readouts actually refuse a topic-local rule. ``confounded`` is
+    built so that the only way to score is to recognise the topic, and the
+    grouped readouts are asserted near chance on it while the ungrouped fallback
+    scores high. A splitter that stopped honouring its groups would pass every
+    count-and-shape assertion in this file, so the confound is what pins it;
+  * the permutation p-value is the add-one statistic from
+    ``anamnesis.analysis.battery.stats``, recomputed here from a reproduced null
+    so that the two call sites are checked against each other rather than each
+    against itself;
   * BH-FDR over the per-block permutation family is monotone in p;
   * the pairwise and four-way readouts name their own conditions, so a missing
     mode is an error stub rather than a silently smaller comparison.
@@ -30,8 +37,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from anamnesis.analysis.battery.stats import (
+    bh_fdr_by_key,
+    permutation_pvalue,
+    permutation_resolution,
+)
 from anamnesis.analysis.gauntlet.classification import (
-    _bh_fdr,
     _make_splits,
     _run_4way_no_analogical,
     _run_cv_stability,
@@ -52,6 +63,12 @@ from anamnesis.analysis.gauntlet.schemas import (
 MODES = ["linear", "socratic", "contrastive", "dialectical", "analogical"]
 N_TOPICS = 6
 
+#: The confound fixture's shape: ten topics, five repetitions of each mode in each.
+CONFOUND_TOPICS = 10
+CONFOUND_REPS = 5
+#: Chance on five balanced modes.
+CHANCE = 1.0 / len(MODES)
+
 
 @pytest.fixture(scope="module")
 def separable() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -64,6 +81,40 @@ def separable() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             y.append(mode)
             topics.append(f"topic_{topic_idx}")
     return np.array(X), np.array(y), np.array(topics)
+
+
+@pytest.fixture(scope="module")
+def confounded() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A deliberate topic confound: readable inside a topic, worthless across topics.
+
+    Each row is a topic fingerprint (three dimensions, one well-separated vector
+    per topic) beside a mode value (two dimensions), and the mode → value rule is an
+    independent permutation in every topic. So a classifier that may train and test
+    inside one topic reads the fingerprint, applies that topic's rule and scores
+    near one; a classifier held out by topic meets a fingerprint it has never seen
+    and a rule it cannot have learned, and scores near chance.
+
+    The rows are shuffled, because plain ``StratifiedKFold`` assigns folds by
+    position within a class: topic-major rows would land whole topics in single
+    folds and hide the leak behind an accident of ordering.
+    """
+    rng = np.random.default_rng(20260921)
+    X, y, topics = [], [], []
+    for topic_idx in range(CONFOUND_TOPICS):
+        fingerprint = 5.0 * rng.standard_normal(3)
+        rule = rng.permutation(len(MODES)).astype(float)
+        for mode_idx, mode in enumerate(MODES):
+            for _ in range(CONFOUND_REPS):
+                X.append(
+                    np.concatenate([
+                        fingerprint + 0.1 * rng.standard_normal(3),
+                        np.full(2, rule[mode_idx]) + 0.1 * rng.standard_normal(2),
+                    ])
+                )
+                y.append(mode)
+                topics.append(f"topic_{topic_idx}")
+    order = rng.permutation(len(y))
+    return np.array(X)[order], np.array(y)[order], np.array(topics)[order]
 
 
 def groups_of(topics: np.ndarray) -> np.ndarray:
@@ -106,6 +157,28 @@ def test_rf_cv_reports_its_folds_and_its_confusion(separable) -> None:
     assert lean.confusion_matrix is None and lean.labels is None
 
 
+def test_rf_cv_scores_a_topic_local_rule_at_chance_when_grouped(confounded) -> None:
+    """The grouped path must not cash in a rule that holds only inside a topic.
+
+    Both halves are asserted: grouped near chance, and the ungrouped fallback high
+    on the same matrix. Without the second half the first could pass because the
+    features are weak; with it, the gap is the confound being refused.
+    """
+    X, y, topics = confounded
+    grouped = _run_rf_cv(X, y, groups=groups_of(topics))
+    ungrouped = _run_rf_cv(X, y, groups=None)
+
+    assert ungrouped.accuracy > 0.70, (
+        "the confound is real: allowed to train and test inside a topic, the forest "
+        "reads the fingerprint and applies that topic's rule"
+    )
+    assert grouped.accuracy < CHANCE + 0.20, (
+        "held out by topic, the topic-local rule is worth nothing and the forest "
+        f"sits near chance ({CHANCE:.0%}), not at the ungrouped "
+        f"{ungrouped.accuracy:.0%}"
+    )
+
+
 def test_topic_heldout_reports_the_group_count_it_actually_had(separable) -> None:
     X, y, topics = separable
     result = _run_topic_heldout(X, y, topics)
@@ -113,6 +186,30 @@ def test_topic_heldout_reports_the_group_count_it_actually_had(separable) -> Non
     assert result.n_groups == N_TOPICS
     assert len(result.fold_accuracies) == 5
     assert result.accuracy > 0.8
+
+
+def test_topic_heldout_holds_topics_out_and_lands_at_chance_on_a_confound(
+    confounded,
+) -> None:
+    """The topic-held-out readout scores a topic-local rule at chance.
+
+    This is the readout whose whole purpose is the leak, so the number is what has
+    to be pinned, not the group count: ``n_groups`` is counted off the topic labels
+    and reads the same whether or not the splitter honours them. Ungrouped folds on
+    the same matrix are asserted beside it, so the assertion is a gap rather than a
+    bare threshold.
+    """
+    X, y, topics = confounded
+    result = _run_topic_heldout(X, y, topics)
+    ungrouped = _run_rf_cv(X, y, groups=None)
+
+    assert result.n_groups == CONFOUND_TOPICS
+    assert len(result.fold_accuracies) == 5, "ten topics, five folds of two"
+    assert ungrouped.accuracy > 0.70, "the confound is readable within a topic"
+    assert result.accuracy < CHANCE + 0.20, (
+        f"holding the topic out leaves chance ({CHANCE:.0%}); scoring like the "
+        f"ungrouped {ungrouped.accuracy:.0%} would mean the folds share topics"
+    )
 
 
 def test_linear_probe_and_pairwise_name_their_conditions(separable) -> None:
@@ -149,10 +246,77 @@ def test_a_permutation_p_value_cannot_be_reported_as_zero(separable) -> None:
     X, y, topics = separable
     result = _run_permutation_test(X, y, n_permutations=12, groups=groups_of(topics))
     assert result.n_permutations == 12
-    assert result.p_value >= 1.0 / 13, "the resolution floor is 1/(N+1), not 0"
+    assert result.p_value >= permutation_resolution(12), "1/(N+1) is the resolution"
     assert result.observed_accuracy > result.null_mean
     assert result.null_p95 <= result.null_max
     assert result.q_value is None, "the q-value is attached by the section, not here"
+
+
+def test_the_section_reports_the_p_value_the_battery_computes(separable) -> None:
+    """The two call sites agree, checked by recomputing one against the other.
+
+    The null is reproducible — one seed drives the label shuffles and every forest
+    grown on them — so the section's number can be rebuilt here and handed to
+    ``permutation_pvalue`` directly. Agreement is the receipt that the section owns
+    no second copy of the arithmetic.
+    """
+    X, y, topics = separable
+    groups = groups_of(topics)
+    n_permutations = 8
+    result = _run_permutation_test(
+        X, y, n_permutations=n_permutations, groups=groups, seed=42,
+    )
+
+    rng = np.random.default_rng(42)
+    null = np.array([
+        _run_rf_cv(
+            X, rng.permutation(y), seed=42, return_confusion=False, groups=groups,
+        ).accuracy
+        for _ in range(n_permutations)
+    ])
+    assert result.null_mean == pytest.approx(float(np.mean(null))), (
+        "the reproduced null matches the one the section drew"
+    )
+    assert result.p_value == pytest.approx(
+        permutation_pvalue(result.observed_accuracy, null)
+    )
+
+
+def test_the_permutation_p_value_carries_the_add_one_correction() -> None:
+    """The reported p-value is (hits+1)/(N+1), not the hit rate with a floor under it.
+
+    Features that are pure noise put the observation in the middle of its own null,
+    so some permutations reach it and some do not — and that is the only case where
+    the two conventions differ. ``(hits + 1) / (N + 1)`` lands on the 1/(N+1)
+    lattice; ``hits / N`` clamped from below at 1/(N+1) lands off it and lower, by a
+    factor approaching two at one hit. The fixture is built here rather than shared,
+    so what this test depends on is the arithmetic and not any property of a
+    splitter.
+    """
+    rng = np.random.default_rng(2)
+    n_samples = 60
+    X = rng.standard_normal((n_samples, 4))
+    y = np.array([MODES[i % len(MODES)] for i in range(n_samples)])
+    groups = np.array([i % N_TOPICS for i in range(n_samples)])
+
+    n_permutations = 12
+    result = _run_permutation_test(
+        X, y, n_permutations=n_permutations, groups=groups, seed=42,
+    )
+
+    lattice_position = result.p_value * (n_permutations + 1)
+    assert lattice_position == pytest.approx(round(lattice_position), abs=1e-9), (
+        "an add-one p-value is a whole number of 1/(N+1) steps"
+    )
+    hits = round(lattice_position) - 1
+    assert 1 <= hits <= n_permutations - 1, (
+        "the observation sits inside its own null, which is the band the two "
+        f"conventions disagree over; got {hits} of {n_permutations}"
+    )
+    assert result.p_value == pytest.approx((hits + 1) / (n_permutations + 1))
+    assert result.p_value > max(hits / n_permutations, permutation_resolution(
+        n_permutations
+    )), "the hit rate with a floor under it is the anti-conservative reading"
 
 
 def test_cv_stability_summarises_the_seeds_it_ran(separable) -> None:
@@ -165,13 +329,15 @@ def test_cv_stability_summarises_the_seeds_it_ran(separable) -> None:
 
 
 def test_bh_fdr_is_monotone_and_never_exceeds_one() -> None:
-    q = _bh_fdr({"a": 0.001, "b": 0.02, "c": 0.5, "d": 0.9})
+    """The per-block family is corrected by the shared step-up, keyed by block."""
+    q = bh_fdr_by_key({"a": 0.001, "b": 0.02, "c": 0.5, "d": 0.9})
     assert set(q) == {"a", "b", "c", "d"}
     ordered = [q[k] for k in ["a", "b", "c", "d"]]
     assert ordered == sorted(ordered), "q-values follow the p-value order"
     assert all(0.0 <= v <= 1.0 for v in q.values())
     assert q["a"] >= 0.001, "adjustment can only raise a p-value"
-    assert _bh_fdr({"only": 0.04})["only"] == pytest.approx(0.04)
+    assert bh_fdr_by_key({"only": 0.04})["only"] == pytest.approx(0.04)
+    assert bh_fdr_by_key({}) == {}, "a family with no members corrects to nothing"
 
 
 def test_the_length_only_baseline_reports_when_it_has_no_lengths(separable) -> None:
