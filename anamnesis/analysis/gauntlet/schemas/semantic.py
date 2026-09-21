@@ -102,7 +102,12 @@ class ShuffleControlsResult(BaseModel):
 
 
 class PerBlockSemanticResult(BaseModel):
-    """Semantic orthogonality battery for a single block."""
+    """Semantic orthogonality battery for a single block.
+
+    ``error`` is a read-side field: banked files carry it for a block the battery
+    could not read, and the summary skips such a row. A pass now takes the battery
+    only over blocks the corpus holds, so nothing writes it.
+    """
 
     model_config = _FORBID
 

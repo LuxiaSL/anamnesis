@@ -1,10 +1,24 @@
-"""Shared utilities for the unified analysis runner."""
+"""Shared utilities for the unified analysis runner.
+
+Three of them are about what a section is allowed to assume. A section reads
+either the signature data or another section's result, and neither is guaranteed
+to hold what it wants: a corpus narrower than the suite that defined the unions
+has fewer blocks, and a section that could not run returns a stub carrying its
+reason instead of its numbers. :func:`absence_reason` answers the first,
+:func:`is_error_stub` and :func:`section_reading` the second, and every consumer
+goes through them — so an absence is stated rather than raised, wherever it
+comes from.
+
+:func:`topic_fold_partition` is here for a different reason: sections 5, 8 and 9
+all hold out whole topics, and two of them compare their numbers against each
+other. One partitioner means they cannot disagree about what a fold is.
+"""
 
 from __future__ import annotations
 
 import time
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any, Generator, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -101,6 +115,105 @@ def absence_reason(data: object, *blocks: str) -> str | None:
         f"{', '.join(missing)} not in this corpus "
         f"(blocks and unions present: {', '.join(present) or 'none'})"
     )
+
+
+def is_error_stub(value: object) -> bool:
+    """Whether a section's result is a stub carrying a reason rather than numbers.
+
+    A section that cannot run — an optional dependency absent, a block this corpus
+    does not hold — returns its own result model with only ``error`` set. That is a
+    legitimate value of the section, not a failure to produce one, so every reader
+    of a section's output has to test for it: the orchestrator to decide what a
+    resume may skip, :func:`section_reading` on behalf of a consuming section.
+    """
+    if isinstance(value, BaseModel):
+        return bool(getattr(value, "error", None))
+    if isinstance(value, dict):
+        return bool(value.get("error"))
+    return False
+
+
+def error_stub_reason(value: object) -> str:
+    """The reason a stub carries, however the stub is spelled."""
+    if isinstance(value, BaseModel):
+        return str(getattr(value, "error", "") or "no reason recorded")
+    if isinstance(value, dict):
+        return str(value.get("error") or "no reason recorded")
+    return "no reason recorded"
+
+
+_Section = TypeVar("_Section", bound=BaseModel)
+
+
+def section_reading(
+    all_results: dict[str, Any], key: str, model: type[_Section],
+) -> tuple[_Section | None, str | None]:
+    """One section's result for a section that consumes it, or the reason there is none.
+
+    A consuming section must treat the error stub as a possible value of its
+    upstream, exactly as a reading section must treat an absent block as a
+    possible state of its corpus. Three states come back as one shape: the typed
+    result and no reason; nothing and a reason naming the section that did not
+    run; nothing and a reason saying the section is absent or mis-shaped.
+
+    Returns
+    -------
+    (result, reason)
+        Exactly one of the two is None. A caller that can score without this
+        upstream carries the reason beside the reading it could not take; one that
+        cannot carries it as its own ``error``.
+    """
+    value = all_results.get(key)
+    if isinstance(value, model):
+        if is_error_stub(value):
+            return None, f"section '{key}' did not run: {error_stub_reason(value)}"
+        return value, None
+    if value is None:
+        return None, f"section '{key}' is not in these results"
+    if is_error_stub(value):
+        return None, f"section '{key}' did not run: {error_stub_reason(value)}"
+    return None, f"section '{key}' did not validate into {model.__name__}"
+
+
+class InsufficientTopicsError(ValueError):
+    """A fold count larger than the number of topics there are to hold out."""
+
+
+def topic_fold_partition(
+    n_topics: int, n_folds: int, rng: np.random.Generator,
+) -> list[NDArray[np.int64]]:
+    """A shuffled partition of ``n_topics`` indices into ``n_folds`` held-out groups.
+
+    Every index lands in exactly one group, and the group sizes differ by at most
+    one. That is the property the callers need and the reason this is a partition
+    rather than a stride: with a topic count that is not a multiple of the fold
+    count, taking ``n // n_folds`` indices per fold leaves the remainder in no
+    held-out group at all, and the variant is then computed over a subset of the
+    topics while reporting the whole.
+
+    ``rng`` is consumed for exactly one permutation of ``n_topics``, so a caller
+    that seeded it gets the same partition it always did; for a topic count that
+    divides the fold count evenly this returns the same groups, in the same order,
+    that consecutive equal slices of that permutation give.
+
+    Raises
+    ------
+    InsufficientTopicsError
+        When ``n_folds`` exceeds ``n_topics``, which cannot be a partition into
+        non-empty groups. The alternative is empty held-out groups, which reach
+        the classifier as a zero-row matrix and fail there instead of here.
+    """
+    if n_folds < 1:
+        raise InsufficientTopicsError(f"n_folds={n_folds}: a fold count is at least 1")
+    if n_folds > n_topics:
+        raise InsufficientTopicsError(
+            f"{n_folds} folds over {n_topics} topics: a held-out fold would be empty. "
+            f"Use at most {n_topics} folds on this corpus."
+        )
+    return [
+        group.astype(np.int64)
+        for group in np.array_split(rng.permutation(n_topics), n_folds)
+    ]
 
 
 def get_available_blocks(data: object) -> tuple[list[str], list[str]]:

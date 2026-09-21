@@ -50,12 +50,17 @@ class CCGPSummary(BaseModel):
 class CCGPResult(BaseModel):
     """Section 5 result: CCGP across classifier/seed/fold variants.
 
-    Both fields are optional so a section that could not run — the union it
-    reads is not in this corpus — round-trips as a stub carrying its reason.
+    ``variants`` and ``summary`` are optional so a section that could not run —
+    the union it reads is not in this corpus — round-trips as a stub carrying its
+    reason. ``refused_variants`` names the variants the corpus could not support
+    and why, keyed as ``variants`` is: a variant asking for more held-out folds
+    than there are topics is a refusal, not a measurement, and it is reported
+    beside the ones that ran rather than as a number that was never taken.
     """
 
     model_config = _FORBID
 
     variants: dict[str, CCGPVariant] | None = None
     summary: CCGPSummary | None = None
+    refused_variants: dict[str, str] | None = None
     error: str | None = None

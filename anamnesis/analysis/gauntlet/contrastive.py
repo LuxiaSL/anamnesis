@@ -36,7 +36,7 @@ from .signature_io import (
     FAMILY_BLOCKS,
     AnalysisData,
 )
-from .utils import absence_reason
+from .utils import absence_reason, topic_fold_partition
 from .schemas import (
     CapacitySweepEntry,
     ContrastiveAblationEntry,
@@ -48,6 +48,11 @@ from .schemas import (
     LinearBaselineEntry,
 )
 
+N_TOPIC_FOLDS = 5
+"""How many topics this section holds out at a time. One number, because the
+capacity sweep, the ablation grid and the linear baselines are compared with each
+other and a fold count that differed between them would make them incomparable."""
+
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 """Whether a trainer can run at all. Probed rather than imported: this section is
 optional, and a pass that reports its absence should not pay for loading torch to
@@ -55,16 +60,25 @@ find that out."""
 
 
 def build_topic_folds(
-    topics: NDArray, n_folds: int = 5, seed: int = 42,
+    topics: NDArray, n_folds: int = N_TOPIC_FOLDS, seed: int = 42,
 ) -> list[tuple[NDArray[np.bool_], NDArray[np.bool_]]]:
-    """Create topic-heldout train/test masks."""
+    """Row masks for ``n_folds`` topic-held-out splits, over every topic.
+
+    The topic partition is
+    :func:`anamnesis.analysis.gauntlet.utils.topic_fold_partition`, shared with
+    section 5, so two sections asked for the same seed hold out the same topics.
+    Every topic is held out exactly once: a split that took ``n // n_folds``
+    topics per fold would leave the remainder in no test mask at all.
+
+    Raises
+    ------
+    InsufficientTopicsError
+        When more folds are asked for than there are topics.
+    """
     unique_topics = sorted(set(topics))
     rng = np.random.default_rng(seed)
-    perm = rng.permutation(len(unique_topics))
-    fold_size = len(unique_topics) // n_folds
     folds = []
-    for i in range(n_folds):
-        test_topic_idx = perm[i * fold_size : (i + 1) * fold_size]
+    for test_topic_idx in topic_fold_partition(len(unique_topics), n_folds, rng):
         test_topics = {unique_topics[j] for j in test_topic_idx}
         test_mask = np.array([t in test_topics for t in topics])
         train_mask = ~test_mask
@@ -81,6 +95,17 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
     if absent is not None:
         return ContrastiveResult(error=f"contrastive projection reads {absent}")
 
+    # Every reading below holds out topics, so a corpus with fewer topics than
+    # folds is stated here rather than refused from inside the partitioner.
+    n_topics = len(set(data.topics))
+    if n_topics < N_TOPIC_FOLDS:
+        return ContrastiveResult(
+            error=(
+                f"contrastive projection holds out {N_TOPIC_FOLDS} topic folds and "
+                f"this corpus has {n_topics} topics"
+            ),
+        )
+
     block_results: dict[str, ContrastiveBlockResult] = {}
 
     for block_name in [ATTENTION_AND_CACHE, ALL_CORE]:
@@ -88,7 +113,7 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
         X = data.get_block(block_name)
         X_scaled = StandardScaler().fit_transform(X)
 
-        folds = build_topic_folds(data.topics, n_folds=5, seed=42)
+        folds = build_topic_folds(data.topics, n_folds=N_TOPIC_FOLDS, seed=42)
 
         fold_accs: list[float] = []
         fold_sils: list[float] = []
@@ -123,7 +148,7 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
     # Capacity sweep (the attention-and-cache union only)
     print("    Capacity sweep...")
     X_key = StandardScaler().fit_transform(data.get_block(ATTENTION_AND_CACHE))
-    folds = build_topic_folds(data.topics, n_folds=5, seed=42)
+    folds = build_topic_folds(data.topics, n_folds=N_TOPIC_FOLDS, seed=42)
     capacities = [64, 128, 256, 512]
     capacity_results: dict[str, CapacitySweepEntry] = {}
 
@@ -177,7 +202,7 @@ def _run_linear_baselines(data: AnalysisData) -> dict[str, LinearBaselineEntry]:
 
     X = data.get_block(ATTENTION_AND_CACHE)
     X_scaled = StandardScaler().fit_transform(X)
-    folds = build_topic_folds(data.topics, n_folds=5, seed=42)
+    folds = build_topic_folds(data.topics, n_folds=N_TOPIC_FOLDS, seed=42)
     n_components = min(len(data.unique_modes) - 1, X.shape[1])
 
     results: dict[str, LinearBaselineEntry] = {}
@@ -228,7 +253,7 @@ def _eval_contrastive_block(
 ) -> ContrastiveAblationEntry:
     """Run contrastive MLP + kNN evaluation on a single feature set."""
     X_scaled = StandardScaler().fit_transform(X)
-    folds = build_topic_folds(topics, n_folds=5, seed=seed)
+    folds = build_topic_folds(topics, n_folds=N_TOPIC_FOLDS, seed=seed)
 
     fold_accs: list[float] = []
     fold_sils: list[float] = []
