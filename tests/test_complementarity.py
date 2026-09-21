@@ -46,6 +46,14 @@ from anamnesis.analysis.complementarity import (
     pair_difficulty,
     pair_name,
 )
+from anamnesis.analysis.gauntlet.signature_io import (
+    ALL_CORE,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+)
 
 LABELS = ["analogical", "contrastive", "dialectical", "linear", "socratic"]
 
@@ -111,7 +119,7 @@ def write_results(
             {"name": name, "importance": importance} for name, importance in top_features
         ]
         document["legacy_bin_readout"] = {
-            "per_block_accuracy": {"T2": 0.5},
+            "per_block_accuracy": {ATTENTION_AND_DELTAS: 0.5},
             "pairwise_block_combinations": {},
             "leave_one_block_out": {},
             "block_ranking": [],
@@ -151,7 +159,7 @@ def test_an_absent_or_broken_run_is_named_and_skipped(tmp_path: Path) -> None:
     (broken / "results.json").write_text("{not json")
     assert load_results(broken / "results.json") is None
 
-    write_results(tmp_path, "8b_v2", by_block={"T1": block_block(0.4)})
+    write_results(tmp_path, "8b_v2", by_block={NORMS_AND_OUTPUT_STATS: block_block(0.4)})
     loaded = load_report_inputs(tmp_path)
     assert set(loaded) == {"8b_v2"}, "only the run that exists is loaded"
 
@@ -160,7 +168,7 @@ def test_a_section_that_does_not_validate_leaves_the_file_readable(tmp_path: Pat
     directory = tmp_path / "8b_v2"
     directory.mkdir()
     (directory / "results.json").write_text(
-        json.dumps({"n_samples": 40, "classification": {"by_block": {"T1": {"nonsense": 1}}}})
+        json.dumps({"n_samples": 40, "classification": {"by_block": {NORMS_AND_OUTPUT_STATS: {"nonsense": 1}}}})
     )
     results = load_results(directory / "results.json")
     assert results is not None
@@ -174,18 +182,18 @@ def test_a_section_that_does_not_validate_leaves_the_file_readable(tmp_path: Pat
 
 
 def test_consistency_flags_the_blocks_that_moved(tmp_path: Path) -> None:
-    write_results(tmp_path, "8b_baseline", by_block={"T1": block_block(0.40), "T2": block_block(0.60)})
+    write_results(tmp_path, "8b_baseline", by_block={NORMS_AND_OUTPUT_STATS: block_block(0.40), ATTENTION_AND_DELTAS: block_block(0.60)})
     write_results(
-        tmp_path, "8b_v2_5way", by_block={"T1": block_block(0.41), "T2": block_block(0.80)}
+        tmp_path, "8b_v2_5way", by_block={NORMS_AND_OUTPUT_STATS: block_block(0.41), ATTENTION_AND_DELTAS: block_block(0.80)}
     )
     results = load_report_inputs(tmp_path)
     comparisons = analyze_consistency(results)["comparisons"]
     assert len(comparisons) == 1, "the 3B pair is absent and is skipped"
     blocks = comparisons[0]["blocks"]
-    assert blocks["T1"]["divergent"] is False
-    assert blocks["T2"]["divergent"] is True
-    assert blocks["T2"]["diff"] == pytest.approx(0.20)
-    assert abs(blocks["T1"]["diff"]) < DIVERGENCE_BAR
+    assert blocks[NORMS_AND_OUTPUT_STATS]["divergent"] is False
+    assert blocks[ATTENTION_AND_DELTAS]["divergent"] is True
+    assert blocks[ATTENTION_AND_DELTAS]["diff"] == pytest.approx(0.20)
+    assert abs(blocks[NORMS_AND_OUTPUT_STATS]["diff"]) < DIVERGENCE_BAR
 
 
 def test_resolution_keeps_the_difficulty_buckets_apart(tmp_path: Path) -> None:
@@ -197,8 +205,8 @@ def test_resolution_keeps_the_difficulty_buckets_apart(tmp_path: Path) -> None:
             ("associative", "compressed"): 0.99,
         }
     )
-    write_results(tmp_path, "8b_v2", by_block={"T2": block_block(0.5, pairwise=pairwise)})
-    resolution = analyze_resolution(load_report_inputs(tmp_path))["8b_v2"]["T2"]
+    write_results(tmp_path, "8b_v2", by_block={ATTENTION_AND_DELTAS: block_block(0.5, pairwise=pairwise)})
+    resolution = analyze_resolution(load_report_inputs(tmp_path))["8b_v2"][ATTENTION_AND_DELTAS]
     assert resolution["hard"]["n_pairs"] == 2
     assert resolution["hard"]["mean"] == pytest.approx(0.65)
     assert resolution["hard"]["min"] == pytest.approx(0.60)
@@ -218,16 +226,16 @@ def test_the_complementarity_matrix_drops_a_block_with_no_profile(tmp_path: Path
         tmp_path,
         "8b_v2",
         by_block={
-            "T2": block_block(0.5, pairwise=hard_pairs(hard)),
-            "T2.5": block_block(0.5, pairwise=hard_pairs(inverse)),
-            "T3": block_block(0.5, pairwise=hard_pairs(flat)),
+            ATTENTION_AND_DELTAS: block_block(0.5, pairwise=hard_pairs(hard)),
+            CACHE_AND_KEYS: block_block(0.5, pairwise=hard_pairs(inverse)),
+            RESIDUAL_PCA: block_block(0.5, pairwise=hard_pairs(flat)),
         },
     )
     out = analyze_complementarity(load_report_inputs(tmp_path))["8b_v2"]
     assert len(out["hard_pairs"]) == 3
     pairs = out["pairs_by_correlation"]
     assert [row["r"] for row in pairs] == sorted(row["r"] for row in pairs)
-    assert {row["block_a"] for row in pairs} | {row["block_b"] for row in pairs} == {"T2", "T2.5"}, (
+    assert {row["block_a"] for row in pairs} | {row["block_b"] for row in pairs} == {ATTENTION_AND_DELTAS, CACHE_AND_KEYS}, (
         "the block at ceiling on every hard pair has no profile to correlate"
     )
     assert pairs[0]["r"] < COMPLEMENTARY_BAR and pairs[0]["reading"] == "COMPLEMENTARY"
@@ -236,10 +244,10 @@ def test_the_complementarity_matrix_drops_a_block_with_no_profile(tmp_path: Path
 def test_feature_names_are_grouped_by_family_and_sub_family() -> None:
     assert feature_family("cp_L16_t3_d07") == "contrastive_projection"
     assert feature_family("af_L8_recency_bias") == "attention_flow"
-    assert feature_family("key_drift_L16") == "T2.5"
-    assert feature_family("attn_entropy_L8") == "T2"
-    assert feature_family("pca_resid_L16") == "T3"
-    assert feature_family("logit_entropy") == "T1"
+    assert feature_family("key_drift_L16") == CACHE_AND_KEYS
+    assert feature_family("attn_entropy_L8") == ATTENTION_AND_DELTAS
+    assert feature_family("pca_resid_L16") == RESIDUAL_PCA
+    assert feature_family("logit_entropy") == NORMS_AND_OUTPUT_STATS
     assert feature_family("mystery").startswith("unknown(")
 
     assert feature_subfamily("cp_L16_t3_d07") == "cp_t3"
@@ -255,7 +263,7 @@ def test_importance_is_summed_per_family_and_per_sub_family(tmp_path: Path) -> N
     write_results(
         tmp_path,
         "8b_v2",
-        by_block={"T2": block_block(0.5)},
+        by_block={ATTENTION_AND_DELTAS: block_block(0.5)},
         top_features=[
             ("af_L8_recency_bias_mean", 0.10),
             ("af_L16_recency_bias_mean", 0.05),
@@ -280,10 +288,10 @@ def test_the_hardest_confusion_is_read_off_the_matrix_that_carries_its_labels(
         [0, 0, 0, 5, 5],
         [0, 0, 0, 5, 5],
     ]
-    write_results(tmp_path, "8b_v2", by_block={"T2": block_block(0.8, confusion=confusion)})
+    write_results(tmp_path, "8b_v2", by_block={ATTENTION_AND_DELTAS: block_block(0.8, confusion=confusion)})
     out = analyze_confusion(load_report_inputs(tmp_path))["8b_v2"]
-    assert out["blocks_analyzed"] == ["T2"]
-    hardest = out["hardest_confusion"]["T2"]
+    assert out["blocks_analyzed"] == [ATTENTION_AND_DELTAS]
+    hardest = out["hardest_confusion"][ATTENTION_AND_DELTAS]
     assert hardest["pair"] == pair_name("linear", "socratic"), (
         "the two classes the matrix recovers half the time are the hardest pair"
     )
@@ -291,7 +299,7 @@ def test_the_hardest_confusion_is_read_off_the_matrix_that_carries_its_labels(
 
 
 def test_a_confusion_matrix_without_labels_is_skipped(tmp_path: Path) -> None:
-    write_results(tmp_path, "8b_v2", by_block={"T2": block_block(0.8)})
+    write_results(tmp_path, "8b_v2", by_block={ATTENTION_AND_DELTAS: block_block(0.8)})
     out = analyze_confusion(load_report_inputs(tmp_path))["8b_v2"]
     assert out["blocks_analyzed"] == []
 
@@ -302,21 +310,21 @@ def test_the_ordering_check_reports_the_three_accuracies_and_its_verdict(tmp_pat
         "8b_v2",
         n_samples=100,
         by_block={
-            "T1": block_block(0.30),
-            "T2": block_block(0.50),
-            "T2.5": block_block(0.62),
-            "T3": block_block(0.40),
+            NORMS_AND_OUTPUT_STATS: block_block(0.30),
+            ATTENTION_AND_DELTAS: block_block(0.50),
+            CACHE_AND_KEYS: block_block(0.62),
+            RESIDUAL_PCA: block_block(0.40),
         },
     )
     out = analyze_block_ordering(load_report_inputs(tmp_path))["8b_v2"]
     assert out["inversion"] is True
     assert out["n_modes"] == 5, "the mode count comes from the samples and the topics per mode"
-    assert out["T3"] == pytest.approx(0.40)
+    assert out[RESIDUAL_PCA] == pytest.approx(0.40)
 
 
 def test_value_add_is_a_delta_and_a_missing_baseline_is_not_a_zero(tmp_path: Path) -> None:
     write_results(
-        tmp_path, "8b_baseline", by_block={"T2+T2.5": block_block(0.60), "combined": block_block(0.70)}
+        tmp_path, "8b_baseline", by_block={ATTENTION_AND_CACHE: block_block(0.60), ALL_CORE: block_block(0.70)}
     )
     write_results(
         tmp_path,
@@ -330,7 +338,7 @@ def test_value_add_is_a_delta_and_a_missing_baseline_is_not_a_zero(tmp_path: Pat
     assert out["families"]["attention_flow"]["delta_vs_baseline_attention_and_cache"] == pytest.approx(0.06)
     assert out["composites"]["engineered"]["delta_vs_baseline_combined"] == pytest.approx(0.05)
 
-    write_results(tmp_path, "3b_run4", by_block={"T1": block_block(0.3)})
+    write_results(tmp_path, "3b_run4", by_block={NORMS_AND_OUTPUT_STATS: block_block(0.3)})
     write_results(tmp_path, "3b_v2_5way", by_block={"attention_flow": block_block(0.5)})
     out_3b = analyze_value_add(load_report_inputs(tmp_path))["3B"]
     assert out_3b["baseline_attention_and_cache"] is None
@@ -338,7 +346,7 @@ def test_value_add_is_a_delta_and_a_missing_baseline_is_not_a_zero(tmp_path: Pat
 
 
 def test_the_report_carries_all_seven_readings(tmp_path: Path) -> None:
-    write_results(tmp_path, "8b_v2", by_block={"T1": block_block(0.4), "T2": block_block(0.6)})
+    write_results(tmp_path, "8b_v2", by_block={NORMS_AND_OUTPUT_STATS: block_block(0.4), ATTENTION_AND_DELTAS: block_block(0.6)})
     report = complementarity_report(load_report_inputs(tmp_path))
     assert set(report) == {
         "runs",

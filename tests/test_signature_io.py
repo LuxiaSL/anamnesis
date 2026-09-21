@@ -4,8 +4,9 @@ Everything the gauntlet concludes rests on this loader putting the right rows in
 the right order with the right labels, so the tests here are about the joins
 rather than about the arithmetic:
 
-  * block discovery from npz contents, and the composite groups built from
-    whichever blocks turned out to be present;
+  * block discovery from npz contents, and the unions built over them — built
+    only where every member a union names is present, so that a label never
+    reports a narrower feature set than it claims;
   * the core-only filter, which is what makes "one repetition per topic-mode
     pair" a property of the loaded matrix rather than of the caller's care;
   * addon merging, including the two ways it must refuse — an addon that covers
@@ -29,11 +30,21 @@ import pytest
 
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
+    ALL_LABELS,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_DELTAS,
     AnalysisData,
+    CACHE_AND_KEYS,
     CORE_BLOCKS,
+    EVERYTHING,
     FAMILY_BLOCKS,
+    GATE_FEATURES,
+    NORMS_AND_OUTPUT_STATS,
+    NPZ_KEY_PREFIX,
+    RESIDUAL_PCA,
     Run4Data,
     SampleMeta,
+    BLOCK_STORED_NAMES,
     BLOCK_UNIONS,
     BLOCK_NPZ_KEYS,
     check_data_quality,
@@ -42,6 +53,13 @@ from anamnesis.analysis.gauntlet.signature_io import (
     load_run4,
 )
 from anamnesis.config.paths import LEGACY_DATA_ENV, outputs_root
+from anamnesis.extraction.state_extractor import (
+    STORED_ATTENTION_AND_DELTAS,
+    STORED_BLOCK_SLICES_KEY,
+    STORED_CACHE_AND_KEYS,
+    STORED_NORMS_AND_OUTPUT_STATS,
+    STORED_RESIDUAL_PCA,
+)
 
 BANKED_RUN = "8b_fat_01"
 BANKED_SUBDIR = "signatures_v3"
@@ -62,15 +80,14 @@ def write_gen(
 ) -> None:
     """One synthetic (npz, json) generation pair, with per-block widths."""
     folder.mkdir(parents=True, exist_ok=True)
-    blocks = blocks or {"T1": 3, "T2": 2}
+    blocks = blocks or {NORMS_AND_OUTPUT_STATS: 3, ATTENTION_AND_DELTAS: 2}
     arrays: dict[str, np.ndarray] = {}
     names: list[str] = []
     slices: dict[str, list[int]] = {}
     cursor = 0
     for block, width in blocks.items():
-        key = BLOCK_NPZ_KEYS[block]
-        arrays[key] = np.arange(width, dtype=np.float32) + float(index)
-        slices[key.replace("features_", "")] = [cursor, cursor + width]
+        arrays[BLOCK_NPZ_KEYS[block]] = np.arange(width, dtype=np.float32) + float(index)
+        slices[BLOCK_STORED_NAMES[block]] = [cursor, cursor + width]
         names.extend(f"{block}_f{i}" for i in range(width))
         cursor += width
     np.savez(folder / f"gen_{index:03d}.npz", feature_names=np.array(names), **arrays)
@@ -84,7 +101,7 @@ def write_gen(
         "generated_text": text,
         "system_prompt": f"system for {mode}",
         "user_prompt": f"user for {topic}",
-        "tier_slices": slices,
+        STORED_BLOCK_SLICES_KEY: slices,
     }
     if lane is not None:
         meta["lane_id"] = lane
@@ -109,20 +126,67 @@ def two_mode_run(tmp_path: Path) -> Path:
 
 def test_blocks_are_discovered_not_declared(tmp_path: Path) -> None:
     folder = tmp_path / "sig"
-    write_gen(folder, 0, blocks={"T2": 4, "gate_features": 6})
+    write_gen(folder, 0, blocks={ATTENTION_AND_DELTAS: 4, GATE_FEATURES: 6})
     data = load_run4(folder, core_only=False)
-    assert set(data.block_features) == {"T2", "gate_features"}
-    assert data.block_features["gate_features"].shape == (1, 6)
-    # A group is built only from the members that are present, and one whose
-    # members are all absent does not appear at all.
-    assert ALL_CORE in data.group_features    # one core block is present
-    assert data.group_features["combined"].shape == (1, 4)
-    assert "T2+T2.5" in data.group_features
+    assert set(data.block_features) == {ATTENTION_AND_DELTAS, GATE_FEATURES}
+    assert data.block_features[GATE_FEATURES].shape == (1, 6)
     assert data.all_features.shape == (1, 10)
     # all_features concatenates the core blocks before the engineered families.
-    assert list(CORE_BLOCKS)[:2] == ["T1", "T2"]
-    assert "gate_features" in FAMILY_BLOCKS
-    assert set(BLOCK_UNIONS) >= {"combined", "combined_v2"}
+    assert list(CORE_BLOCKS)[:2] == [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS]
+    assert GATE_FEATURES in FAMILY_BLOCKS
+    assert set(BLOCK_UNIONS) >= {ALL_CORE, EVERYTHING}
+
+
+def test_a_union_missing_a_member_is_not_built(tmp_path: Path) -> None:
+    """A label names what is in it, so a short union is absent rather than narrow.
+
+    One core block and one family are present here. Every union defined over
+    them names at least one block this corpus does not hold, so none is built —
+    the alternative is `every_block` reported at the width of one block.
+    """
+    folder = tmp_path / "sig"
+    write_gen(folder, 0, blocks={ATTENTION_AND_DELTAS: 4, GATE_FEATURES: 6})
+    data = load_run4(folder, core_only=False)
+    assert data.group_features == {}
+    assert not data.has_block(ALL_CORE)
+    assert not data.has_block(ATTENTION_AND_CACHE)
+    assert data.has_block(ATTENTION_AND_DELTAS)
+
+
+def test_a_union_whose_members_are_all_present_is_built_at_its_full_width(
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "sig"
+    write_gen(folder, 0, blocks={
+        NORMS_AND_OUTPUT_STATS: 3, ATTENTION_AND_DELTAS: 4,
+        CACHE_AND_KEYS: 5, RESIDUAL_PCA: 6,
+    })
+    data = load_run4(folder, core_only=False)
+    assert data.group_features[ALL_CORE].shape == (1, 18)
+    assert data.group_features[ATTENTION_AND_CACHE].shape == (1, 9)
+    # Every union reported holds exactly the blocks its definition names.
+    for label, members in BLOCK_UNIONS.items():
+        if label in data.group_features:
+            width = sum(data.block_features[m].shape[1] for m in members)
+            assert data.group_features[label].shape[1] == width, label
+
+
+def test_npz_keys_come_from_the_stored_block_names() -> None:
+    """The frozen strings live in one place, and this is what says so.
+
+    A banked npz keys the four core blocks by names that predate the labels, and
+    every signature ever written indexes into its vector with exactly them.
+    """
+    assert BLOCK_STORED_NAMES[NORMS_AND_OUTPUT_STATS] == STORED_NORMS_AND_OUTPUT_STATS
+    assert BLOCK_STORED_NAMES[ATTENTION_AND_DELTAS] == STORED_ATTENTION_AND_DELTAS
+    assert BLOCK_STORED_NAMES[CACHE_AND_KEYS] == STORED_CACHE_AND_KEYS
+    assert BLOCK_STORED_NAMES[RESIDUAL_PCA] == STORED_RESIDUAL_PCA
+    for block in FAMILY_BLOCKS:
+        assert BLOCK_STORED_NAMES[block] == block, "a family is stored under its own label"
+    assert BLOCK_NPZ_KEYS == {
+        label: NPZ_KEY_PREFIX + stored for label, stored in BLOCK_STORED_NAMES.items()
+    }
+    assert set(BLOCK_NPZ_KEYS) | set(BLOCK_UNIONS) == set(ALL_LABELS)
 
 
 def test_core_only_keeps_one_repetition_of_each_shared_pair(two_mode_run: Path) -> None:
@@ -167,7 +231,7 @@ def test_unknown_block_label_names_what_is_available(two_mode_run: Path) -> None
     data = load_run4(two_mode_run, core_only=True)
     with pytest.raises(KeyError, match="Unknown block/group"):
         data.get_block("no_such_block")
-    assert data.get_block("T1").shape[0] == data.n_samples
+    assert data.get_block(NORMS_AND_OUTPUT_STATS).shape[0] == data.n_samples
 
 
 def test_missing_directory_and_empty_directory_are_distinguished(tmp_path: Path) -> None:
@@ -184,16 +248,16 @@ def test_addon_merges_new_blocks_and_skips_an_incomplete_one(tmp_path: Path) -> 
     write_gen(base, 1, topic="topic_b", topic_idx=1)
 
     complete = tmp_path / "complete"
-    write_gen(complete, 0, blocks={"T3": 5})
-    write_gen(complete, 1, blocks={"T3": 5})
+    write_gen(complete, 0, blocks={RESIDUAL_PCA: 5})
+    write_gen(complete, 1, blocks={RESIDUAL_PCA: 5})
     merged = load_run4(base, core_only=False, addon_dirs=[complete])
-    assert "T3" in merged.block_features
-    assert merged.block_features["T3"].shape == (2, 5)
+    assert RESIDUAL_PCA in merged.block_features
+    assert merged.block_features[RESIDUAL_PCA].shape == (2, 5)
 
     partial = tmp_path / "partial"
-    write_gen(partial, 0, blocks={"T2.5": 7})
+    write_gen(partial, 0, blocks={CACHE_AND_KEYS: 7})
     dropped = load_run4(base, core_only=False, addon_dirs=[partial])
-    assert "T2.5" not in dropped.block_features, "an addon covering some rows is dropped whole"
+    assert CACHE_AND_KEYS not in dropped.block_features, "an addon covering some rows is dropped whole"
 
 
 def test_addon_directory_that_is_absent_or_empty_is_a_warning_not_a_failure(
@@ -221,7 +285,7 @@ def test_analysis_data_carries_text_and_delegates_the_rest(two_mode_run: Path) -
     assert list(data.topics) == list(data.run4.topics)
     assert data.unique_modes == data.run4.unique_modes
     assert data.unique_topics == data.run4.unique_topics
-    assert data.get_block("T1").shape == data.run4.get_block("T1").shape
+    assert data.get_block(NORMS_AND_OUTPUT_STATS).shape == data.run4.get_block(NORMS_AND_OUTPUT_STATS).shape
     assert data.mode_mask("linear").sum() == 2
     assert data.topic_mask("topic_a").sum() == 2
 
@@ -247,10 +311,12 @@ def test_quality_report_counts_what_a_reader_would_check(two_mode_run: Path) -> 
     assert report["n_samples"] == 4
     assert report["n_modes"] == 2
     assert report["samples_per_mode"] == {"linear": 2, "socratic": 2}
-    assert report["nan_counts"]["T1"] == 0
-    assert report["inf_counts"]["T1"] == 0
-    assert report["block_dims"]["T1"] == 3
-    assert "combined" in report["group_dims"]
+    assert report["nan_counts"][NORMS_AND_OUTPUT_STATS] == 0
+    assert report["inf_counts"][NORMS_AND_OUTPUT_STATS] == 0
+    assert report["block_dims"][NORMS_AND_OUTPUT_STATS] == 3
+    # This corpus holds two of the four core blocks, so no union over them is
+    # built and there is nothing for the group table to report.
+    assert report["group_dims"] == {}
 
 
 def test_default_signature_dir_follows_the_legacy_root_at_call_time(

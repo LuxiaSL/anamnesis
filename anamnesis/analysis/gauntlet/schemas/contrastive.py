@@ -5,18 +5,15 @@ on its embedding, the per-block and pairwise ablation grids, the super-additivit
 test, and the capacity sweep and linear baselines that say whether a nonlinear
 encoder was needed.
 
-The block labels on disk are a frozen wire vocabulary and several are not legal
-Python identifiers, so each model that carries them translates in one place:
-``_ON_DISK_RENAMES`` plus the validator/serializer pair beneath it. The Python
-side says which substrates a block reads; the wire side stays byte-for-byte what
-banked JSON holds.
+Every field here is named for what it holds, and a written result carries those
+names. A banked file whose keys predate them is read forward by
+``anamnesis/analysis/gauntlet/schemas/compat.py``, which is where the retired
+spellings live.
 """
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
-
-from pydantic import BaseModel, model_serializer, model_validator
+from pydantic import BaseModel
 
 from anamnesis.analysis.gauntlet.schemas.base import _FORBID
 
@@ -73,39 +70,13 @@ class ContrastiveSuperAdditivity(BaseModel):
     combined_knn: float
     attention_and_cache_beats_combined: bool
 
-    _ON_DISK_RENAMES: ClassVar[dict[str, str]] = {
-        "T2_alone": "attention_alone",
-        "T2.5_alone": "cache_alone",
-        "T2+T2.5_pair": "attention_and_cache_pair",
-        "T2+T2.5_beats_combined": "attention_and_cache_beats_combined",
-    }
-
-    @model_validator(mode="before")
-    @classmethod
-    def _from_disk(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            return {cls._ON_DISK_RENAMES.get(k, k): v for k, v in data.items()}
-        return data
-
-    @model_serializer(mode="plain")
-    def _to_disk(self) -> dict[str, Any]:
-        return {
-            "T2_alone": self.attention_alone,
-            "T2.5_alone": self.cache_alone,
-            "T2+T2.5_pair": self.attention_and_cache_pair,
-            "best_individual": self.best_individual,
-            "gain": self.gain,
-            "combined_knn": self.combined_knn,
-            "T2+T2.5_beats_combined": self.attention_and_cache_beats_combined,
-        }
-
 
 class ContrastiveBlockAblation(BaseModel):
     """The contrastive encoder's per-block ablation bundle.
 
-    The union of the attention block and the cache-and-keys block is stored under
-    a label that is not a legal Python identifier, so it is translated on the way
-    in and out by the validator + serializer pair below.
+    ``individual`` is keyed by block label and ``pairwise`` by a pair of them
+    joined with ``+``; the two named entries are the unions those keys cannot
+    spell as a field name.
     """
 
     model_config = _FORBID
@@ -115,35 +86,6 @@ class ContrastiveBlockAblation(BaseModel):
     attention_and_cache: ContrastiveAblationEntry
     combined: ContrastiveAblationEntry
     super_additivity: ContrastiveSuperAdditivity
-
-    _ON_DISK_ATTENTION_AND_CACHE: ClassVar[str] = "T2+T2.5"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _from_disk(cls, data: Any) -> Any:
-        if isinstance(data, dict) and cls._ON_DISK_ATTENTION_AND_CACHE in data:
-            out = dict(data)
-            out["attention_and_cache"] = out.pop(cls._ON_DISK_ATTENTION_AND_CACHE)
-            return out
-        return data
-
-    @model_serializer(mode="plain")
-    def _to_disk(self) -> dict[str, Any]:
-        return {
-            "individual": {
-                k: v.model_dump(mode="json", exclude_none=True)
-                for k, v in self.individual.items()
-            },
-            "pairwise": {
-                k: v.model_dump(mode="json", exclude_none=True)
-                for k, v in self.pairwise.items()
-            },
-            self._ON_DISK_ATTENTION_AND_CACHE: self.attention_and_cache.model_dump(
-                mode="json", exclude_none=True
-            ),
-            "combined": self.combined.model_dump(mode="json", exclude_none=True),
-            "super_additivity": self.super_additivity.model_dump(mode="json"),
-        }
 
 
 class CapacitySweepEntry(BaseModel):
@@ -169,10 +111,9 @@ class LinearBaselineEntry(BaseModel):
 class ContrastiveResult(BaseModel):
     """Section 8 result: contrastive projection (MLP + triplet loss).
 
-    Top-level fields are all ``Optional`` so the PyTorch-missing error
-    stub (``{"error": "..."}``) round-trips cleanly. The union of the attention
-    block and the cache-and-keys block is translated on the way in and out for
-    the same reason as in ContrastiveBlockAblation.
+    Every field is ``Optional`` so that a section that could not run — PyTorch
+    absent, or the union it reads not in this corpus — round-trips as an error
+    stub carrying only its reason.
     """
 
     model_config = _FORBID
@@ -183,41 +124,3 @@ class ContrastiveResult(BaseModel):
     block_ablation: ContrastiveBlockAblation | None = None
     linear_baselines: dict[str, LinearBaselineEntry] | None = None
     error: str | None = None
-
-    _ON_DISK_ABLATION: ClassVar[str] = "tier_ablation"
-    _ON_DISK_RENAMES: ClassVar[dict[str, str]] = {
-        ContrastiveBlockAblation._ON_DISK_ATTENTION_AND_CACHE: "attention_and_cache",
-        _ON_DISK_ABLATION: "block_ablation",
-    }
-
-    @model_validator(mode="before")
-    @classmethod
-    def _from_disk(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            return {cls._ON_DISK_RENAMES.get(k, k): v for k, v in data.items()}
-        return data
-
-    @model_serializer(mode="plain")
-    def _to_disk(self) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        if self.attention_and_cache is not None:
-            out[ContrastiveBlockAblation._ON_DISK_ATTENTION_AND_CACHE] = self.attention_and_cache.model_dump(
-                mode="json", exclude_none=True
-            )
-        if self.combined is not None:
-            out["combined"] = self.combined.model_dump(mode="json", exclude_none=True)
-        if self.capacity_sweep is not None:
-            out["capacity_sweep"] = {
-                k: v.model_dump(mode="json", exclude_none=True)
-                for k, v in self.capacity_sweep.items()
-            }
-        if self.block_ablation is not None:
-            out[self._ON_DISK_ABLATION] = self.block_ablation.model_dump(mode="json")
-        if self.linear_baselines is not None:
-            out["linear_baselines"] = {
-                k: v.model_dump(mode="json", exclude_none=True)
-                for k, v in self.linear_baselines.items()
-            }
-        if self.error is not None:
-            out["error"] = self.error
-        return out
