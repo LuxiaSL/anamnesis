@@ -23,9 +23,15 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from importlib import util
+
+import pytest
 
 import anamnesis
 from anamnesis.config import ExperimentConfig, ModelConfig, ModelPreset, RunSpec
+
+PROVIDER_LIBRARIES = ("anthropic", "requests")
+"""The clients the `judge` extra installs, and the only ones deferred to first use."""
 
 
 def run_probe(source: str) -> subprocess.CompletedProcess[str]:
@@ -102,12 +108,24 @@ def test_naming_the_judging_package_pulls_no_vendor_client() -> None:
 
 
 def test_the_harness_imports_without_the_provider_libraries_installed() -> None:
-    """The import-time claim is not vacuous only because the harness is importable
-    in an environment that has neither library, which is this one."""
+    """The harness is usable with the `judge` extra uninstalled — where that is testable.
+
+    The claim is about the package: nothing on the import path to the harness needs a
+    vendor client. Demonstrating it requires an interpreter that *lacks* at least one of
+    them, and whether this interpreter does is a property of the machine, not of the
+    package. So the machine is inspected rather than assumed: with both libraries
+    present the probe could only pass for the wrong reason, and a test that cannot
+    distinguish those says so instead of reporting either verdict.
+    """
+    installed = [m for m in PROVIDER_LIBRARIES if util.find_spec(m) is not None]
+    if len(installed) == len(PROVIDER_LIBRARIES):
+        pytest.skip(
+            "every provider client is installed here "
+            f"({', '.join(installed)}), so an import probe cannot show they are optional"
+        )
+
     result = run_probe(
-        "import importlib.util as u, anamnesis.judging.harness as h, sys; "
-        "missing = [m for m in ('anthropic', 'requests') if u.find_spec(m) is None]; "
-        "assert missing, 'both client libraries are installed, so this proves nothing'; "
+        "import anamnesis.judging.harness as h, sys; "
         "pulled = [m for m in sys.modules if m.split('.')[0] in ('anthropic', 'requests')]; "
         "assert not pulled, pulled; "
         "assert h.AnthropicBackend().api_key_present() in (True, False)"

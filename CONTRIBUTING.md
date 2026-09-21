@@ -89,10 +89,10 @@ A pull request merges when these pass. Each is a command you can run.
 | gate | what it checks | command |
 |---|---|---|
 | tests | the suite | `pytest tests/` |
-| G3 documentation | the two rules above | `python tools/check_timelessness.py --root anamnesis tools tests` and `python tools/check_referents.py --root anamnesis tools tests` |
-| G4 import closure | every module reachable from a command or a test; no orphans | `python tools/check_import_closure.py --package anamnesis --roots anamnesis/scripts tests` |
-| G1 data compatibility | banked artifacts in, identical features out | `python tools/g1_hash_manifest.py` — see its own help; needs banked data |
-| G2 consolidation | a consolidated module smaller than the donors it replaced; test lines not shrinking | `python tools/g2_loc_report.py --repo .` |
+| G3 documentation | the two rules above | `python -m tools.check_timelessness --root anamnesis tools tests` and `python -m tools.check_referents --root anamnesis tools tests` |
+| G4 import closure | every module reachable from a command or a test; no orphans | `python -m tools.check_import_closure --package anamnesis --roots anamnesis/scripts tests` |
+| G1 data compatibility | banked artifacts in, identical features out | `python -m tools.g1_hash_manifest` — see its own help; needs banked data |
+| G2 consolidation | a consolidated module smaller than the donors it replaced; test lines not shrinking | `python -m tools.g2_loc_report --repo .` |
 
 `tools/surface_report.py` reports the size of the codebase in code tokens and documentation
 words. It is a trend instrument, not a gate: it says which direction the repository is moving.
