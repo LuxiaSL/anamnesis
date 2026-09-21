@@ -251,3 +251,72 @@ require.
 | `tests/test_extraction_perf_phase0.py` | *record* | Not ported. Classified as a lane test by module import, but its single case loads `scripts/extraction_perf_phase0.py` by file path and exercises that module's `incremental_raw`. Its subject is the campaign hub, not the lane. |
 | `tests/test_verify_batch_schedule.py` | *record* | Not ported. Every case calls `validate_batch_schedule` from the campaign; `batch_layout.pack_spans` appears only inside the fixture, as the digest the campaign's receipts are checked against. There are no batch-layout assertions to separate out. |
 | — | `tests/test_qualify_box.py` | New. What the golden path asks for, the refusals that stop a meaningless measurement before a model loads, and the verdict's three distinguishable states with the exit status that follows them. The sentence about not mixing boxes is asserted, not merely written. |
+
+## Analysis — the gauntlet
+
+`unified_runner` named a mechanism (a runner that unifies) rather than the thing it
+does. It runs eleven standing analyses over one set of signatures, because a claim
+about signatures is usually a claim about several of them agreeing: an accuracy
+means one thing beside a clean orthogonality result and another beside a length-only
+baseline reaching the same number. It is `gauntlet/` here, by ruling.
+
+Two names in that package both said "load". `geometric_trio/data_loader.py` held
+`Run4Data` and the join rules; `unified_runner/data_loading.py` was a 138-line
+wrapper that added the generated text and delegated everything else. Side by side
+under one package, a stranger could not tell which to call — and the trio's own
+mathematics left that package long ago, so its directory dissolves. **They are one
+module, `signature_io.py`.** `Run4Data` and `AnalysisData` both live there, the
+lane guard runs inside it, and the merged module is smaller than its two donors
+(603 lines against 608). Nothing about the merge changes what a load returns.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/analysis/unified_runner/__init__.py` | `anamnesis/analysis/gauntlet/__init__.py` | The eleven-section registry, the `importlib` dispatch, the checkpoint and the resume, logic-identical. Three adaptations: the default output directory is `outputs_root()` from the configuration package rather than a path computed from `__file__`, the module docstring says what the gauntlet is for rather than listing its features, and the printed banner names the gauntlet rather than the runner it used to be filed as. `run_full_analysis`, `SECTIONS`, `SECTION_KEYS`, `SECTION_NAMES` and `SECTION_MODELS` keep their names. |
+| `anamnesis/analysis/geometric_trio/data_loader.py` + `anamnesis/analysis/unified_runner/data_loading.py` | `anamnesis/analysis/gauntlet/signature_io.py` | **Merged, the F7 resolution.** Every name both donors exported survives: `Run4Data`, `SampleMeta`, `AnalysisData`, `load_run4`, `load_analysis_data`, `check_data_quality`, `TIER_KEYS`, `TIER_GROUPS`, `BASELINE_TIERS`, `ENGINEERED_TIERS`. The `SIGNATURE_DIR` module constant becomes `default_signature_dir()`, so the Phase-0 root is read when asked rather than frozen at import — the same call-time rule the configuration package holds to, and what lets a test redirect the root. `load_run4`'s first argument defaults to `None` and resolves to that function. The lane-guard import moves from inside the function to the module header, unchanged in effect. |
+| `anamnesis/analysis/geometric_trio/__init__.py` | *record* | The directory dissolves: an empty `__init__` for a package whose mathematics went elsewhere. |
+| `anamnesis/analysis/unified_runner/results_schema.py` | `anamnesis/analysis/gauntlet/schemas/` | **Split per section**, one module each for the eleven sections plus the composite, class bodies unchanged. `base.py` holds the one shared `model_config` and the two rules that follow from `extra="forbid"`; the package `__init__` re-exports all 81 models, so `from ...schemas import X` reaches every name the flat module exported. The split costs lines against a single file (1,731 across fourteen files, against 1,409) and buys the property the section layout already had everywhere else: a section's schema, its runner and its `--skip` number move together. |
+| `anamnesis/analysis/unified_runner/classification.py` | `anamnesis/analysis/gauntlet/classification.py` | Import paths only, plus one comment that carried the date of a decision rather than of evidence. |
+| `anamnesis/analysis/unified_runner/tier_ablation.py` | `anamnesis/analysis/gauntlet/tier_ablation.py` | Import paths, plus one necessary adaptation: `LogisticRegression(multi_class="multinomial")` no longer constructs under scikit-learn 1.7 and later, which removed the argument after making multinomial the only multiclass fit its solvers perform. The argument is dropped and the behaviour stated in a comment; the fit is the same fit. The file keeps its name — the tier-vocabulary rename is a later sweep. |
+| `anamnesis/analysis/unified_runner/{geometry,clustering,contrastive,semantic,integrity,scorecard,utils}.py` | `anamnesis/analysis/gauntlet/` | Import paths only. |
+| — | `anamnesis/analysis/gauntlet/schemas/base.py` | New. The shared `_FORBID`, and the two backward-compatibility rules that follow from it, stated once where every section module reads them. |
+
+### The battery
+
+The metrology layer, which answers the question prior to every arm: how large a
+difference has to be before it counts, and how many samples it would take to see
+one. It ports whole and as-is — twelve modules, one adaptation, which is that
+`feature_map` now lives at the package root.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/analysis/battery/floors.py` | `anamnesis/analysis/battery/floors.py` | The floors and the n-min law. Byte-identical but for the `feature_map` import path and one comment reflowed so its "observed" sits on the line with its date. |
+| `anamnesis/analysis/battery/{__init__,manifest,stats,deltas,magnitude,channel,decomp,dissoc,gates,report,text_decode}.py` | same paths under `anamnesis/analysis/battery/` | Byte-identical. `decomp.decompose` and `dissoc.dissociation_row` still raise `NotImplementedError`; their containers are typed and their contracts are tested, which is what a Wave-1 stub is. |
+
+### Consolidations
+
+| old path | new home | notes |
+|---|---|---|
+| `v3_audit/_common.py` · `v3_audit/build_surface_caches.py` · `v3_audit/surface_encoder_floor.py` | `anamnesis/analysis/audit_lib.py` (**C5**) | 648 donor lines to 353. Extracted: `residualize` / `residualize_all`, `subsample_topics`, `load_signature_matrix` with `SignatureMatrix` / `gen_metadata_by_id` / `unwrap_generations`, `sample_positions` / `surface_vector` / `attention_vector` with the bin constants they need, and `preprocess_fold_gpu`. Added: `leak_free_folds`, which is the `GroupKFold(5)`-by-topic-plus-`subsample_topics` idiom the suite repeated in eight files, composed so the folds are identical to that idiom's and a fold count exceeding the topic count is refused rather than guessed at. `SignatureMatrix` is pydantic unconditionally — the donor's dataclass fallback existed for a node environment without pydantic, and this package depends on it. The three donors stay frozen, with their seven import sites, in `anamnesis-pl`. |
+| `scripts/vmb_arm_a5_analyze.py` · `scripts/vmb_c3_entropy_replay.py` · `scripts/vmb_14n_hedging_index.py` | `anamnesis/analysis/text_stats.py` (**C4**) | 826 donor lines to 269, ported as capability rather than as a consolidation (ruling 5). The text channel beside the signature: `text_stats` (length, type-token ratio, trigram repetition — the degeneracy check), `entropy_and_nll_over_generation` (donor `_ent_nll_over_gen`), the hedge and definitive lexicons with `HEDGE_RE` and `DEF_RE` under their own names, `marker_rate` / `texts_by_prompt_group` / `group_marker_rates` / `placebo_marker_floor` (donors `_rate` / `_cell_groups` / `_group_rates` / `_placebo_floor`, promoted out of privacy because a library's capability should be callable), and `add_null_ratios` with its zero-denominator guard. The donors' analyzers are superseded and stay in the record; `parse_cell_dir` and `rekey_topic`, which several record-side scripts import from `vmb_arm_a5_analyze`, are cell-directory parsing rather than text statistics and stay with them. |
+
+### Admitted under ruling 7
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/extraction/feature_families/binding_probe.py` (untracked in `anamnesis-pl`) | `anamnesis/extraction/feature_families/binding_probe.py` | **Admitted.** It duplicates nothing: no other family cuts the prompt finer than a four-way region split, and binding — which attribute went with which entity — is invisible to the rest of the suite by construction. It satisfies the family contract (a `FeatureFamilyResult`, a declared name contract, aligned zeros where there is nothing to read), needs no dependency the package lacks, and is pure numpy. It is registered nowhere, and the family package's docstring now names that category and says why a registry entry would be a promise a run over unlabelled prompts cannot keep. It arrives with the test its admission required. One comment changed: the level-2 quadrature convention is stated as a convention rather than as a temporary stand-in for an unmerged branch. |
+| `anamnesis/scripts/analyze_signature_richness.py` (untracked) | *record, for now* | **Not admitted, with grounds.** Its two effective-rank metrics and its depth-slot common basis are real instrument capability, but its primary metric is intrinsic dimension, which `gauntlet/geometry.py` already provides — and the script reimplements the two TwoNN estimators in-file *because* `dadapy` and `skdim` were absent from the environment it was written in, not because the capability was missing. Admitting it as written would put two intrinsic-dimension implementations in one repository, which is the duplication the constitution exists to prevent. It is also a script with a hardcoded seven-bank table addressing a private outputs tree, it reaches into the gauntlet's `utils` for the z-score convention, and it has no test. The decision it waits on is whether the `geometry` extra resolves — if it does not, these dependency-free estimators are the better home for the repository's intrinsic dimension and the script's metrics should land as `analysis/richness.py` with its bank table externalized the way the run registry is. |
+| `anamnesis/analysis/fast_lda.py` | *record* | Not ported, by ruling: it ports if and only if the richness readout is admitted and adopts it. |
+
+### Tests
+
+| old path | new home | notes |
+|---|---|---|
+| `tests/test_lane_guard.py` | `tests/test_lane_guard.py` | **The four deferred cases land**, now driving `signature_io.load_run4`: a lane preserved and a conflicting one refused, an untagged addon refused against a tagged lane, the legacy all-untagged read still available, and a tagged directory that cannot silently skip a file with no metadata. |
+| — | `tests/test_signature_io.py` | New. The join rules rather than the arithmetic: tier discovery, the core-only filter and its exclusion of swap modes, addon merging and the two ways it must refuse, the text half, and a read of the banked `8b_fat_01` signatures that skips with a named reason where that bank is absent. |
+| — | `tests/test_gauntlet_schemas.py` | New. That the split did not lose a name: every section module's models are re-exported, `__all__` and the modules agree both ways, the composite's field types are the sections' own models, `extra="forbid"` is live everywhere, and the two reshaping models round-trip their on-disk spelling. |
+| — | `tests/test_gauntlet_run.py` | New. A real pass over a synthetic corpus with six of eleven sections running: dispatch, text loaded only when a section needs it, checkpoint, resume with rehydration, an error stub not counting as completed, and the composite validating. |
+| — | `tests/test_gauntlet_classification.py` | New. Section 2's parts at small parameters, because its key-tier sweep is minutes of CPU per tier: the grouped-CV default, the permutation p-value's `1/(N+1)` floor, BH-FDR's monotonicity, and the readouts that name their own conditions. |
+| — | `tests/test_battery.py` | New, and the battery's first tests in either repository. The stamp gate raising rather than warning, the law floored at permutation resolution, paired deltas drawn within a prompt class only, the cell masks, the channel split's two extremes, the manifest refusing a duplicate cell, and the Wave-1 stubs saying they are stubs. |
+| — | `tests/test_audit_lib.py` | New. Each control against the property it exists for: what residualization removes and that the split version fits on train only, that folds hold out whole topics, that feature order is pinned and a missing feature fills with zero, that a surface vector's width does not depend on generation length, and that the Gram reduction preserves the inner products it claims to. |
+| — | `tests/test_text_stats.py` | New. That a looping generation scores as degenerate, that the lexicons are word-bounded, that the prompt group is the unit, that the placebo floor is reproducible, and that a ratio to a near-zero denominator is suppressed in favour of the band readout. |
+| — | `tests/test_binding_probe.py` | New, and the condition of the family's admission. Chiefly alignment, which is what a within-pair contrast rests on: names a function of the arguments alone, aligned zeros for a short generation and for an uncaptured layer, every refusal of a bad span table, and the increment-permutation null leaving level 1 identical while destroying level 2. |

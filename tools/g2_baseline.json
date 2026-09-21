@@ -53,7 +53,7 @@
     "C4": {
       "capability": "text-stats utilities",
       "module": "anamnesis/analysis/text_stats.py",
-      "justification": "capability: ported as instrument capability rather than as a consolidation (ruling 5, 2026-09-20), so the arithmetic is reported beside the consumer count and neither number stands alone",
+      "justification": "capability: ported as instrument capability rather than as a consolidation (ruling 5, 2026-09-20), so the arithmetic is reported beside the consumer count and neither number stands alone. The one consumer is tests/test_text_stats.py; no module under anamnesis/ reads it yet, and the scripts that read the donors stay in the frozen record.",
       "ported_consumers": 1,
       "donor_total": 826,
       "donors": {
@@ -65,8 +65,8 @@
     "C5": {
       "capability": "audit lib",
       "module": "anamnesis/analysis/audit_lib.py",
-      "justification": "consolidation",
-      "ported_consumers": null,
+      "justification": "consolidation. The one consumer is tests/test_audit_lib.py; the seven scripts that read the three donor modules stay in the frozen record, which is where their results were produced.",
+      "ported_consumers": 1,
       "donor_total": 648,
       "donors": {
         "anamnesis/analysis/v3_audit/_common.py": 223,
