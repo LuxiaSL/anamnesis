@@ -3,10 +3,10 @@
 This module has NO model awareness. It operates on pre-collected tensors
 and can be tested offline with saved tensor samples.
 
-Feature groups (LEGACY tier labels retired 2026-07-11 — the interpretable taxonomy is
-source × method × depth, see analysis/feature_map.py and
-research/methodology/tier-retirement-and-translation.md; the group names below are kept
-only because feature-name prefixes and stored signatures still reference them):
+Feature groups (LEGACY tier labels, retired by the 2026-07-11 ruling — the interpretable
+taxonomy is source × method × depth, in `anamnesis/feature_map.py`; the group names below
+are kept only because feature-name prefixes and stored signatures still reference them,
+and a stored signature's `tier_slices` keys are read back by name):
   "T1"  — Activation norms (residual/magnitude), logit statistics (output/distributional)
   "T2"  — Attention entropy + head agreement (attention), residual deltas (residual),
           spectral graph features
@@ -88,8 +88,8 @@ class RawGenerationData:
     # list of block-boundary committed snapshots, each [n_pos, hidden_dim].
     # ── MoE expert routing (vmb arm A7, M6 DeepSeek-V2-Lite class) — optional, MoE-layers only ──
     # Dense models (Llama/Qwen/OLMo/Gemma) leave these None; the xrt family returns empty when absent
-    # (the gate_features None-guard pattern). Populated by the M6 capture hooks (see model_loader /
-    # research/planning/HOOK-AUDIT-PLAN-M6-dsv2lite-2026-07-17.md).
+    # (the gate_features None-guard pattern). Populated by the MoE capture hooks in
+    # `anamnesis/extraction/model_loader.py`, which document which module each hook attaches to.
     router_dist: dict[int, list[F32]] | None = None
     # layer_idx → T × [n_routed_experts]: per-generated-token expert-allocation distribution over the
     # routed experts. Banked reading = the DENSE pre-topk softmax (recomputed in the MoE-module pre-hook
@@ -314,7 +314,15 @@ def extract_tier1(
 ) -> tuple[F32, list[str]]:
     """Extract Tier 1 features: activation norms, logit stats, token dynamics.
 
-    Returns (feature_vector, feature_names).
+    Returns (feature_vector, feature_names), both of length
+    ``num_layers * (2 + n_traj) + 10 + 3 * n_traj`` with
+    ``n_traj = config.trajectory_points`` — 221 at the 28-layer, 5-point default.
+
+    With no generation steps the names and the length are unchanged and every value
+    is 0.0: a signature's layout is fixed across generations, so a run that produced
+    nothing still occupies its columns rather than shortening the vector and
+    silently shifting every feature after it. The layer count then has no tensor to
+    come from and falls back to 28.
     """
     features: list[float] = []
     names: list[str] = []
@@ -448,7 +456,14 @@ def extract_tier2(
 ) -> tuple[F32, list[str]]:
     """Extract Tier 2 features: attention entropy, head agreement, residual deltas, spectral.
 
-    Returns (feature_vector, feature_names).
+    Returns (feature_vector, feature_names), both of length
+    ``4 * num_layers + 3 * (num_layers - 1) + 4 * len(config.sampled_layers)`` —
+    221 at 28 layers with the 7 sampled layers of the default preset.
+
+    With no attention steps the names and the length are unchanged and every value is
+    0.0, for the same reason Tier 1 zero-fills: the column layout is part of the
+    signature's identity. The layer count is then taken from `hidden_states`, or
+    falls back to 28 when those are absent too, and the head count to 24.
     """
     features: list[float] = []
     names: list[str] = []
@@ -695,7 +710,15 @@ def extract_tier2_5(
 ) -> tuple[F32, list[str]]:
     """Extract Tier 2.5: KV cache attention profiles, key geometry, cross-layer, epochs.
 
-    Returns (feature_vector, feature_names).
+    Returns (feature_vector, feature_names), both of length
+    ``19 * len(config.sampled_layers) + 9`` — 9 cache-profile and 10 key-geometry
+    features per sampled layer, plus 9 epoch features; 142 at the default 7 sampled
+    layers.
+
+    With no attention steps the names and the length are unchanged and every value is
+    0.0, as in the other tiers. A sampled layer index the model does not have is
+    zero-filled under its own names by the same rule, so a layer list written for a
+    deeper model does not shorten the vector.
     """
     features: list[float] = []
     names: list[str] = []
@@ -1114,7 +1137,15 @@ def extract_tier3(
             positionally-corrected calibration states).
         pca_mean: matching mean — [hidden_dim] array (legacy) or {layer_idx: [hidden_dim]} (per-layer).
 
-    Returns (feature_vector, feature_names).
+    Returns (feature_vector, feature_names), both of length
+    ``len(config.pca_layers) * config.pca_temporal_samples * config.pca_components``
+    — 500 at the default two PCA layers, 5 temporal samples and 50 components.
+
+    This tier does NOT zero-fill. With no generation steps, or with no fitted basis
+    passed, it returns an empty vector and an empty name list: a projection onto a
+    basis that was never fitted is not a measurement of zero, and the caller records
+    the tier as absent rather than as flat. A per-layer basis missing a layer drops
+    that layer's columns for the same reason.
     """
     features: list[float] = []
     names: list[str] = []

@@ -1,7 +1,6 @@
 """Path-signature feature family — level-2 log-signature (iterated integrals) of the residual path.
 
-Spec: ``research/planning/SPEC-path-signature-family-2026-09-11.md`` (anamnesis_exps, desk-cut
-2026-09-11). **Status: exploratory build.** Nothing computed here is quotable pre-first-read.
+**Status: exploratory build.** Nothing computed here is quotable pre-first-read.
 
 WHAT THIS COMPUTES, AND WHY IT IS NOT ANOTHER MARGINAL STATISTIC
 ---------------------------------------------------------------
@@ -15,7 +14,8 @@ level-2 log-signature of a path ``X: [T, D]`` is exactly:
         ``A_ij = ½ Σ_t ( (X_i[t] - X_i[0]) ΔX_j[t] - (X_j[t] - X_j[0]) ΔX_i[t] )``
 
 with ``ΔX[t] = X[t+1] - X[t]`` and the sum over ``t = 0 .. T-2``. Both are hand-rolled numpy —
-**no dependency is added** (the extractor path's pure-numpy design constraint, CLAUDE.md). If
+**no dependency is added** (the extraction path is pure numpy, a constraint
+``tests/test_extraction_purity.py`` holds every family to). If
 ``iisignature`` happens to be importable the selftest cross-checks against it; runtime never
 imports it.
 
@@ -603,7 +603,8 @@ class ArrayPathSource(ResidualPathSource):
 class RawGenerationDataPathSource(ResidualPathSource):
     """Source over a single in-memory ``RawGenerationData`` (the pipeline's own contract).
 
-    ``hidden_states[t][l+1]`` — index 0 is the embedding, not layer 0 (CLAUDE.md gotcha).
+    ``hidden_states[t][l+1]`` — index 0 is the embedding output, not layer 0, so an
+    off-by-one here silently mislabels every layer-indexed feature.
     Positional correction reuses ``state_extractor._correct_hidden_state``, i.e. exactly what
     the residual_trajectory / T2.5 / T3 features do, so the projected path is the same object
     those features summarise.
@@ -783,7 +784,8 @@ class OutputStatsPathConfig(_NullControlMixin):
     it is ``annex_potential_gradient.s_terms_repmass``: ``S = sum_{v in prior context} p_t(v)``
     where "prior context" is every token seen so far, INCLUDING THE PROMPT. That set needs the
     prompt's actual token ids; ``RawGenerationData`` (this pipeline's per-generation contract,
-    CLAUDE.md) carries only ``prompt_length: int`` — a count, not the ids — so the candidate set
+    defined in ``anamnesis/extraction/state_extractor.py``) carries only
+    ``prompt_length: int`` — a count, not the ids — so the candidate set
     cannot be reconstructed from what this family is contracted to read. A scoped substitute
     (self-only repetition over the generated span, ``annex_cs_pulses.s_terms_selfrep``) exists
     and IS fully computable from ``chosen_token_ids``, but spec §1a says "reuse those
@@ -1340,7 +1342,8 @@ def _output_stats_per_token(
       split mirrors ``expert_routing.py``'s existing ``np.partition(..., -2)`` idiom.
     * ``eos_log_mass`` — ``annex_potential_gradient.s_terms_eos``:
       ``logsumexp(log_softmax(logits)[eos_ids])``. ``eos_token_ids`` is the caller's explicit,
-      model-specific set (CLAUDE.md gotcha) — never defaulted, never inferred.
+      model-specific set — never defaulted, never inferred, because a wrong id set makes the
+      column a measurement of the wrong token.
     * ``varentropy`` — ``annex_cs_pulses.s_terms_varentropy``: ``sum_v p_v (s_v - H)^2`` with
       ``s_v = -log p_v`` the per-token surprisal and ``H`` the SAME entropy value computed
       above (not recomputed independently, so the two columns cannot numerically disagree
@@ -1462,7 +1465,7 @@ def _attention_region_per_token(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Naming — must classify cleanly in analysis/feature_map.py
+# Naming — must classify cleanly in anamnesis/feature_map.py
 # ──────────────────────────────────────────────────────────────────────────────
 
 

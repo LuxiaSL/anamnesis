@@ -67,9 +67,9 @@ def test_rope_parameters_layout_also_supported():
 
 
 # ── wrapper-aware RoPE gate (multimodal configs nest the transformer params) ──
-# These two cases travelled in `tests/test_tool_fixes_2026_07_18.py`, whose other
-# cases pin analysis scripts that are not part of this port. They live here, with
-# the rest of the config-reading gate they exercise.
+# A multimodal config nests the transformer's own parameters one level down, so the
+# theta reader has to unwrap before it looks. These two cases live here, with the rest
+# of the config-reading gate they exercise.
 
 
 class _Cfg:

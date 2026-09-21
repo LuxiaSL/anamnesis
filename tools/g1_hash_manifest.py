@@ -20,9 +20,9 @@ register as drift while values do.
 
 Usage
 -----
-    python tools/g1_hash_manifest.py --signatures <dir> --out reference.txt
-    python tools/g1_hash_manifest.py --signatures <dir> --out candidate.txt
-    python tools/g1_hash_manifest.py --compare reference.txt candidate.txt
+    python tools/g1_hash_manifest.py --signatures <dir> --out <reference>
+    python tools/g1_hash_manifest.py --signatures <dir> --out <candidate>
+    python tools/g1_hash_manifest.py --compare <reference> <candidate>
 """
 
 from __future__ import annotations

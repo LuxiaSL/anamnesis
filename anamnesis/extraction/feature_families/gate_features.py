@@ -11,8 +11,12 @@ These features capture:
     - Temporal dynamics: windowed + STFT decomposition of gate time series
 
 Architecture-specific: only works for gated-MLP models (Llama, Mistral,
-Gemma, Qwen). Returns empty result for models without gate hooks.
-See research/planning/multi-model-feature-architecture.md for design notes.
+Gemma, Qwen). A model whose MLP is not gated supplies no substrate, so the family
+returns `FeatureFamilyResult.empty` and its names are absent from the vector
+rather than present and zero — an absent substrate must not read as a measured
+value. Inside a model that does supply it, a single unavailable layer IS
+zero-filled under its own names, because the vector's layout is fixed across
+generations of the same model.
 """
 
 from __future__ import annotations
