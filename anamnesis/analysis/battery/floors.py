@@ -42,6 +42,7 @@ from scipy.stats import norm
 
 from anamnesis.feature_map import FeatureMap
 from anamnesis.analysis.battery.manifest import FloorType
+from anamnesis.analysis.lane_guard import gate_banked_signatures
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +114,20 @@ class FloorReport(BaseModel):
 
 # ---------------------------------------------------------------------------- loading
 
-def load_signature_matrix(sig_dir: Path) -> tuple[F32, list[str], list[int]]:
-    """Load gen_*.npz signatures → (X [n, d], feature_names, gen_ids). Skips empty/failed."""
+def load_signature_matrix(
+    sig_dir: Path, *, allow_mixed_lanes: bool = False
+) -> tuple[F32, list[str], list[int]]:
+    """Load gen_*.npz signatures → (X [n, d], feature_names, gen_ids). Skips empty/failed.
+
+    The rows that reach the matrix must all come from one arithmetic lane, so
+    :func:`anamnesis.analysis.lane_guard.gate_banked_signatures` runs over exactly
+    those rows before they are stacked: the gate covers the join, and the join is
+    the matrix. ``allow_mixed_lanes`` names the bypass and logs the conflict.
+    """
     paths = sorted(sig_dir.glob("gen_*.npz"), key=lambda p: int(p.stem.split("_")[1]))
     if not paths:
         raise FileNotFoundError(f"no gen_*.npz under {sig_dir}")
-    loaded: list[tuple[int, F32, tuple[str, ...]]] = []
+    loaded: list[tuple[int, F32, tuple[str, ...], Path]] = []
     for p in paths:
         z = np.load(p, allow_pickle=True)
         if "features" not in z:
@@ -126,7 +135,7 @@ def load_signature_matrix(sig_dir: Path) -> tuple[F32, list[str], list[int]]:
             continue
         f = np.asarray(z["features"], dtype=np.float32)
         loaded.append((int(p.stem.split("_")[1]),
-                       f, tuple(str(x) for x in z["feature_names"])))
+                       f, tuple(str(x) for x in z["feature_names"]), p))
     if not loaded:
         raise ValueError(f"no usable signatures under {sig_dir}")
     # The model's STANDARD vector = the modal feature-name set. Generations too
@@ -134,7 +143,7 @@ def load_signature_matrix(sig_dir: Path) -> tuple[F32, list[str], list[int]]:
     # and CKA families — observed on OLMo-2 base, 2026-07-12) are EXCLUDED,
     # loudly: a truncated vector is not the same measurement.
     name_counts: dict[tuple[str, ...], int] = {}
-    for _, _, nm in loaded:
+    for _, _, nm, _ in loaded:
         name_counts[nm] = name_counts.get(nm, 0) + 1
     modal = max(name_counts, key=lambda k: name_counts[k])
     modal_len = len(modal)
@@ -146,16 +155,20 @@ def load_signature_matrix(sig_dir: Path) -> tuple[F32, list[str], list[int]]:
     # same as short gens.
     def _standard(f: F32, nm: tuple[str, ...]) -> bool:
         return nm == modal and int(f.shape[0]) == modal_len
-    dropped = [gid for gid, f, nm in loaded if not _standard(f, nm)]
+    dropped = [gid for gid, f, nm, _ in loaded if not _standard(f, nm)]
     if dropped:
         logger.warning(
             f"{sig_dir}: {len(dropped)}/{len(loaded)} signatures excluded — "
             f"non-standard feature vector (short gens or features/names length mismatch); "
             f"gen_ids={dropped}"
         )
-    rows = [f for _, f, nm in loaded if _standard(f, nm)]
-    gen_ids = [gid for gid, f, nm in loaded if _standard(f, nm)]
-    return np.stack(rows), list(modal), gen_ids
+    kept = [(gid, f, p) for gid, f, nm, p in loaded if _standard(f, nm)]
+    gate_banked_signatures([p for _, _, p in kept], allow_mixed_lanes=allow_mixed_lanes)
+    return (
+        np.stack([f for _, f, _ in kept]),
+        list(modal),
+        [gid for gid, _, _ in kept],
+    )
 
 
 def load_class_labels(metadata_path: Path) -> dict[int, tuple[int, str]]:
