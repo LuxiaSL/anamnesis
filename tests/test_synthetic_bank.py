@@ -21,7 +21,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from anamnesis.analysis.gauntlet.signature_io import ALL_FAMILIES, load_run4
+from anamnesis.analysis.gauntlet.signature_io import (
+    ALL_FAMILIES,
+    BLOCK_STORED_NAMES,
+    BLOCK_UNIONS,
+    EVERYTHING,
+    load_run4,
+)
 from anamnesis.synthetic_bank import (
     DEFAULT_BLOCK_WIDTHS,
     SYNTHETIC_LANE,
@@ -51,8 +57,15 @@ def test_the_gauntlet_loader_opens_it(tmp_path: Path, small_spec: SyntheticBankS
     assert set(data.block_features) == set(DEFAULT_BLOCK_WIDTHS)
     for block, width in DEFAULT_BLOCK_WIDTHS.items():
         assert data.block_features[block].shape == (small_spec.generations, width)
-    # The union over the families is built, which is the grouping a reader asks for.
-    assert data.group_features[ALL_FAMILIES].shape == (small_spec.generations, bank.width)
+
+    # Every union is built, because every member is written — which is the property that
+    # lets a section read rather than state an absence. Each is checked at the width its
+    # own members sum to, since a union reported narrower than that would be a label
+    # overstating its contents.
+    for union, members in BLOCK_UNIONS.items():
+        expected = sum(DEFAULT_BLOCK_WIDTHS[m] for m in members)
+        assert data.group_features[union].shape == (small_spec.generations, expected), union
+    assert data.group_features[EVERYTHING].shape == (small_spec.generations, bank.width)
 
 
 def test_the_same_seed_writes_the_same_bank(
@@ -82,13 +95,18 @@ def test_a_different_seed_writes_a_different_bank(tmp_path: Path) -> None:
 def test_no_retired_bin_vocabulary_reaches_a_reader(
     tmp_path: Path, small_spec: SyntheticBankSpec
 ) -> None:
-    """The fixture names blocks by the families it writes, never by the retired bins.
+    """The fixture names every block for what it reads, never for a retired bin.
 
-    The one place a bin name survives is the metadata key the loader reads, which is the
-    on-disk format and not this fixture's to rename. Everything a reader *sees* — feature
-    names, block labels, the values in the sidecar — is checked here.
+    Two things carry a bin name and neither is this fixture's to rename: the npz array
+    keys and the slice-table keys inside the sidecar. Those are the frozen on-disk format
+    — bytes in banked files that will never be rewritten — and they reach a reader only
+    through the ``STORED_*`` constants. So they are exempted **by derivation from those
+    constants**, not by a hand-written list, which is what stops the exemption from
+    widening quietly. Everything else is checked: feature names, and every string the
+    sidecar carries.
     """
     bank = write_synthetic_bank(tmp_path / "signatures", small_spec)
+    wire_format = set(BLOCK_STORED_NAMES.values())
 
     for npz_path in bank.directory.glob("*.npz"):
         for name in np.load(npz_path)["feature_names"]:
@@ -101,6 +119,8 @@ def test_no_retired_bin_vocabulary_reaches_a_reader(
                 assert not RETIRED_BIN_VOCABULARY.search(value), (key, value)
             if isinstance(value, dict):
                 for inner in value:
+                    if inner in wire_format:
+                        continue
                     assert not RETIRED_BIN_VOCABULARY.search(inner), (key, inner)
 
 

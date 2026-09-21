@@ -23,13 +23,14 @@ that construction and both matter:
 Two more things the construction is careful about, both so that reading the demo teaches
 the instrument rather than an artefact of the fixture:
 
-* the blocks written are the **engineered feature families**, which is the decomposition
-  the instrument reports against. Per-family decomposition is what a reader is supposed
-  to reach for; a fixture built on another axis would advertise the wrong method.
-* every family gets the **same separating strength per column**, normalized so width
-  does not decide which family looks informative. A fixture where one block happened to
-  win would read as a finding about substrates, and the only finding available here is
-  about the generator.
+* every block gets the **same separating strength per column**, normalized so that width
+  does not decide which block looks informative. A fixture where one block happened to
+  win would read as a finding about substrates — and the only finding available here is
+  about the generator. This matters more than it sounds: the claim this project had to
+  revise was a claim that one bin was load-bearing, and a demo that staged it by accident
+  would teach a reader the superseded result off the first command they ran.
+* every block is written, so no union is short and no section has to state an absence
+  it would only be stating about the fixture.
 
 The bank carries a lane identifier naming itself as synthetic, because the read side
 gates on lane identity and an unstamped bank is indistinguishable from one whose
@@ -45,9 +46,14 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from anamnesis.analysis.gauntlet.signature_io import (
+    ATTENTION_AND_DELTAS,
     ATTENTION_FLOW,
     BLOCK_NPZ_KEYS,
+    CACHE_AND_KEYS,
+    CONTRASTIVE_PROJECTION,
     GATE_FEATURES,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
     RESIDUAL_TRAJECTORY,
     TEMPORAL_DYNAMICS,
 )
@@ -58,12 +64,24 @@ SYNTHETIC_LANE = "synthetic-bank-v1"
 """The lane identity a synthetic bank carries, so it is never mistaken for a measurement."""
 
 DEFAULT_BLOCK_WIDTHS: dict[str, int] = {
+    NORMS_AND_OUTPUT_STATS: 16,
+    ATTENTION_AND_DELTAS: 24,
+    CACHE_AND_KEYS: 24,
+    RESIDUAL_PCA: 12,
     RESIDUAL_TRAJECTORY: 18,
     ATTENTION_FLOW: 24,
     GATE_FEATURES: 20,
     TEMPORAL_DYNAMICS: 24,
+    CONTRASTIVE_PROJECTION: 20,
 }
-"""Per-family widths. Narrow on purpose: the shape is the point, not the size."""
+"""Every block the loader knows, narrow.
+
+All nine, rather than a readable subset, because a union is built only when every one
+of its members is present — so a bank missing one block is a bank on which several
+sections state an absence instead of reading. A fixture whose purpose is to exercise
+the reading side should not be the reason a section cannot run. The widths are small
+because the shape is the point, not the size.
+"""
 
 FEATURES_KEY_PREFIX = "features_"
 
