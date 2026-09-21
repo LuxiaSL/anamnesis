@@ -28,6 +28,16 @@ geometry = [
     "dadapy>=0.3",
     "scikit-dimension>=0.3",
 ]
+# The judging layer is the one part of the instrument that talks to a model
+# provider: it needs a network, a vendor account and a budget, where everything
+# else here runs on a machine with none of the three. So the two client libraries
+# are an extra, their imports are deferred to first use, and the test suite mocks
+# the transport rather than installing them — which is also what guarantees no
+# test can reach an API.
+judge = [
+    "anthropic>=0.40",
+    "requests>=2.31",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["anamnesis", "tools"]

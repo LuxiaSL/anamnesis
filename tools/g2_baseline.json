@@ -20,8 +20,8 @@
     "C2": {
       "capability": "2AFC judge harness",
       "module": "anamnesis/judging/harness.py",
-      "justification": "consolidation",
-      "ported_consumers": null,
+      "justification": "consolidation. The five consumers are anamnesis/judging/likert.py (the non-2AFC paradigm, which shares the backend contract and the usage accounting), anamnesis/scripts/judge_2afc.py (the entry point), and tests/test_judging_{harness,likert}.py plus tests/test_judge_2afc_cli.py. The eight donors stay frozen in the record, where their banked tables were produced. The reduction is the smallest of the five consolidations and says something true about the scope: the module carries three controls no single donor had in one place (the ceiling rule, the reader-grade ladder and the mechanical anti-circularity check), plus packet banking, reconstruction verification and cross-family comparison, so what it removes is the duplicated pair-drawing, Wilson arithmetic and fallback ladder that appeared in all eight.",
+      "ported_consumers": 5,
       "donor_total": 1700,
       "donors": {
         "anamnesis/scripts/run_2afc_mode_hardening.py": 190,

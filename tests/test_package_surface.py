@@ -86,6 +86,35 @@ def test_configuration_does_not_import_the_mode_prompts() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_naming_the_judging_package_pulls_no_vendor_client() -> None:
+    """Judging is the one layer that talks to a provider, and it says so by extra.
+
+    The two client libraries ship in `[judge]` and are imported at first use, so
+    reading the judging package's docstring, or the prompt table, costs nothing
+    and needs no account.
+    """
+    result = run_probe(
+        "import anamnesis.judging, anamnesis.judging.prompts, sys; "
+        "pulled = [m for m in sys.modules if m.split('.')[0] in ('anthropic', 'requests')]; "
+        "assert not pulled, pulled"
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_harness_imports_without_the_provider_libraries_installed() -> None:
+    """The import-time claim is not vacuous only because the harness is importable
+    in an environment that has neither library, which is this one."""
+    result = run_probe(
+        "import importlib.util as u, anamnesis.judging.harness as h, sys; "
+        "missing = [m for m in ('anthropic', 'requests') if u.find_spec(m) is None]; "
+        "assert missing, 'both client libraries are installed, so this proves nothing'; "
+        "pulled = [m for m in sys.modules if m.split('.')[0] in ('anthropic', 'requests')]; "
+        "assert not pulled, pulled; "
+        "assert h.AnthropicBackend().api_key_present() in (True, False)"
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_the_public_surface_names_are_the_types_downstream_builds_on() -> None:
     for symbol in (ExperimentConfig, ModelConfig, ModelPreset, RunSpec):
         assert symbol.__module__.startswith("anamnesis.config.")
