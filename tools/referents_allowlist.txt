@@ -67,6 +67,12 @@ https?://[^\s`'"<>)\]]+
 \bsignature\.npz
 \bfeatures\.npz
 
+# The default artifact location on the operator's machine. It is a location this
+# code computes rather than a file in this repository, and stating it is the whole
+# job of the docstring that names it — a reader has to know where a run's output
+# lands. Anchored to the XDG spelling so it cannot mask an arbitrary home path.
+~/\.local/share
+
 # Files that live inside a model checkpoint directory. They belong to the
 # checkpoint the operator points at, and what they contain is the reason the
 # comment names them.

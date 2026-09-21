@@ -7,8 +7,11 @@ Three roots locate everything the instrument reads and writes:
     sets — lives under it.
 ``outputs_root()``
     Runs, calibration artifacts and analysis results. ``ANAMNESIS_OUTPUTS``
-    names it; the default is ``outputs`` inside the package directory, which a
-    deployment fills or points at its own data store.
+    names it; the default is ``anamnesis`` under the XDG data directory. It is
+    outside the package because an installed package lives in ``site-packages``,
+    where a run's artifacts would be mixed in with the code that produced them,
+    removed by the next upgrade, and shared between every project on the machine.
+    A corpus is a machine's data, not part of the installation.
 ``legacy_data_root()``
     The Phase-0 tree holding the 3B corpus and its calibration.
     ``ANAMNESIS_LEGACY_DATA`` names it; the default is ``phase_0`` beside the
@@ -38,6 +41,10 @@ DATA_ROOTS: tuple[DataRoot, ...] = get_args(DataRoot)
 OUTPUTS_ENV = "ANAMNESIS_OUTPUTS"
 LEGACY_DATA_ENV = "ANAMNESIS_LEGACY_DATA"
 RUN_NAME_ENV = "ANAMNESIS_RUN_NAME"
+XDG_DATA_ENV = "XDG_DATA_HOME"
+
+DEFAULT_XDG_DATA_DIR = ".local/share"
+OUTPUTS_DIRNAME = "anamnesis"
 
 DEFAULT_RUN_NAME = "run_8b_baseline"
 PROMPTS_DIRNAME = "prompts"
@@ -54,11 +61,26 @@ def package_root() -> Path:
 
 
 def outputs_root() -> Path:
-    """Where runs, calibration and analysis artifacts live."""
+    """Where runs, calibration and analysis artifacts live.
+
+    ``ANAMNESIS_OUTPUTS`` wins. Without it, the answer is the XDG data location,
+    never a directory inside the installation: a wheel unpacks into
+    ``site-packages``, so a default under the package would write a corpus into
+    the install tree, where an upgrade deletes it and every project on the machine
+    shares it.
+    """
     override = os.environ.get(OUTPUTS_ENV, "").strip()
     if override:
         return Path(override).expanduser()
-    return package_root() / "outputs"
+    return user_data_root() / OUTPUTS_DIRNAME
+
+
+def user_data_root() -> Path:
+    """The XDG data directory: ``XDG_DATA_HOME``, or ``~/.local/share``."""
+    override = os.environ.get(XDG_DATA_ENV, "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / DEFAULT_XDG_DATA_DIR
 
 
 def legacy_data_root() -> Path:

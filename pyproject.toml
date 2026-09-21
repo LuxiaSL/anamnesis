@@ -15,7 +15,13 @@ dependencies = [
     "scipy>=1.12",
     "scikit-learn>=1.4",
     "torch>=2.1",
-    "transformers>=4.36",
+    # 4.54 is where ``Cache`` grew its ``layers`` list of per-layer objects holding
+    # ``keys``/``values``, and where ``DynamicCache`` began accepting pre-built layer
+    # data and a config. The fast lane's batched cache path is written against both
+    # (anamnesis/extraction/fast/features.py:414), and on 4.53 it raises
+    # AttributeError rather than degrading, so this floor is a requirement and not a
+    # preference.
+    "transformers>=4.54",
     "tqdm>=4.66",
 ]
 
@@ -27,6 +33,20 @@ dev = ["pytest>=8"]
 geometry = [
     "dadapy>=0.3",
     "scikit-dimension>=0.3",
+    "ripser>=0.6",
+]
+# Sentence embeddings are the semantic section's yardstick for what a text says,
+# which is the quantity every "orthogonal to content" claim is measured against.
+# The model downloads on first use, so it is an extra for the same reason the
+# judge is: it needs a network the rest of the instrument does not.
+semantic = [
+    "sentence-transformers>=2.2",
+]
+# Adapters are how a training run's checkpoints are loaded for a replay series:
+# one base model plus a sequence of adapters, rather than a sequence of models.
+# A corpus that never replays a fine-tune never needs it.
+adapters = [
+    "peft>=0.10",
 ]
 # The judging layer is the one part of the instrument that talks to a model
 # provider: it needs a network, a vendor account and a budget, where everything
@@ -40,7 +60,11 @@ judge = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["anamnesis", "tools"]
+# ``tools`` is the gate tooling: it checks this repository rather than forming part
+# of the instrument, so it stays out of the wheel. Its own tests import it as a
+# top-level module, which ``[tool.pytest.ini_options] pythonpath`` supplies from a
+# checkout.
+packages = ["anamnesis"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

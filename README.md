@@ -12,6 +12,22 @@ This repository is being refounded from the research codebase; the structure and
 landing in reviewed increments. [`CONTRIBUTING.md`](CONTRIBUTING.md) states how code and claims
 arrive, the documentation rule both are held to, and the gates a change passes.
 
+## Installing
+
+```bash
+pip install -e ".[dev]"
+```
+
+Artifacts — runs, calibration, analysis results — are written under the XDG data
+directory, never inside the installation. `ANAMNESIS_OUTPUTS` points that elsewhere, and is
+how a corpus on another disk is read.
+
+Four extras, each carrying what one part needs and nothing else: `geometry`
+(intrinsic-dimension estimators and persistent homology), `semantic` (sentence
+embeddings), `judge` (provider clients), `adapters` (checkpoint-series replay). The
+instrument imports and runs without all four, and a part that needs one reports its
+absence rather than failing the import.
+
 ## Lineage
 
 - [`anamnesis-pl`](https://github.com/LuxiaSL/anamnesis-pl) — the frozen record: the

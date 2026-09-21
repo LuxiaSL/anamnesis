@@ -57,6 +57,7 @@ from anamnesis.config.paths import (
     resolve_prompts_path,
     run_name,
     run_outputs_dir,
+    user_data_root,
 )
 from anamnesis.config.runs import (
     RUNS_FILE,
@@ -113,4 +114,5 @@ __all__ = [
     "run_name",
     "run_names",
     "run_outputs_dir",
+    "user_data_root",
 ]

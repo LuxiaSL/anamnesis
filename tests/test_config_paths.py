@@ -15,9 +15,32 @@ def test_package_root_is_the_installed_package() -> None:
     assert (root / "config" / "paths.py").is_file()
 
 
-def test_outputs_root_defaults_beside_the_package(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_outputs_root_defaults_to_the_user_data_location(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.delenv(paths.OUTPUTS_ENV, raising=False)
-    assert paths.outputs_root() == paths.package_root() / "outputs"
+    monkeypatch.setenv(paths.XDG_DATA_ENV, str(tmp_path / "share"))
+    assert paths.outputs_root() == tmp_path / "share" / paths.OUTPUTS_DIRNAME
+
+
+def test_outputs_root_never_defaults_inside_the_installation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The invariant behind the default: a wheel's own directory is not a data store.
+
+    An installed package sits in ``site-packages``, so a corpus written under the
+    package directory is deleted by the next upgrade and shared by every project on
+    the machine. This holds whether or not the XDG variable is set, which is why it
+    is asserted both ways rather than only against the fallback.
+    """
+    monkeypatch.delenv(paths.OUTPUTS_ENV, raising=False)
+    package = paths.package_root()
+
+    monkeypatch.setenv(paths.XDG_DATA_ENV, str(tmp_path / "share"))
+    assert package not in paths.outputs_root().parents
+
+    monkeypatch.delenv(paths.XDG_DATA_ENV, raising=False)
+    assert package not in paths.outputs_root().parents
 
 
 def test_outputs_root_follows_its_environment_variable(
@@ -28,10 +51,25 @@ def test_outputs_root_follows_its_environment_variable(
 
 
 def test_blank_environment_variable_falls_back_to_the_default(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv(paths.OUTPUTS_ENV, "   ")
-    assert paths.outputs_root() == paths.package_root() / "outputs"
+    monkeypatch.setenv(paths.XDG_DATA_ENV, str(tmp_path / "share"))
+    assert paths.outputs_root() == tmp_path / "share" / paths.OUTPUTS_DIRNAME
+
+
+def test_user_data_root_prefers_its_environment_variable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(paths.XDG_DATA_ENV, str(tmp_path / "share"))
+    assert paths.user_data_root() == tmp_path / "share"
+
+
+def test_user_data_root_falls_back_under_the_home_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(paths.XDG_DATA_ENV, raising=False)
+    assert paths.user_data_root() == Path.home() / paths.DEFAULT_XDG_DATA_DIR
 
 
 def test_legacy_data_root_defaults_beside_the_package(monkeypatch: pytest.MonkeyPatch) -> None:
