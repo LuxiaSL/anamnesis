@@ -100,7 +100,7 @@ def save_raw_tensors(
         hs_array_indices = [0] + hs_array_indices
         hs_layer_indices = [-1] + hs_layer_indices  # -1 = embedding layer
 
-    # Attention: sampled_layers only (these are what T2/T2.5 features use)
+    # Attention: sampled_layers only (what the attention and cache-read features use)
     attn_layer_indices = sorted(config.sampled_layers)
     # Attention array: index L directly (no +1 offset like hidden_states)
 
@@ -383,7 +383,7 @@ def load_raw_tensors(
 
     The returned object is compatible with state_extractor.extract_all_features(),
     with the caveat that only sampled layers are populated — features that require
-    all layers (like per-layer norms in Tier 1) will only have data at saved layers.
+    all layers (like the per-layer activation norms) will only have data at saved layers.
 
     Parameters
     ----------

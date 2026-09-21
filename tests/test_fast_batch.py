@@ -71,7 +71,7 @@ def test_batch_feature_parity_repeat_and_cleanup(
         early_layer_cutoff=8, late_layer_cutoff=24,
     )
     families = FeaturePipelineConfig(
-        include_baseline_tiers=True,
+        include_core_blocks=True,
         enable_residual_trajectory=True,
         trajectory_layers=[1],
         enable_attention_flow=True,

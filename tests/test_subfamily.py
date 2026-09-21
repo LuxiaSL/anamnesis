@@ -148,10 +148,10 @@ def synthetic_run(names: list[str], *, n_per_mode: int = 12, seed: int = 0) -> R
         )
     X = np.stack(rows)
     return Run4Data(
-        tier_features={"temporal_dynamics": X},
+        block_features={"temporal_dynamics": X},
         group_features={},
         all_features=X,
-        tier_feature_names={"temporal_dynamics": np.array(names)},
+        block_feature_names={"temporal_dynamics": np.array(names)},
         samples=samples,
         modes=np.array(modes),
         topics=np.array([s.topic for s in samples]),
@@ -164,11 +164,11 @@ def test_names_and_columns_must_agree_or_the_cut_is_refused() -> None:
     data = synthetic_run(TD_NAMES)
     assert feature_names_for(data, "temporal_dynamics") == TD_NAMES
 
-    data.tier_feature_names["temporal_dynamics"] = np.array(TD_NAMES[:-1])
+    data.block_feature_names["temporal_dynamics"] = np.array(TD_NAMES[:-1])
     with pytest.raises(ValueError, match="would map names onto the wrong columns"):
         feature_names_for(data, "temporal_dynamics")
 
-    data.tier_feature_names["temporal_dynamics"] = np.array([])
+    data.block_feature_names["temporal_dynamics"] = np.array([])
     with pytest.raises(KeyError, match="no feature names"):
         feature_names_for(data, "temporal_dynamics")
 
@@ -189,7 +189,7 @@ def test_a_cut_scores_every_part_and_the_whole_family() -> None:
 
 def test_an_empty_subset_returns_a_reason_rather_than_an_accuracy() -> None:
     data = synthetic_run(TD_NAMES)
-    X = data.get_tier("temporal_dynamics")
+    X = data.get_block("temporal_dynamics")
     empty = accuracy_on_subset(X, data.modes, np.zeros(X.shape[1], dtype=bool))
     assert empty.n_features == 0 and empty.accuracy == 0.0
     assert empty.error == "no features"
@@ -225,7 +225,7 @@ def test_a_run_is_decomposed_for_every_family_it_carries_a_convention_for() -> N
 
 def test_a_family_whose_names_the_bank_cannot_assign_is_skipped_with_a_reason() -> None:
     data = synthetic_run(TD_NAMES)
-    data.tier_feature_names.clear()
+    data.block_feature_names.clear()
     assert decompose_run(data) == {}, "a family with no usable names is not decomposed"
 
 

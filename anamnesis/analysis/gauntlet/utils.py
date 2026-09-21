@@ -10,6 +10,18 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel
 
+from .signature_io import (
+    ALL_CORE,
+    ALL_FAMILIES,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    EVERYTHING,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+)
+
 
 def standardize(X: NDArray[np.floating]) -> NDArray[np.float64]:
     """Z-score standardize features. Constant features get std=1."""
@@ -65,36 +77,36 @@ def timer(label: str = "") -> Generator[dict[str, float], None, None]:
             print(f"  [{label}] {result['elapsed']:.1f}s")
 
 
-# Default tier lists — used when analysis modules don't get dynamic lists.
-# For v2 data, use get_available_tiers() to discover what's actually present.
-ALL_TIERS = ["T1", "T2", "T2.5", "T3", "T2+T2.5", "combined"]
-KEY_TIERS = ["T2+T2.5", "combined"]
+# Default block lists — used when analysis modules don't get dynamic lists.
+# For v2 data, use get_available_blocks() to discover what's actually present.
+ALL_BLOCKS = [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA, ATTENTION_AND_CACHE, ALL_CORE]
+KEY_BLOCKS = [ATTENTION_AND_CACHE, ALL_CORE]
 
 
-def get_available_tiers(data: object) -> tuple[list[str], list[str]]:
-    """Discover which tiers and groups are available in loaded data.
+def get_available_blocks(data: object) -> tuple[list[str], list[str]]:
+    """Discover which blocks and groups are available in loaded data.
 
     Parameters
     ----------
     data : AnalysisData or Run4Data
-        Loaded data object with tier_features and group_features.
+        Loaded data object with block_features and group_features.
 
     Returns
     -------
-    all_tiers : list[str]
-        All individual tiers + groups that are present.
-    key_tiers : list[str]
+    all_blocks : list[str]
+        All individual blocks + groups that are present.
+    key_blocks : list[str]
         Key composite groups for expensive analyses.
     """
     run4 = getattr(data, "run4", data)
-    individual = list(run4.tier_features.keys())
+    individual = list(run4.block_features.keys())
     groups = list(run4.group_features.keys())
 
-    all_tiers = individual + groups
-    # Key tiers: composites that include multiple families
-    key_tiers = [g for g in groups if g in {
-        "T2+T2.5", "combined", "engineered", "combined_v2",
-        "T2+T2.5+engineered",
+    all_blocks = individual + groups
+    # Key blocks: composites that include multiple families
+    key_blocks = [g for g in groups if g in {
+        ATTENTION_AND_CACHE, ALL_CORE, ALL_FAMILIES, EVERYTHING,
+        ATTENTION_AND_CACHE_WITH_FAMILIES,
     }]
 
-    return all_tiers, key_tiers
+    return all_blocks, key_blocks

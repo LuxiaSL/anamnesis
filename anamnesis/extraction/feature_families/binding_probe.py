@@ -3,7 +3,7 @@
 Every other family in this package pools over *prompt position*. The finest
 prompt-side cut available anywhere in the suite is the four-way
 ``[prompt | early_gen | mid_gen | recent]`` region split (``attention_flow``)
-or the whole-prompt scalars in tier 2.5 (``cache_lookback_ratio`` and
+or the whole-prompt cache-read scalars (``cache_lookback_ratio`` and
 friends): they record how much mass landed on the prompt, never *which*
 prompt token it landed on. Binding — which attribute went with which entity —
 is therefore invisible to the standard suite by construction, not by accident.

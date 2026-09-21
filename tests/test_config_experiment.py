@@ -74,15 +74,15 @@ def test_extraction_layer_plan_comes_from_the_preset(
     assert config.pca_layers == pca
     assert config.early_layer_cutoff == early
     assert config.late_layer_cutoff == late
-    assert config.enable_tier1 and config.enable_tier2 and config.enable_tier2_5
-    assert config.enable_tier3 and config.enable_knnlm_baseline
+    assert config.enable_norms_and_output_stats and config.enable_attention_and_deltas and config.enable_cache_and_keys
+    assert config.enable_residual_pca and config.enable_knnlm_baseline
     assert not config.save_raw_tensors
 
 
 def test_extraction_config_stays_mutable_for_a_single_switch() -> None:
     config = ExtractionConfig.from_preset("8b")
-    config.enable_tier3 = False
-    assert not config.enable_tier3
+    config.enable_residual_pca = False
+    assert not config.enable_residual_pca
 
 
 def test_extraction_layer_plan_is_checked_against_the_model_depth() -> None:
@@ -113,7 +113,7 @@ def test_family_layers_come_from_the_preset(name: str, layers: list[int]) -> Non
     config = FeaturePipelineConfig.from_preset(name)
     assert config.trajectory_layers == layers
     assert config.contrastive_layers == layers
-    assert config.include_baseline_tiers
+    assert config.include_core_blocks
     assert not config.enable_attention_flow
     assert not config.enable_path_signature
 

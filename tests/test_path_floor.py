@@ -29,7 +29,7 @@ from anamnesis.extraction.equivalence.path_floor import (
     coordinate_lower_bound,
     first_position_coordinates,
 )
-from anamnesis.extraction.state_extractor import RawGenerationData, extract_tier1
+from anamnesis.extraction.state_extractor import RawGenerationData, extract_norms_and_output_stats
 
 
 @pytest.mark.parametrize(
@@ -52,7 +52,7 @@ def test_first_coordinates_exactly_match_full_reference(steps, width):
         prompt_length=11,
         positional_means=pm,
     )
-    full, names = extract_tier1(raw, cfg)
+    full, names = extract_norms_and_output_stats(raw, cfg)
     values, selected = first_position_coordinates(hidden[0], pm, 11, cfg)
     expected = full[[names.index(n) for n in selected]]
     assert values.tobytes() == expected.tobytes()

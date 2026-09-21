@@ -147,7 +147,7 @@ def load_run_features(
     """One run's feature matrix and encoded mode labels, in banked order.
 
     ``feature_key`` names the npz key, or several keys to concatenate in the order
-    given — which is how a subset of tiers is read without recomputing anything.
+    given — which is how a subset of blocks is read without recomputing anything.
     ``feature_indices`` selects columns *after* that concatenation, so an index
     means a position in the vector the caller asked for.
     """

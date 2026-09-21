@@ -1,15 +1,13 @@
 """Feature map — the (SOURCE x METHOD x DEPTH) taxonomy, the vocabulary of record for
 describing what a feature reads.
 
-The T1/T2/T2.5/T3 tier names remain a compatibility surface, and both halves of that
-sentence are load-bearing. A tier is a diagonal smear across three orthogonal axes — T2.5
-alone mixes attention-weight reads with key-vector geometry, two different substrates — so a
-tier's accuracy is not a reading of anything, and no new claim is stated in tier terms. But
-the names are frozen on disk: `extract_tier1`..`extract_tier3` in
-`anamnesis/extraction/state_extractor.py` build the vector, the `tier_slices` keys in a
-banked signature's metadata index into it, and
-`anamnesis/analysis/gauntlet/tier_ablation.py` runs as section 3 of the gauntlet off those
-slices. Describe a feature by its cell here; address a stored artifact by its tier name.
+A feature's cell here is what says which substrate it reads. The contiguous blocks a
+signature vector is addressed in — `extract_norms_and_output_stats`..`extract_residual_pca`
+in `anamnesis/extraction/state_extractor.py` build them, and
+`anamnesis/analysis/gauntlet/signature_io.py` reads them back — are addresses into the
+vector and nothing more. Three of the four span several sources at once, so a block's
+accuracy is not a reading of any single substrate and no claim is stated per block. Address a
+stored artifact by its block; describe a feature by its cell.
 
 This module tags every signature feature by the axes that ARE interpretable and were
 empirically validated on the merged v3 corpus (2026-06-14):
@@ -102,13 +100,21 @@ class FeatureTag(BaseModel):
     dynamic: Optional[bool]      # True=dynamic, False=static, None=ambiguous
     layer: Optional[int]
     band: Optional[Band]
-    family: str                  # legacy tier/family label (back-compat with gate_a_v3_battery.fam_of)
+    family: str                  # the family label banked analyses key their per-family
+                                 # numbers by; see `stored_family()` for the label set
 
 
 # ---------------------------------------------------------------------------- classification rules
 
-def legacy_family(n: str) -> str:
-    """Verbatim from gate_a_v3_battery.fam_of (+ the v3 hand-suite families) — old analyses still line up."""
+def stored_family(n: str) -> str:
+    """The family label a feature is grouped under in banked per-family results.
+
+    The labels are a wire vocabulary, not a description: `anamnesis/analysis/battery/floors.py`
+    keys its floor results by `family:<label>`, so a label that changed would silently stop
+    lining up with the numbers already banked under it. Five of them are short historical
+    strings that follow the stored block layout; the rest name their family directly. What a feature
+    reads is answered by `classify()` and its (source, method, depth) cell, never by this.
+    """
     if n.startswith("value_"): return "value_geometry"
     if n.startswith(("qk_", "q_")): return "qk_geometry"
     if "cka" in n: return "kv_cka"
@@ -234,7 +240,7 @@ def classify(name: str, n_layers: int) -> FeatureTag:
     L = _layer(name)
     src = _source(name)
     return FeatureTag(name=name, source=src, method=_method(name, src), dynamic=_dynamic(name),
-                      layer=L, band=_band(L, n_layers), family=legacy_family(name))
+                      layer=L, band=_band(L, n_layers), family=stored_family(name))
 
 
 # ---------------------------------------------------------------------------- the map

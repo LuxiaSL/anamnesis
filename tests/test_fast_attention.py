@@ -30,7 +30,7 @@ from anamnesis.extraction.feature_families.per_head import extract_per_head
 from anamnesis.extraction.feature_families.operators import apply_operators
 from anamnesis.extraction.fast.attention import AttentionReducer
 from anamnesis.extraction.fast.ops import FeatureCollector, temporal
-from anamnesis.extraction.state_extractor import RawGenerationData, extract_tier2, extract_tier2_5
+from anamnesis.extraction.state_extractor import RawGenerationData, extract_attention_and_deltas, extract_cache_and_keys
 
 
 @pytest.mark.parametrize('steps',[1,2,7,31,61,127])
@@ -50,7 +50,7 @@ def test_attention_matches_all_reference_consumers(steps):
     config=ExtractionConfig(sampled_layers=[0,1],pca_layers=[0,1],
                             early_layer_cutoff=8,late_layer_cutoff=24)
     expected={}
-    for fn in (extract_tier2,extract_tier2_5):
+    for fn in (extract_attention_and_deltas,extract_cache_and_keys):
         f,n=fn(raw,config)
         expected.update(zip(n,f,strict=True))
     for fn in (extract_attention_flow,extract_per_head):

@@ -2,8 +2,8 @@
 
 prereg-vmb-v1 §6b: one analysis template for every arm × model. A BatteryCell is
 the unit of the visibility map: (arm, model, dose, cell type), with its floor
-type declared per the ratified two-floor design (§1). No tier vocabulary
-anywhere — localization speaks feature_map (source × method × dynamic × depth).
+type declared per the ratified two-floor design (§1). Localization speaks feature_map
+(source × method × dynamic × depth); a coarse feature block never stands in for a cell.
 
 Every emitted number downstream carries (n, M, law, floor-type); the manifest is
 where those stamps originate.

@@ -157,7 +157,8 @@ class PathSignatureConfig(BaseModel):
     positional_correct: bool = Field(
         default=True,
         description="Subtract the banked positional mean from each hidden state before "
-                    "projecting (matches residual_stream / T2.5 / T3 practice).",
+                    "projecting, as residual_stream and the cache-and-keys and "
+                    "residual-PCA blocks all do.",
     )
     permute_increments: bool = Field(
         default=False,
@@ -427,7 +428,7 @@ class ProjectionBasisBank(BaseModel):
         """Load a banked calibration PCA (global or C5 per-layer format).
 
         Mirrors ``feature_pipeline._load_pca_model``'s format sniffing so the same artefacts
-        that already feed T3 feed this family, with no new calibration step.
+        that already feed the residual-PCA block feed this family, with no new calibration step.
         """
         p = Path(path)
         if not p.exists():
@@ -606,8 +607,8 @@ class RawGenerationDataPathSource(ResidualPathSource):
     ``hidden_states[t][l+1]`` — index 0 is the embedding output, not layer 0, so an
     off-by-one here silently mislabels every layer-indexed feature.
     Positional correction reuses ``state_extractor._correct_hidden_state``, i.e. exactly what
-    the residual_trajectory / T2.5 / T3 features do, so the projected path is the same object
-    those features summarise.
+    residual_trajectory and the cache-and-keys and residual-PCA blocks do, so the projected
+    path is the same object those features summarise.
     """
 
     def __init__(
@@ -827,7 +828,7 @@ class AttentionRegionPathConfig(_NullControlMixin):
     ``attention_flow.extract_attention_flow`` already computes —
     ``prompt, early_gen, mid_gen, recent`` (4 dims), plus ``sink`` (attention to position 0,
     ``state_extractor``'s ``cache_sink_mass_L{n}`` formula) as a 5th when ``include_sink=True``
-    (spec: "plus sink mass if separable" — it is, per the existing T2.5 sink feature, so this
+    (spec: "plus sink mass if separable" — it is, per the existing cache sink feature, so this
     defaults on). Region order is fixed and documented so coordinate indices ``c0..c{k-1}`` are
     interpretable: ``[prompt, early_gen, mid_gen, recent, (sink)]``.
     """
@@ -1416,7 +1417,7 @@ def _attention_region_per_token(
     (the ``prompt_len`` / ``gen_len`` / thirds split, and the ``total_mass``-normalised
     fractions) — same arithmetic, same edge cases (an empty attention step at position 0 of a
     degenerate path contributes an all-zero row, matching that family's own fallback). Sink
-    mass reuses ``state_extractor``'s T2.5 ``cache_sink_mass_L{n}`` definition (attention to
+    mass reuses ``state_extractor``'s ``cache_sink_mass_L{n}`` definition (attention to
     position 0, the BOS/attention-sink position), here additionally divided by ``total_mass``
     so it sits on the same [0,1]-fraction-of-total-attention scale as the four region columns
     (state_extractor's own sink feature skips that division since raw attention weights

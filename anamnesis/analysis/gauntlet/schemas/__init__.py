@@ -6,6 +6,10 @@ written under ``outputs/analysis/<run>/results.json`` is the model's own wire
 shape: ``clean_for_json`` stays in the write path for NaN/Inf scrubbing and
 numpy coercion, and nothing here reshapes a banked file's structure.
 
+``compat`` is the read side of a rename: it maps an older file's field names onto
+the current ones so a banked document still loads, and it is the one place to look
+when following a citation from an older file.
+
 The split is by section because that is how the results are produced, consumed
 and skipped — a section's schema, its runner and its ``--skip`` number move
 together. ``base`` holds the one shared model config and the rules that follow
@@ -16,6 +20,11 @@ caller that wants one section can import that module alone.
 
 from __future__ import annotations
 
+from anamnesis.analysis.gauntlet.schemas.compat import (
+    FIELD_RENAMES,
+    SECTION_RENAMES,
+    migrate_banked_results,
+)
 from anamnesis.analysis.gauntlet.schemas.ccgp import (
     CCGPDichotomy,
     CCGPResult,
@@ -30,14 +39,14 @@ from anamnesis.analysis.gauntlet.schemas.classification import (
     LengthOnlyResult,
     PerModeLengthStats,
     PermutationTestResult,
-    TierClassificationResult,
+    BlockClassificationResult,
     TopicHeldoutResult,
 )
 from anamnesis.analysis.gauntlet.schemas.clustering import (
     ClusteringResult,
     EmbeddingResult,
     PerModeSilhouetteStats,
-    TierSilhouette,
+    BlockSilhouette,
 )
 from anamnesis.analysis.gauntlet.schemas.contrastive import (
     CapacitySweepEntry,
@@ -45,8 +54,8 @@ from anamnesis.analysis.gauntlet.schemas.contrastive import (
     ContrastivePairwiseEntry,
     ContrastiveResult,
     ContrastiveSuperAdditivity,
-    ContrastiveTierAblation,
-    ContrastiveTierResult,
+    ContrastiveBlockAblation,
+    ContrastiveBlockResult,
     LinearBaselineEntry,
 )
 from anamnesis.analysis.gauntlet.schemas.integrity import (
@@ -54,16 +63,16 @@ from anamnesis.analysis.gauntlet.schemas.integrity import (
     LengthByModeStats,
     LengthOverallStats,
     NanInfCount,
-    TierValueRange,
-    TierVarianceReport,
+    BlockValueRange,
+    BlockVarianceReport,
 )
 from anamnesis.analysis.gauntlet.schemas.intrinsic_dimension import (
     BootstrapStats,
-    GlobalTierIDResult,
+    GlobalBlockIDResult,
     GRIDEResult,
     IntrinsicDimensionResult,
     PerModeIDResult,
-    TierConvergenceResult,
+    BlockConvergenceResult,
 )
 from anamnesis.analysis.gauntlet.schemas.manifold_geometry import (
     BettiNumberEntry,
@@ -92,9 +101,9 @@ from anamnesis.analysis.gauntlet.schemas.semantic import (
     MantelResult,
     PerModeSurfaceVsCompute,
     PerModeSurfaceVsComputeResult,
-    PerTierSemanticResult,
+    PerBlockSemanticResult,
     PromptSwapConfoundResult,
-    PromptSwapTierResult,
+    PromptSwapBlockResult,
     RetrievalFeatureSet,
     RetrievalResult,
     SemanticClassifierBundle,
@@ -102,17 +111,17 @@ from anamnesis.analysis.gauntlet.schemas.semantic import (
     ShuffleControlsResult,
     TextToComputeR2,
 )
-from anamnesis.analysis.gauntlet.schemas.tier_ablation import (
+from anamnesis.analysis.gauntlet.schemas.legacy_bin_readout import (
     CohensDPerTopicResult,
     CrossGroupAblation,
     FeatureImportanceEntry,
     LeaveOneOutEntry,
-    PairwiseTierCombo,
+    PairwiseBlockCombo,
     PerTopicEffectSize,
     StdVsMeanResult,
-    TierAblationResult,
-    TierRankingEntry,
-    TripleTierCombo,
+    LegacyBinReadoutResult,
+    BlockRankingEntry,
+    TripleBlockCombo,
 )
 from anamnesis.analysis.gauntlet.schemas.topology import (
     GromovDeltaResult,
@@ -142,8 +151,8 @@ __all__ = [
     "ContrastiveProjectionComparisonResult",
     "ContrastiveResult",
     "ContrastiveSuperAdditivity",
-    "ContrastiveTierAblation",
-    "ContrastiveTierResult",
+    "ContrastiveBlockAblation",
+    "ContrastiveBlockResult",
     "CrossGroupAblation",
     "CurvatureResult",
     "CurvatureScaleEntry",
@@ -153,10 +162,11 @@ __all__ = [
     "GeodesicDistortionResult",
     "GeodesicOverall",
     "GeodesicPerMode",
-    "GlobalTierIDResult",
+    "GlobalBlockIDResult",
     "GromovDeltaResult",
     "IntegrityResult",
     "IntrinsicDimensionResult",
+    "FIELD_RENAMES",
     "JaccardStats",
     "LeaveOneOutEntry",
     "LengthByModeStats",
@@ -167,20 +177,21 @@ __all__ = [
     "MantelResult",
     "ModeVarianceExplained",
     "NanInfCount",
-    "PairwiseTierCombo",
+    "PairwiseBlockCombo",
     "PerModeIDResult",
     "PerModeLengthStats",
     "PerModeSilhouetteStats",
     "PerModeSurfaceVsCompute",
     "PerModeSurfaceVsComputeResult",
-    "PerTierSemanticResult",
+    "PerBlockSemanticResult",
     "PerTopicEffectSize",
     "PermutationTestResult",
     "PersistentHomologyResult",
     "PromptSwapConfoundResult",
-    "PromptSwapTierResult",
+    "PromptSwapBlockResult",
     "RetrievalFeatureSet",
     "RetrievalResult",
+    "SECTION_RENAMES",
     "ScorecardPrediction",
     "ScorecardResult",
     "ScorecardSummary",
@@ -191,15 +202,16 @@ __all__ = [
     "TangentAngles",
     "TangentSpaceResult",
     "TextToComputeR2",
-    "TierAblationResult",
-    "TierClassificationResult",
-    "TierConvergenceResult",
-    "TierRankingEntry",
-    "TierSilhouette",
-    "TierValueRange",
-    "TierVarianceReport",
+    "LegacyBinReadoutResult",
+    "BlockClassificationResult",
+    "BlockConvergenceResult",
+    "BlockRankingEntry",
+    "BlockSilhouette",
+    "BlockValueRange",
+    "BlockVarianceReport",
     "TopicHeldoutResult",
     "TopologyMetricSummary",
     "TopologyResult",
-    "TripleTierCombo",
+    "TripleBlockCombo",
+    "migrate_banked_results",
 ]

@@ -80,4 +80,4 @@ def resolve_gpu_schema(
     result = compute_features_v2_from_data(raw, extraction, families, components, means)
     if len(result.feature_names) != len(set(result.feature_names)):
         raise ValueError("canonical schema contains duplicate names")
-    return GpuFeatureSchema(tuple(result.feature_names), dict(result.tier_slices))
+    return GpuFeatureSchema(tuple(result.feature_names), dict(result.block_slices))

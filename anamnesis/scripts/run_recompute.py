@@ -63,10 +63,10 @@ def configs(model: str) -> tuple[ExtractionConfig, FeaturePipelineConfig]:
     """
     preset = resolve_preset(model)
     return (
-        ExtractionConfig.from_preset(preset, enable_tier3=True),
+        ExtractionConfig.from_preset(preset, enable_residual_pca=True),
         FeaturePipelineConfig.from_preset(
             preset,
-            include_baseline_tiers=True,
+            include_core_blocks=True,
             enable_residual_trajectory=True,
             enable_attention_flow=True,
             enable_gate_features=True,

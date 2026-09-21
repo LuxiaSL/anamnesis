@@ -1,6 +1,6 @@
 """Section 7 schemas: silhouette and k-means agreement.
 
-Unsupervised structure read against the mode labels: per-tier silhouette with
+Unsupervised structure read against the mode labels: per-block silhouette with
 its per-mode breakdown, k-means adjusted Rand, and the 2-D embeddings.
 """
 
@@ -13,8 +13,8 @@ from pydantic import BaseModel
 from anamnesis.analysis.gauntlet.schemas.base import _FORBID
 
 
-class TierSilhouette(BaseModel):
-    """Per-tier silhouette scores.
+class BlockSilhouette(BaseModel):
+    """Per-block silhouette scores.
 
     ``mode_silhouette_cosine`` / ``_euclidean`` / ``mode_silhouette`` are
     floats on success; they fall back to ``"ERROR: ..."`` strings when
@@ -70,7 +70,7 @@ class ClusteringResult(BaseModel):
 
     model_config = _FORBID
 
-    silhouette_by_tier: dict[str, TierSilhouette]
+    silhouette_by_block: dict[str, BlockSilhouette]
     per_mode_silhouette: dict[str, Any]
     per_mode_silhouette_cosine: dict[str, Any]
     per_mode_silhouette_euclidean: dict[str, Any]

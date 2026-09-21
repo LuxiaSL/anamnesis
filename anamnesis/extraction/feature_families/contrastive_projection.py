@@ -1,6 +1,6 @@
-"""Contrastive projection of raw hidden states — T3 replacement.
+"""Contrastive projection of raw hidden states — what the residual-PCA block is for.
 
-Replaces content-calibrated PCA (which captures format, not modes) with
+Stands in for content-calibrated PCA, which captures format rather than modes, with
 a trained contrastive projection that maximizes mode separation.
 
 Architecture: Linear(hidden_dim, 256) → ReLU → Linear(256, 32) → L2-normalize

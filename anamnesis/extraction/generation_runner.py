@@ -41,6 +41,7 @@ from anamnesis.extraction.replay.manifest import (
     write_replay_manifest,
 )
 from anamnesis.extraction.state_extractor import (
+    STORED_BLOCK_SLICES_KEY,
     ExtractionResult,
     RawGenerationData,
     extract_all_features,
@@ -201,7 +202,7 @@ def run_single_generation(
         "num_generated_tokens": len(generated_ids),
         "prompt_length": prompt_length,
         "num_features": len(result.features),
-        "tier_slices": result.tier_slices,
+        STORED_BLOCK_SLICES_KEY: result.block_slices,
         INPUT_IDS_KEY: realized_ids,
         "timing": {
             "generation_seconds": round(t_generate - t_start, 2),
@@ -464,13 +465,15 @@ def save_generation(
     if result.knnlm_baseline is not None:
         save_dict["knnlm_baseline"] = result.knnlm_baseline
 
-    for tier_name, (start, end) in result.tier_slices.items():
-        save_dict[f"features_{tier_name}"] = result.features[start:end]
+    for block_name, (start, end) in result.block_slices.items():
+        save_dict[f"features_{block_name}"] = result.features[start:end]
 
     np.savez_compressed(npz_path, **save_dict)
 
     meta_copy = lean_metadata(metadata)
-    meta_copy["tier_slices"] = {k: list(v) for k, v in metadata["tier_slices"].items()}
+    meta_copy[STORED_BLOCK_SLICES_KEY] = {
+        k: list(v) for k, v in metadata[STORED_BLOCK_SLICES_KEY].items()
+    }
     with open(json_path, "w") as f:
         json.dump(meta_copy, f, indent=2, default=str)
 

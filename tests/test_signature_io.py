@@ -4,8 +4,8 @@ Everything the gauntlet concludes rests on this loader putting the right rows in
 the right order with the right labels, so the tests here are about the joins
 rather than about the arithmetic:
 
-  * tier discovery from npz contents, and the composite groups built from
-    whichever tiers turned out to be present;
+  * block discovery from npz contents, and the composite groups built from
+    whichever blocks turned out to be present;
   * the core-only filter, which is what makes "one repetition per topic-mode
     pair" a property of the loaded matrix rather than of the caller's care;
   * addon merging, including the two ways it must refuse — an addon that covers
@@ -28,13 +28,14 @@ import numpy as np
 import pytest
 
 from anamnesis.analysis.gauntlet.signature_io import (
+    ALL_CORE,
     AnalysisData,
-    BASELINE_TIERS,
-    ENGINEERED_TIERS,
+    CORE_BLOCKS,
+    FAMILY_BLOCKS,
     Run4Data,
     SampleMeta,
-    TIER_GROUPS,
-    TIER_KEYS,
+    BLOCK_UNIONS,
+    BLOCK_NPZ_KEYS,
     check_data_quality,
     default_signature_dir,
     load_analysis_data,
@@ -54,23 +55,23 @@ def write_gen(
     mode_idx: int = 0,
     topic: str = "topic_a",
     topic_idx: int = 0,
-    tiers: dict[str, int] | None = None,
+    blocks: dict[str, int] | None = None,
     text: str = "some generated text",
     tokens: int = 128,
     lane: str | None = None,
 ) -> None:
-    """One synthetic (npz, json) generation pair, with per-tier widths."""
+    """One synthetic (npz, json) generation pair, with per-block widths."""
     folder.mkdir(parents=True, exist_ok=True)
-    tiers = tiers or {"T1": 3, "T2": 2}
+    blocks = blocks or {"T1": 3, "T2": 2}
     arrays: dict[str, np.ndarray] = {}
     names: list[str] = []
     slices: dict[str, list[int]] = {}
     cursor = 0
-    for tier, width in tiers.items():
-        key = TIER_KEYS[tier]
+    for block, width in blocks.items():
+        key = BLOCK_NPZ_KEYS[block]
         arrays[key] = np.arange(width, dtype=np.float32) + float(index)
         slices[key.replace("features_", "")] = [cursor, cursor + width]
-        names.extend(f"{tier}_f{i}" for i in range(width))
+        names.extend(f"{block}_f{i}" for i in range(width))
         cursor += width
     np.savez(folder / f"gen_{index:03d}.npz", feature_names=np.array(names), **arrays)
     meta: dict[str, object] = {
@@ -106,22 +107,22 @@ def two_mode_run(tmp_path: Path) -> Path:
     return folder
 
 
-def test_tiers_are_discovered_not_declared(tmp_path: Path) -> None:
+def test_blocks_are_discovered_not_declared(tmp_path: Path) -> None:
     folder = tmp_path / "sig"
-    write_gen(folder, 0, tiers={"T2": 4, "gate_features": 6})
+    write_gen(folder, 0, blocks={"T2": 4, "gate_features": 6})
     data = load_run4(folder, core_only=False)
-    assert set(data.tier_features) == {"T2", "gate_features"}
-    assert data.tier_features["gate_features"].shape == (1, 6)
+    assert set(data.block_features) == {"T2", "gate_features"}
+    assert data.block_features["gate_features"].shape == (1, 6)
     # A group is built only from the members that are present, and one whose
     # members are all absent does not appear at all.
-    assert "combined" in data.group_features          # T2 present
+    assert ALL_CORE in data.group_features    # one core block is present
     assert data.group_features["combined"].shape == (1, 4)
     assert "T2+T2.5" in data.group_features
     assert data.all_features.shape == (1, 10)
-    # all_features concatenates baseline tiers before engineered ones.
-    assert list(BASELINE_TIERS)[:2] == ["T1", "T2"]
-    assert "gate_features" in ENGINEERED_TIERS
-    assert set(TIER_GROUPS) >= {"combined", "combined_v2"}
+    # all_features concatenates the core blocks before the engineered families.
+    assert list(CORE_BLOCKS)[:2] == ["T1", "T2"]
+    assert "gate_features" in FAMILY_BLOCKS
+    assert set(BLOCK_UNIONS) >= {"combined", "combined_v2"}
 
 
 def test_core_only_keeps_one_repetition_of_each_shared_pair(two_mode_run: Path) -> None:
@@ -162,11 +163,11 @@ def test_mode_filter_rejects_a_filter_that_selects_nothing(two_mode_run: Path) -
         load_run4(two_mode_run, core_only=False, mode_filter=["dialectical"])
 
 
-def test_unknown_tier_name_names_what_is_available(two_mode_run: Path) -> None:
+def test_unknown_block_label_names_what_is_available(two_mode_run: Path) -> None:
     data = load_run4(two_mode_run, core_only=True)
-    with pytest.raises(KeyError, match="Unknown tier/group"):
-        data.get_tier("no_such_tier")
-    assert data.get_tier("T1").shape[0] == data.n_samples
+    with pytest.raises(KeyError, match="Unknown block/group"):
+        data.get_block("no_such_block")
+    assert data.get_block("T1").shape[0] == data.n_samples
 
 
 def test_missing_directory_and_empty_directory_are_distinguished(tmp_path: Path) -> None:
@@ -177,22 +178,22 @@ def test_missing_directory_and_empty_directory_are_distinguished(tmp_path: Path)
         load_run4(tmp_path / "empty", core_only=False)
 
 
-def test_addon_merges_new_tiers_and_skips_an_incomplete_one(tmp_path: Path) -> None:
+def test_addon_merges_new_blocks_and_skips_an_incomplete_one(tmp_path: Path) -> None:
     base = tmp_path / "base"
     write_gen(base, 0, topic="topic_a", topic_idx=0)
     write_gen(base, 1, topic="topic_b", topic_idx=1)
 
     complete = tmp_path / "complete"
-    write_gen(complete, 0, tiers={"T3": 5})
-    write_gen(complete, 1, tiers={"T3": 5})
+    write_gen(complete, 0, blocks={"T3": 5})
+    write_gen(complete, 1, blocks={"T3": 5})
     merged = load_run4(base, core_only=False, addon_dirs=[complete])
-    assert "T3" in merged.tier_features
-    assert merged.tier_features["T3"].shape == (2, 5)
+    assert "T3" in merged.block_features
+    assert merged.block_features["T3"].shape == (2, 5)
 
     partial = tmp_path / "partial"
-    write_gen(partial, 0, tiers={"T2.5": 7})
+    write_gen(partial, 0, blocks={"T2.5": 7})
     dropped = load_run4(base, core_only=False, addon_dirs=[partial])
-    assert "T2.5" not in dropped.tier_features, "an addon covering some rows is dropped whole"
+    assert "T2.5" not in dropped.block_features, "an addon covering some rows is dropped whole"
 
 
 def test_addon_directory_that_is_absent_or_empty_is_a_warning_not_a_failure(
@@ -220,7 +221,7 @@ def test_analysis_data_carries_text_and_delegates_the_rest(two_mode_run: Path) -
     assert list(data.topics) == list(data.run4.topics)
     assert data.unique_modes == data.run4.unique_modes
     assert data.unique_topics == data.run4.unique_topics
-    assert data.get_tier("T1").shape == data.run4.get_tier("T1").shape
+    assert data.get_block("T1").shape == data.run4.get_block("T1").shape
     assert data.mode_mask("linear").sum() == 2
     assert data.topic_mask("topic_a").sum() == 2
 
@@ -248,7 +249,7 @@ def test_quality_report_counts_what_a_reader_would_check(two_mode_run: Path) -> 
     assert report["samples_per_mode"] == {"linear": 2, "socratic": 2}
     assert report["nan_counts"]["T1"] == 0
     assert report["inf_counts"]["T1"] == 0
-    assert report["tier_dims"]["T1"] == 3
+    assert report["block_dims"]["T1"] == 3
     assert "combined" in report["group_dims"]
 
 
@@ -267,7 +268,7 @@ def test_reads_the_banked_8b_signatures() -> None:
 
     CI has no banked data, so absence is a skip rather than a failure. What this
     catches that synthetic npz files cannot: the real feature-name arrays, the
-    real tier_slices, the real repetition structure the core filter reduces, and
+    real block_slices, the real repetition structure the core filter reduces, and
     the lane field a legacy bank does not carry.
     """
     sig_dir = outputs_root() / "runs" / BANKED_RUN / BANKED_SUBDIR
@@ -275,9 +276,9 @@ def test_reads_the_banked_8b_signatures() -> None:
         pytest.skip(f"banked signatures absent: {sig_dir}")
     data = load_run4(sig_dir, core_only=False)
     assert data.n_samples > 0
-    assert data.tier_features, "a banked directory discovered no tiers"
-    for tier, matrix in data.tier_features.items():
-        assert matrix.shape[0] == data.n_samples, f"{tier} row count disagrees with the samples"
+    assert data.block_features, "a banked directory discovered no blocks"
+    for block, matrix in data.block_features.items():
+        assert matrix.shape[0] == data.n_samples, f"{block} row count disagrees with the samples"
         assert matrix.ndim == 2 and matrix.shape[1] > 0
     assert len(data.modes) == data.n_samples
     assert len(data.topics) == data.n_samples
@@ -288,4 +289,4 @@ def test_reads_the_banked_8b_signatures() -> None:
     # never an invented certification.
     assert data.lane_id is None or isinstance(data.lane_id, str)
     report = check_data_quality(data)
-    assert report["nan_counts"], "quality report found no tiers to check"
+    assert report["nan_counts"], "quality report found no blocks to check"

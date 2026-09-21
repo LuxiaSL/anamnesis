@@ -61,7 +61,7 @@ F32 = NDArray[np.float32]
 class FeatureFamilyResult:
     """Output from a pluggable feature family.
 
-    Same contract as extract_tier*() in state_extractor.py:
+    Same contract as the extract_* block functions in state_extractor.py:
     a flat feature vector paired with names.
     """
 

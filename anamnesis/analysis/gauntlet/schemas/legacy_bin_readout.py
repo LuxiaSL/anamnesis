@@ -1,8 +1,13 @@
-"""Section 3 schemas: which feature blocks carry the discrimination.
+"""Section 3 schemas: the readout over the stored feature blocks.
 
-Combinations and leave-one-out drops over the tiers, the resulting ranking, the
+Combinations and leave-one-out drops over the blocks, the resulting ranking, the
 top feature importances, the static-versus-dynamic split, and per-topic effect
-sizes. The ``tier_inversion_*`` flag is a named prediction, not a summary.
+sizes. ``cache_beats_attention_beats_norms`` is a named prediction being scored,
+not a summary of the table above it.
+
+The field names here are the Python side; several banked files carry an older
+spelling for the same field, and `anamnesis/analysis/gauntlet/schemas/compat.py`
+is what maps one onto the other on the way in.
 """
 
 from __future__ import annotations
@@ -14,8 +19,8 @@ from pydantic import BaseModel, Field, model_serializer
 from anamnesis.analysis.gauntlet.schemas.base import _FORBID
 
 
-class PairwiseTierCombo(BaseModel):
-    """Accuracy of two baseline tiers concatenated."""
+class PairwiseBlockCombo(BaseModel):
+    """Accuracy of two core blocks concatenated."""
 
     model_config = _FORBID
 
@@ -25,8 +30,8 @@ class PairwiseTierCombo(BaseModel):
     gain_over_best_individual: float
 
 
-class TripleTierCombo(BaseModel):
-    """Accuracy of three baseline tiers concatenated."""
+class TripleBlockCombo(BaseModel):
+    """Accuracy of three core blocks concatenated."""
 
     model_config = _FORBID
 
@@ -49,7 +54,7 @@ class CrossGroupAblation(BaseModel):
 
 
 class LeaveOneOutEntry(BaseModel):
-    """Per-tier leave-one-out accuracy + cost of removal."""
+    """Per-block leave-one-out accuracy + cost of removal."""
 
     model_config = _FORBID
 
@@ -57,12 +62,12 @@ class LeaveOneOutEntry(BaseModel):
     cost_of_removal: float
 
 
-class TierRankingEntry(BaseModel):
-    """One row of the tier-ranking table (tier name + its standalone accuracy)."""
+class BlockRankingEntry(BaseModel):
+    """One row of the block-ranking table (block name + its standalone accuracy)."""
 
     model_config = _FORBID
 
-    tier: str
+    block: str
     accuracy: float
 
 
@@ -147,8 +152,8 @@ class CohensDPerTopicResult(BaseModel):
         }
 
 
-class TierAblationResult(BaseModel):
-    """Section 3 result: tier ablation + feature importance.
+class LegacyBinReadoutResult(BaseModel):
+    """Section 3 result: the per-block readout plus feature importance.
 
     Several fields are present only for v2 runs (``cross_group_ablation``,
     ``top_features_rf``, etc.). ``top_features_rf_combined`` is a legacy
@@ -158,24 +163,24 @@ class TierAblationResult(BaseModel):
 
     model_config = _FORBID
 
-    per_tier_accuracy: dict[str, float]
-    pairwise_tier_combinations: dict[str, PairwiseTierCombo]
-    triple_tier_combinations: dict[str, TripleTierCombo] | None = None
+    per_block_accuracy: dict[str, float]
+    pairwise_block_combinations: dict[str, PairwiseBlockCombo]
+    triple_block_combinations: dict[str, TripleBlockCombo] | None = None
     cross_group_ablation: dict[str, CrossGroupAblation] | None = None
     cross_group_baseline: str | None = None
-    leave_one_tier_out: dict[str, LeaveOneOutEntry]
+    leave_one_block_out: dict[str, LeaveOneOutEntry]
     leave_one_out_baseline_accuracy: float | None = None
-    tier_ranking: list[TierRankingEntry]
-    tier_inversion_t25_gt_t2_gt_t1: bool
+    block_ranking: list[BlockRankingEntry]
+    cache_beats_attention_beats_norms: bool
     top_features_rf: list[FeatureImportanceEntry] | None = None
     top_features_lr: list[FeatureImportanceEntry] | None = None
     feature_importance_composite: str | None = None
-    top_features_rf_t2t25: list[FeatureImportanceEntry]
-    top_features_lr_t2t25: list[FeatureImportanceEntry]
+    top_features_rf_attention_and_cache: list[FeatureImportanceEntry]
+    top_features_lr_attention_and_cache: list[FeatureImportanceEntry]
     top_features_rf_combined: list[FeatureImportanceEntry] | None = Field(
         default=None,
         description="Legacy top-features key from pre-v2 baseline snapshots.",
     )
-    tier_contribution_ratio: dict[str, float]
+    block_contribution_ratio: dict[str, float]
     std_vs_mean: StdVsMeanResult
     cohens_d_per_topic: CohensDPerTopicResult

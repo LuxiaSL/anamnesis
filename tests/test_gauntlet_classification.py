@@ -1,8 +1,8 @@
 """Section 2's machinery, at test scale.
 
-``run_classification`` is not called here: on its key composite tiers it runs a
+``run_classification`` is not called here: on its key composite blocks it runs a
 hundred-seed stability sweep and a thousand-permutation null, which is minutes of
-CPU per tier and belongs to a real pass rather than to a suite. The parts it is
+CPU per block and belongs to a real pass rather than to a suite. The parts it is
 made of are all cheap at small parameters, and they are where the properties that
 matter live — so they are tested directly:
 
@@ -11,7 +11,7 @@ matter live — so they are tested directly:
     default the corpus of record was rerun under;
   * the permutation p-value cannot report zero, because with N permutations the
     smallest resolvable p is 1/(N+1);
-  * BH-FDR over the per-tier permutation family is monotone in p;
+  * BH-FDR over the per-block permutation family is monotone in p;
   * the pairwise and four-way readouts name their own conditions, so a missing
     mode is an error stub rather than a silently smaller comparison.
 

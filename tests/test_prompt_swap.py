@@ -10,10 +10,10 @@ Also pinned:
 
   * the swap label's grammar — ``swap_A→B`` is (system prompt, execution), and a name that
     does not match is not a swap generation;
-  * a tier is used only where **every** swap generation has it, because a tier present for
+  * a block is used only where **every** swap generation has it, because a block present for
     some and absent for others would train and predict over different feature sets under
     one name;
-  * composites are built from the tiers that survived that filter;
+  * composites are built from the blocks that survived that filter;
   * the pooled direction needs more than a bare majority: at 1.5:1 the reading is a
     direction and below it the reading is ``ambiguous``, which is a verdict rather than a
     missing one;
@@ -42,8 +42,8 @@ from anamnesis.analysis.prompt_swap import (
     swap_report,
 )
 
-TIER_KEY = "features_tier1"
-TIER_NAME = "T1"
+BLOCK_NPZ_KEY = "features_tier1"
+BLOCK_LABEL = "T1"
 ADDON_KEY = "features_attention_flow"
 ADDON_NAME = "attention_flow"
 N_TOPICS = 6
@@ -59,7 +59,7 @@ def write_generation(
     vector: np.ndarray,
     keys: dict[str, np.ndarray] | None = None,
 ) -> None:
-    arrays = {TIER_KEY: vector.astype(np.float32)}
+    arrays = {BLOCK_NPZ_KEY: vector.astype(np.float32)}
     arrays.update({k: v.astype(np.float32) for k, v in (keys or {}).items()})
     np.savez(sig_dir / f"gen_{gid:03d}.npz", **arrays)
     (sig_dir / f"gen_{gid:03d}.json").write_text(
@@ -124,18 +124,18 @@ def test_a_swap_that_executes_the_asked_for_mode_reads_as_execution_based(
     pair = result.per_swap_type["swap_socratic→linear"]
     assert pair.system_prompt_mode == "socratic" and pair.execution_mode == "linear"
     assert pair.n_training_per_mode == {"socratic": N_TOPICS, "linear": N_TOPICS}
-    tier = pair.per_tier[TIER_NAME]
-    assert tier.n_execution == N_TOPICS and tier.n_system == 0
-    assert tier.pct_execution == pytest.approx(1.0)
-    assert result.aggregate[TIER_NAME].signal_type == EXECUTION_BASED
+    block = pair.per_block[BLOCK_LABEL]
+    assert block.n_execution == N_TOPICS and block.n_system == 0
+    assert block.pct_execution == pytest.approx(1.0)
+    assert result.aggregate[BLOCK_LABEL].signal_type == EXECUTION_BASED
 
 
 def test_the_same_test_calls_the_other_direction_prompt_based(tmp_path: Path) -> None:
     sig_dir = write_bank(tmp_path / "prompt", swap_carries="system")
     result = run_binary_prompt_swap("prompt", sig_dir)
-    tier = result.per_swap_type["swap_socratic→linear"].per_tier[TIER_NAME]
-    assert tier.n_system == N_TOPICS and tier.n_execution == 0
-    assert result.aggregate[TIER_NAME].signal_type == PROMPT_BASED
+    block = result.per_swap_type["swap_socratic→linear"].per_block[BLOCK_LABEL]
+    assert block.n_system == N_TOPICS and block.n_execution == 0
+    assert result.aggregate[BLOCK_LABEL].signal_type == PROMPT_BASED
 
 
 def test_the_pooled_direction_needs_more_than_a_bare_majority() -> None:
@@ -146,19 +146,19 @@ def test_the_pooled_direction_needs_more_than_a_bare_majority() -> None:
     assert signal_type(0, 0) == AMBIGUOUS
 
 
-def test_a_tier_missing_from_some_swap_generations_is_not_used(tmp_path: Path) -> None:
+def test_a_block_missing_from_some_swap_generations_is_not_used(tmp_path: Path) -> None:
     sig_dir = write_bank(tmp_path / "partial", swap_carries="execution")
     first_swap = sorted(sig_dir.glob("gen_*.json"))[2 * N_TOPICS]
     gid = int(first_swap.stem.split("_")[1])
     existing = np.load(sig_dir / f"gen_{gid:03d}.npz")
     np.savez(
         sig_dir / f"gen_{gid:03d}.npz",
-        **{TIER_KEY: existing[TIER_KEY], ADDON_KEY: np.ones(2, dtype=np.float32)},
+        **{BLOCK_NPZ_KEY: existing[BLOCK_NPZ_KEY], ADDON_KEY: np.ones(2, dtype=np.float32)},
     )
     _samples, features = load_swap_samples(sig_dir)
-    assert TIER_NAME in features
+    assert BLOCK_LABEL in features
     assert ADDON_NAME not in features, (
-        "a tier only one generation has would train and predict over different features"
+        "a block only one generation has would train and predict over different features"
     )
 
 
@@ -177,5 +177,5 @@ def test_the_report_is_the_typed_results_per_run(tmp_path: Path) -> None:
     result = run_binary_prompt_swap("exec", sig_dir)
     document = swap_report({"exec": result})
     assert set(document) == {"exec"}
-    assert document["exec"]["aggregate"][TIER_NAME]["signal_type"] == EXECUTION_BASED
+    assert document["exec"]["aggregate"][BLOCK_LABEL]["signal_type"] == EXECUTION_BASED
     assert document["exec"]["per_swap_type"]["swap_socratic→linear"]["n_swap"] == N_TOPICS

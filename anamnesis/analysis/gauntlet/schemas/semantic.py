@@ -32,7 +32,7 @@ class SemanticClassifierBundle(BaseModel):
     ``dims`` is present for tfidf / sbert / combined / semantic_noise
     (which record the feature-set dimensionality). Newer v2 runs omit
     ``dims`` for compute_classification (it pulls from
-    per_tier_semantic.classification, which never set it).
+    per_block_semantic.classification, which never set it).
     """
 
     model_config = _FORBID
@@ -101,8 +101,8 @@ class ShuffleControlsResult(BaseModel):
     global_shuffle: ClassificationScore
 
 
-class PerTierSemanticResult(BaseModel):
-    """Semantic orthogonality battery for a single tier."""
+class PerBlockSemanticResult(BaseModel):
+    """Semantic orthogonality battery for a single block."""
 
     model_config = _FORBID
 
@@ -141,7 +141,7 @@ class RetrievalResult(BaseModel):
 
     model_config = _FORBID
 
-    compute_t2t25: RetrievalFeatureSet | None = None
+    compute_attention_and_cache: RetrievalFeatureSet | None = None
     tfidf: RetrievalFeatureSet | None = None
     sbert: RetrievalFeatureSet | None = None
     combined_compute_sbert: RetrievalFeatureSet | None = None
@@ -165,20 +165,20 @@ class ContrastiveProjectionComparisonResult(BaseModel):
     """Contrastive projection comparison across feature sets.
 
     The section either returns an error stub or populates one or more
-    feature-set entries (tfidf, compute_t2t25, sbert, combined_compute_sbert).
+    feature-set entries (tfidf, compute_attention_and_cache, sbert, combined_compute_sbert).
     """
 
     model_config = _FORBID
 
-    compute_t2t25: ContrastiveProjectionComparisonEntry | None = None
+    compute_attention_and_cache: ContrastiveProjectionComparisonEntry | None = None
     tfidf: ContrastiveProjectionComparisonEntry | None = None
     sbert: ContrastiveProjectionComparisonEntry | None = None
     combined_compute_sbert: ContrastiveProjectionComparisonEntry | None = None
     error: str | None = None
 
 
-class PromptSwapTierResult(BaseModel):
-    """Per-tier prompt-swap confound outcome."""
+class PromptSwapBlockResult(BaseModel):
+    """Per-block prompt-swap confound outcome."""
 
     model_config = _FORBID
 
@@ -203,7 +203,7 @@ class PromptSwapConfoundResult(BaseModel):
 
     n_swap_samples: int | None = None
     swap_types: list[str] | None = None
-    per_tier: dict[str, PromptSwapTierResult] | None = None
+    per_block: dict[str, PromptSwapBlockResult] | None = None
     error: str | None = None
 
 
@@ -211,7 +211,7 @@ class SemanticResult(BaseModel):
     """Section 9 result.
 
     Top-level error ``{"error": "No generated text available"}`` round-trips
-    via the Optional fields. ``per_tier_semantic`` is only populated by
+    via the Optional fields. ``per_block_semantic`` is only populated by
     v2 runs; older baseline snapshots omit it.
     """
 
@@ -219,7 +219,7 @@ class SemanticResult(BaseModel):
 
     tfidf_classification: SemanticClassifierBundle | None = None
     sbert_classification: SemanticClassifierBundle | None = None
-    per_tier_semantic: dict[str, PerTierSemanticResult] | None = None
+    per_block_semantic: dict[str, PerBlockSemanticResult] | None = None
     compute_classification: SemanticClassifierBundle | None = None
     combined_classification: SemanticClassifierBundle | None = None
     semantic_noise_classification: SemanticClassifierBundle | None = None

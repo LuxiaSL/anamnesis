@@ -40,10 +40,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
 from anamnesis.analysis.gauntlet.signature_io import (
-    BASELINE_TIERS,
-    ENGINEERED_TIERS,
-    TIER_GROUPS,
-    TIER_KEYS,
+    CORE_BLOCKS,
+    FAMILY_BLOCKS,
+    BLOCK_UNIONS,
+    BLOCK_NPZ_KEYS,
     Run4Data,
     load_run4,
 )
@@ -90,11 +90,11 @@ def load_swap_samples(
     signature_dir: Path,
     addon_dirs: Sequence[Path] | None = None,
 ) -> tuple[list[SwapSample], dict[str, list[F32]]]:
-    """Swap generations and their features, per tier, from the primary bank and addons.
+    """Swap generations and their features, per block, from the primary bank and addons.
 
-    A tier is kept only where **every** swap sample has it: a tier present for some
+    A block is kept only where **every** swap sample has it: a block present for some
     samples and absent for others would train and predict over different feature
-    sets under one name. Composite groups are then built from the tiers that
+    sets under one name. Composite groups are then built from the blocks that
     survived, which is the same join the core loader performs.
     """
     signature_dir = Path(signature_dir)
@@ -126,14 +126,14 @@ def load_swap_samples(
     if not samples:
         raise ValueError(f"no prompt-swap generations under {signature_dir}")
 
-    per_tier: dict[str, list[F32 | None]] = {}
+    per_block: dict[str, list[F32 | None]] = {}
 
     def absorb(index: int, npz_path: Path, *, only_missing: bool) -> None:
         data = np.load(npz_path, allow_pickle=True)
-        for tier, key in TIER_KEYS.items():
+        for block, key in BLOCK_NPZ_KEYS.items():
             if key not in data.files:
                 continue
-            column = per_tier.setdefault(tier, [None] * len(swap_paths))
+            column = per_block.setdefault(block, [None] * len(swap_paths))
             if only_missing and column[index] is not None:
                 continue
             column[index] = np.asarray(data[key], dtype=np.float32)
@@ -150,23 +150,23 @@ def load_swap_samples(
                 absorb(index, addon_npz, only_missing=True)
 
     complete: dict[str, list[F32]] = {
-        tier: [array for array in column if array is not None]
-        for tier, column in per_tier.items()
+        block: [array for array in column if array is not None]
+        for block, column in per_block.items()
         if all(array is not None for array in column)
     }
-    for group, members in TIER_GROUPS.items():
+    for group, members in BLOCK_UNIONS.items():
         available = [m for m in members if m in complete]
         if available:
             complete[group] = [
                 np.concatenate([complete[m][i] for m in available])
                 for i in range(len(swap_paths))
             ]
-    logger.info(f"{len(samples)} swap generations, {len(complete)} tiers with full coverage")
+    logger.info(f"{len(samples)} swap generations, {len(complete)} blocks with full coverage")
     return samples, complete
 
 
-class TierSwapResult(BaseModel):
-    """One tier's verdict on one swap pair: where the predictions landed."""
+class BlockSwapResult(BaseModel):
+    """One block's verdict on one swap pair: where the predictions landed."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -179,7 +179,7 @@ class TierSwapResult(BaseModel):
 
 
 class SwapPairResult(BaseModel):
-    """One swap pair, tier by tier, with what the classifier was trained on."""
+    """One swap pair, block by block, with what the classifier was trained on."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -187,11 +187,11 @@ class SwapPairResult(BaseModel):
     execution_mode: str
     n_swap: int = Field(gt=0)
     n_training_per_mode: dict[str, int]
-    per_tier: dict[str, TierSwapResult] = Field(default_factory=dict)
+    per_block: dict[str, BlockSwapResult] = Field(default_factory=dict)
 
 
 class SwapAggregate(BaseModel):
-    """One tier's reading pooled over every swap pair, and the direction it names."""
+    """One block's reading pooled over every swap pair, and the direction it names."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -215,14 +215,14 @@ class PromptSwapResult(BaseModel):
     aggregate: dict[str, SwapAggregate] = Field(default_factory=dict)
 
 
-def _test_tiers(core: Run4Data, swap_features: dict[str, list[F32]]) -> list[str]:
-    """Tiers present on both sides, individual tiers first and then composites."""
-    tiers = [
-        tier for tier in list(BASELINE_TIERS) + list(ENGINEERED_TIERS)
-        if tier in core.tier_features and tier in swap_features
+def _test_blocks(core: Run4Data, swap_features: dict[str, list[F32]]) -> list[str]:
+    """Blocks present on both sides, individual blocks first and then composites."""
+    blocks = [
+        block for block in list(CORE_BLOCKS) + list(FAMILY_BLOCKS)
+        if block in core.block_features and block in swap_features
     ]
-    tiers += [g for g in TIER_GROUPS if g in core.group_features and g in swap_features]
-    return tiers
+    blocks += [g for g in BLOCK_UNIONS if g in core.group_features and g in swap_features]
+    return blocks
 
 
 def classify_swap_pair(
@@ -232,9 +232,9 @@ def classify_swap_pair(
     indices: Sequence[int],
     system_prompt_mode: str,
     execution_mode: str,
-    tiers: Sequence[str],
+    blocks: Sequence[str],
 ) -> SwapPairResult:
-    """Train on the pair's two pure modes, predict its swap samples, per tier.
+    """Train on the pair's two pure modes, predict its swap samples, per block.
 
     The scaler is fitted on the two-mode training slice and applied to the swap
     samples, because a scaler fitted over both would let the swap samples inform
@@ -251,13 +251,13 @@ def classify_swap_pair(
             execution_mode: int(np.sum(y == execution_mode)),
         },
     )
-    for tier in tiers:
+    for block in blocks:
         try:
-            all_rows = core.get_tier(tier)
+            all_rows = core.get_block(block)
         except KeyError:
             continue
         X_train = all_rows[mask]
-        X_swap = np.stack([swap_features[tier][i] for i in indices], axis=0)
+        X_swap = np.stack([swap_features[block][i] for i in indices], axis=0)
 
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
@@ -273,7 +273,7 @@ def classify_swap_pair(
 
         n_execution = int(np.sum(predictions == execution_mode))
         n_system = int(np.sum(predictions == system_prompt_mode))
-        result.per_tier[tier] = TierSwapResult(
+        result.per_block[block] = BlockSwapResult(
             n_execution=n_execution,
             n_system=n_system,
             n_total=len(predictions),
@@ -283,8 +283,8 @@ def classify_swap_pair(
         )
         verdict = "EXEC" if n_execution > n_system else ("SYS" if n_system > n_execution else "TIE")
         logger.info(
-            f"    {tier:<25} {n_execution}/{len(predictions)} exec  "
-            f"P(exec)={result.per_tier[tier].mean_p_execution:.3f}  [{verdict}]"
+            f"    {block:<25} {n_execution}/{len(predictions)} exec  "
+            f"P(exec)={result.per_block[block].mean_p_execution:.3f}  [{verdict}]"
         )
     return result
 
@@ -299,29 +299,29 @@ def signal_type(n_execution: int, n_system: int) -> str:
 
 
 def aggregate_swaps(
-    per_pair: dict[str, SwapPairResult], tiers: Sequence[str]
+    per_pair: dict[str, SwapPairResult], blocks: Sequence[str]
 ) -> dict[str, SwapAggregate]:
-    """Pool each tier over every swap pair.
+    """Pool each block over every swap pair.
 
     Counts are summed and the probability is averaged over pairs rather than over
     samples: a pair is the unit of the experiment, and one pair with more swap
     samples than another should not weigh more on the mean probability.
     """
     out: dict[str, SwapAggregate] = {}
-    for tier in tiers:
+    for block in blocks:
         n_execution = n_system = n_total = 0
         probabilities: list[float] = []
         for pair in per_pair.values():
-            tier_result = pair.per_tier.get(tier)
-            if tier_result is None:
+            block_result = pair.per_block.get(block)
+            if block_result is None:
                 continue
-            n_execution += tier_result.n_execution
-            n_system += tier_result.n_system
-            n_total += tier_result.n_total
-            probabilities.append(tier_result.mean_p_execution)
+            n_execution += block_result.n_execution
+            n_system += block_result.n_system
+            n_total += block_result.n_total
+            probabilities.append(block_result.mean_p_execution)
         if n_total == 0:
             continue
-        out[tier] = SwapAggregate(
+        out[block] = SwapAggregate(
             n_execution=n_execution,
             n_system=n_system,
             n_total=n_total,
@@ -330,8 +330,8 @@ def aggregate_swaps(
             signal_type=signal_type(n_execution, n_system),
         )
         logger.info(
-            f"    {tier:<25} {n_execution}/{n_total} exec  "
-            f"P(exec)={out[tier].mean_p_execution:.3f}  [{out[tier].signal_type.upper()}]"
+            f"    {block:<25} {n_execution}/{n_total} exec  "
+            f"P(exec)={out[block].mean_p_execution:.3f}  [{out[block].signal_type.upper()}]"
         )
     return out
 
@@ -341,7 +341,7 @@ def run_binary_prompt_swap(
     signature_dir: Path,
     addon_dirs: Sequence[Path] | None = None,
 ) -> PromptSwapResult:
-    """The whole test for one run: every swap pair, every tier, then the pool."""
+    """The whole test for one run: every swap pair, every block, then the pool."""
     core = load_run4(
         signature_dir=signature_dir, core_only=True, addon_dirs=list(addon_dirs or []) or None
     )
@@ -351,8 +351,8 @@ def run_binary_prompt_swap(
     for index, sample in enumerate(samples):
         by_swap.setdefault(sample.swap_name, []).append(index)
 
-    tiers = _test_tiers(core, swap_features)
-    logger.info(f"swap types: {sorted(by_swap)}; tiers under test: {tiers}")
+    blocks = _test_blocks(core, swap_features)
+    logger.info(f"swap types: {sorted(by_swap)}; blocks under test: {blocks}")
 
     result = PromptSwapResult(
         run_name=run_name,
@@ -373,10 +373,10 @@ def run_binary_prompt_swap(
             indices=indices,
             system_prompt_mode=system_prompt_mode,
             execution_mode=execution_mode,
-            tiers=tiers,
+            blocks=blocks,
         )
     logger.info(f"  aggregate over {len(samples)} swap generations")
-    result.aggregate = aggregate_swaps(result.per_swap_type, tiers)
+    result.aggregate = aggregate_swaps(result.per_swap_type, blocks)
     return result
 
 
@@ -394,7 +394,7 @@ __all__ = [
     "SwapAggregate",
     "SwapPairResult",
     "SwapSample",
-    "TierSwapResult",
+    "BlockSwapResult",
     "aggregate_swaps",
     "classify_swap_pair",
     "load_swap_samples",

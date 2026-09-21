@@ -307,7 +307,7 @@ def extraction_result(n_features: int = 6) -> ExtractionResult:
     return ExtractionResult(
         features=features,
         feature_names=[f"f{i}" for i in range(n_features)],
-        tier_slices={"tier1": (0, 3), "tier2": (3, n_features)},
+        block_slices={"tier1": (0, 3), "tier2": (3, n_features)},
         knnlm_baseline=None,
     )
 

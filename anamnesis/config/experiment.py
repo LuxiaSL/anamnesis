@@ -123,11 +123,22 @@ class ExtractionConfig(BaseModel):
         default=100, gt=0, description="Components for the kNN-LM baseline projection"
     )
 
-    enable_tier1: bool = Field(default=True, description="Compute the output-source baseline block")
-    enable_tier2: bool = Field(default=True, description="Compute the attention-dynamics baseline block")
-    enable_tier2_5: bool = Field(default=True, description="Compute the cache-geometry baseline block")
-    enable_tier3: bool = Field(default=True, description="Compute the residual-PCA baseline block")
-    enable_knnlm_baseline: bool = Field(default=True, description="Compute the kNN-LM baseline block")
+    enable_norms_and_output_stats: bool = Field(
+        default=True, description="Compute residual activation norms and output statistics"
+    )
+    enable_attention_and_deltas: bool = Field(
+        default=True,
+        description="Compute attention entropy, head agreement, residual deltas and spectral reads",
+    )
+    enable_cache_and_keys: bool = Field(
+        default=True, description="Compute cache-read profiles and pre-RoPE key geometry"
+    )
+    enable_residual_pca: bool = Field(
+        default=True, description="Compute residual-stream projections onto a pre-fitted basis"
+    )
+    enable_knnlm_baseline: bool = Field(
+        default=True, description="Compute the kNN-LM comparison vector beside the blocks"
+    )
 
     early_layer_cutoff: int = Field(
         ge=0, description="At or below this a layer counts as early for cross-layer agreement"
@@ -198,14 +209,15 @@ class FeaturePipelineConfig(BaseModel):
     """Which engineered families run over the saved raw tensors.
 
     Each family is a self-contained extractor over banked tensors, so a family is
-    enabled independently of the rest and of the baseline blocks. The layer
+    enabled independently of the rest and of the core blocks. The layer
     fields are required for the same reason as in :class:`ExtractionConfig`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    include_baseline_tiers: bool = Field(
-        default=True, description="Include the baseline blocks from the numeric anchor"
+    include_core_blocks: bool = Field(
+        default=True,
+        description="Include the four blocks the numeric anchor builds, beside the families",
     )
 
     enable_residual_trajectory: bool = Field(

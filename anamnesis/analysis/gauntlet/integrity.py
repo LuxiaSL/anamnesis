@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import numpy as np
 
-from .signature_io import AnalysisData
+from .signature_io import (
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+    AnalysisData,
+)
 from .schemas import (
     IntegrityResult,
     LengthByModeStats,
     LengthOverallStats,
     NanInfCount,
-    TierValueRange,
-    TierVarianceReport,
+    BlockValueRange,
+    BlockVarianceReport,
 )
-from .utils import get_available_tiers
+from .utils import get_available_blocks
 
 
 def run_integrity_checks(data: AnalysisData) -> IntegrityResult:
@@ -26,40 +32,40 @@ def run_integrity_checks(data: AnalysisData) -> IntegrityResult:
     }
     balanced = len(set(samples_per_mode.values())) == 1
 
-    available_tiers, _ = get_available_tiers(data)
+    available_blocks, _ = get_available_blocks(data)
 
     # Feature dimensions
-    tier_dims: dict[str, int] = {}
-    for tier in available_tiers:
+    block_dims: dict[str, int] = {}
+    for block in available_blocks:
         try:
-            tier_dims[tier] = data.get_tier(tier).shape[1]
+            block_dims[block] = data.get_block(block).shape[1]
         except KeyError:
-            tier_dims[tier] = 0
+            block_dims[block] = 0
     total_features = sum(
-        tier_dims.get(t, 0) for t in ["T1", "T2", "T2.5", "T3"]
+        block_dims.get(t, 0) for t in [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA]
     )
 
     # NaN / Inf checks
     nan_inf: dict[str, NanInfCount] = {}
     all_clean = True
-    for tier in available_tiers:
+    for block in available_blocks:
         try:
-            X = data.get_tier(tier)
+            X = data.get_block(block)
             nan_count = int(np.sum(np.isnan(X)))
             inf_count = int(np.sum(np.isinf(X)))
-            nan_inf[tier] = NanInfCount(nan=nan_count, inf=inf_count)
+            nan_inf[block] = NanInfCount(nan=nan_count, inf=inf_count)
             if nan_count > 0 or inf_count > 0:
                 all_clean = False
         except KeyError:
-            nan_inf[tier] = NanInfCount(nan=-1, inf=-1, error="tier not found")
+            nan_inf[block] = NanInfCount(nan=-1, inf=-1, error="block not found")
 
     # Per-feature variance (detect constant features)
-    variance_report: dict[str, TierVarianceReport] = {}
-    for tier in available_tiers:
+    variance_report: dict[str, BlockVarianceReport] = {}
+    for block in available_blocks:
         try:
-            X = data.get_tier(tier)
+            X = data.get_block(block)
             var = X.var(axis=0)
-            variance_report[tier] = TierVarianceReport(
+            variance_report[block] = BlockVarianceReport(
                 n_features=int(X.shape[1]),
                 n_constant=int(np.sum(var < 1e-12)),
                 n_near_constant=int(np.sum(var < 1e-6)),
@@ -91,12 +97,12 @@ def run_integrity_checks(data: AnalysisData) -> IntegrityResult:
             max=int(np.max(all_lengths)),
         )
 
-    # Feature value range summary per tier
-    value_ranges: dict[str, TierValueRange] = {}
-    for tier in available_tiers:
+    # Feature value range summary per block
+    value_ranges: dict[str, BlockValueRange] = {}
+    for block in available_blocks:
         try:
-            X = data.get_tier(tier)
-            value_ranges[tier] = TierValueRange(
+            X = data.get_block(block)
+            value_ranges[block] = BlockValueRange(
                 global_mean=float(np.mean(X)),
                 global_std=float(np.std(X)),
                 global_min=float(np.min(X)),
@@ -118,7 +124,7 @@ def run_integrity_checks(data: AnalysisData) -> IntegrityResult:
         samples_per_mode=samples_per_mode,
         samples_per_topic=samples_per_topic,
         balanced=balanced,
-        tier_dims=tier_dims,
+        block_dims=block_dims,
         total_features=total_features,
         nan_inf=nan_inf,
         all_clean=all_clean,

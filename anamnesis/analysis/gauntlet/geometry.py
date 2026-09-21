@@ -14,7 +14,15 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 
-from .signature_io import AnalysisData
+from .signature_io import (
+    ALL_CORE,
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_DELTAS,
+    CACHE_AND_KEYS,
+    NORMS_AND_OUTPUT_STATS,
+    RESIDUAL_PCA,
+    AnalysisData,
+)
 from .schemas import (
     BettiNumberEntry,
     BootstrapStats,
@@ -27,7 +35,7 @@ from .schemas import (
     GeodesicDistortionResult,
     GeodesicOverall,
     GeodesicPerMode,
-    GlobalTierIDResult,
+    GlobalBlockIDResult,
     GromovDeltaResult,
     GRIDEResult,
     IntrinsicDimensionResult,
@@ -37,11 +45,11 @@ from .schemas import (
     PersistentHomologyResult,
     TangentAngles,
     TangentSpaceResult,
-    TierConvergenceResult,
+    BlockConvergenceResult,
     TopologyMetricSummary,
     TopologyResult,
 )
-from .utils import standardize, remove_constant, get_available_tiers
+from .utils import standardize, remove_constant, get_available_blocks
 
 
 # ──────────────────────────────────────────────────────────────
@@ -63,12 +71,12 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
 
     seeds = [42, 123, 777]
 
-    # Global ID per tier
-    global_result: dict[str, GlobalTierIDResult] = {}
-    available_tiers, _ = get_available_tiers(data)
-    for tier in available_tiers:
-        print(f"    ID: {tier}")
-        X = data.get_tier(tier)
+    # Global ID per block
+    global_result: dict[str, GlobalBlockIDResult] = {}
+    available_blocks, _ = get_available_blocks(data)
+    for block in available_blocks:
+        print(f"    ID: {block}")
+        X = data.get_block(block)
         X_std = standardize(X)
         X_clean = remove_constant(X_std)
 
@@ -115,7 +123,7 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
                     n_successful=len(boot_ids),
                 )
 
-        global_result[tier] = GlobalTierIDResult(
+        global_result[block] = GlobalBlockIDResult(
             n_features_clean=int(X_clean.shape[1]),
             dadapy_id=dadapy_id,
             dadapy_err=dadapy_err,
@@ -123,10 +131,10 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
             bootstrap_by_seed=boot_by_seed,
         )
 
-    # Per-mode ID (T2+T2.5 only)
-    print("    Per-mode ID (T2+T2.5)...")
+    # Per-mode ID (attention-and-cache union only)
+    print("    Per-mode ID (attention and cache)...")
     per_mode_result: dict[str, PerModeIDResult] = {}
-    X_full = data.get_tier("T2+T2.5")
+    X_full = data.get_block(ATTENTION_AND_CACHE)
     for mode in data.unique_modes:
         mask = data.mode_mask(mode)
         X_mode = X_full[mask]
@@ -185,11 +193,11 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
             bootstrap_ci=bootstrap_ci,
         )
 
-    # GRIDE multiscale (T2+T2.5)
+    # GRIDE multiscale (attention-and-cache union)
     print("    GRIDE multiscale...")
     gride: GRIDEResult
     try:
-        X_full_std = standardize(data.get_tier("T2+T2.5"))
+        X_full_std = standardize(data.get_block(ATTENTION_AND_CACHE))
         X_full_clean = remove_constant(X_full_std)
         dada_g = DADAData(X_full_clean)
         dada_g.compute_id_2NN()
@@ -208,17 +216,17 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
     except Exception as e:
         gride = GRIDEResult(error=str(e))
 
-    # Tier convergence metric
-    tier_convergence: TierConvergenceResult | None = None
+    # Block convergence metric
+    block_convergence: BlockConvergenceResult | None = None
     global_ids: dict[str, float] = {}
-    for tier in ["T1", "T2", "T2.5"]:
-        tid = global_result.get(tier)
+    for block in [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS]:
+        tid = global_result.get(block)
         if tid is not None and isinstance(tid.dadapy_id, (int, float)):
-            global_ids[tier] = float(tid.dadapy_id)
+            global_ids[block] = float(tid.dadapy_id)
 
     if len(global_ids) == 3:
         vals = list(global_ids.values())
-        tier_convergence = TierConvergenceResult(
+        block_convergence = BlockConvergenceResult(
             max_pairwise_diff=float(max(vals) - min(vals)),
             converged_within_2=(max(vals) - min(vals)) < 4.0,
             values=global_ids,
@@ -228,7 +236,7 @@ def run_intrinsic_dimension(data: AnalysisData) -> IntrinsicDimensionResult:
         global_=global_result,
         per_mode=per_mode_result,
         gride=gride,
-        tier_convergence=tier_convergence,
+        block_convergence=block_convergence,
     )
 
 
@@ -372,8 +380,8 @@ def _ccgp_variant(
 def run_ccgp(data: AnalysisData) -> CCGPResult:
     """Run CCGP with multiple variants."""
     variants: dict[str, CCGPVariant] = {}
-    tier = "T2+T2.5"
-    X = data.get_tier(tier)
+    block = ATTENTION_AND_CACHE
+    X = data.get_block(block)
 
     # Primary: kNN k=3, multiple seeds
     for seed in [42, 123, 777]:
@@ -397,9 +405,9 @@ def run_ccgp(data: AnalysisData) -> CCGPResult:
             X, data.modes, data.topics, n_folds=n_folds, seed=42, clf_name="knn3",
         )
 
-    for tier_name in ["T2", "T2.5", "combined"]:
-        X_t = data.get_tier(tier_name)
-        key = f"knn3_seed42_5fold_{tier_name}"
+    for block_name in [ATTENTION_AND_DELTAS, CACHE_AND_KEYS, ALL_CORE]:
+        X_t = data.get_block(block_name)
+        key = f"knn3_seed42_5fold_{block_name}"
         print(f"    CCGP: {key}")
         variants[key] = _ccgp_variant(
             X_t, data.modes, data.topics, n_folds=5, seed=42, clf_name="knn3",
@@ -468,8 +476,8 @@ def _hierarchical_clustering(
 
 def run_topology(data: AnalysisData) -> TopologyResult:
     """Run centroid topology and delta-hyperbolicity analysis."""
-    tier = "T2+T2.5"
-    X = data.get_tier(tier)
+    block = ATTENTION_AND_CACHE
+    X = data.get_block(block)
     modes_list = sorted(set(data.modes))
 
     metric_dists: dict[str, dict[tuple[str, str], float]] = {}
@@ -543,7 +551,7 @@ def run_topology(data: AnalysisData) -> TopologyResult:
     )
 
     return TopologyResult(
-        tier=tier,
+        block=block,
         euclidean_centroid_distances=centroid_by_metric["euclidean"],
         cosine_centroid_distances=centroid_by_metric["cosine"],
         manhattan_centroid_distances=centroid_by_metric["manhattan"],
@@ -558,13 +566,13 @@ def run_topology(data: AnalysisData) -> TopologyResult:
 
 def run_manifold_geometry(data: AnalysisData) -> ManifoldGeometryResult:
     """Tangent-space alignment, geodesic-vs-euclidean distortion,
-    curvature proxies, and persistent homology on T2+T2.5."""
+    curvature proxies, and persistent homology on the attention-and-cache union."""
     from scipy.linalg import subspace_angles
     from sklearn.decomposition import PCA
     from sklearn.manifold import Isomap
     from sklearn.neighbors import NearestNeighbors
 
-    X = data.get_tier("T2+T2.5")
+    X = data.get_block(ATTENTION_AND_CACHE)
     scaler = StandardScaler()
     X_std = scaler.fit_transform(X)
     y = data.modes

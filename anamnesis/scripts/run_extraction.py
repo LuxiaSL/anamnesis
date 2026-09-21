@@ -79,7 +79,7 @@ def build_config(args: argparse.Namespace) -> Any:
         args.model,
         run_name=args.run_name,
         extraction_overrides={
-            "enable_tier3": not args.no_pca,
+            "enable_residual_pca": not args.no_pca,
             "save_raw_tensors": args.save_raw,
         },
         generation_overrides=(

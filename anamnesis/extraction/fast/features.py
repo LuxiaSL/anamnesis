@@ -73,7 +73,7 @@ class GpuFeatureLane:
             raise ValueError("replay_path must be cached or full")
         self.replay_path = replay_path
         required = (
-            "include_baseline_tiers",
+            "include_core_blocks",
             "enable_residual_trajectory",
             "enable_attention_flow",
             "enable_gate_features",
@@ -95,13 +95,13 @@ class GpuFeatureLane:
             raise ValueError("GPU lane does not support additional feature families")
         if not all(
             (
-                extraction.enable_tier1,
-                extraction.enable_tier2,
-                extraction.enable_tier2_5,
-                extraction.enable_tier3,
+                extraction.enable_norms_and_output_stats,
+                extraction.enable_attention_and_deltas,
+                extraction.enable_cache_and_keys,
+                extraction.enable_residual_pca,
             )
         ):
-            raise ValueError("GPU lane cannot drop baseline feature families")
+            raise ValueError("GPU lane cannot drop any of the four core blocks")
         if len(calibration_sha256) != 64:
             raise ValueError("calibration SHA256 is mandatory")
         self.device = torch.device(device)

@@ -30,10 +30,10 @@ def test_shared_native_config_matches_original_inline_contract(model, enable_pca
         pca_layers=preset.pca_layers,
         early_layer_cutoff=preset.early_layer_cutoff,
         late_layer_cutoff=preset.late_layer_cutoff,
-        enable_tier3=enable_pca,
+        enable_residual_pca=enable_pca,
     )
     expected_fc = FeaturePipelineConfig(
-        include_baseline_tiers=True,
+        include_core_blocks=True,
         enable_residual_trajectory=True,
         enable_attention_flow=True,
         enable_gate_features=True,

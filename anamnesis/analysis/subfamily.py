@@ -22,7 +22,7 @@ operator cut groups by window and spectral treatment, which is what says whether
 windowing bought anything over the plain series.
 
 Feature names come from the loader rather than from a second read of the bank. A
-tier's names are the slice of the vector's name list its own metadata assigns to
+block's names are the slice of the vector's name list its own metadata assigns to
 it, and a decomposition whose names and columns disagree is silently mapping
 indices onto the wrong features — so a length mismatch is refused here rather than
 producing a plausible table.
@@ -43,7 +43,13 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-from anamnesis.analysis.gauntlet.signature_io import Run4Data
+from anamnesis.analysis.gauntlet.signature_io import (
+    ATTENTION_FLOW,
+    CONTRASTIVE_PROJECTION,
+    GATE_FEATURES,
+    TEMPORAL_DYNAMICS,
+    Run4Data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,10 +176,10 @@ def classify_contrastive_projection(name: str) -> str:
 
 
 SUBFAMILY_CLASSIFIERS: dict[str, Callable[[str], str]] = {
-    "temporal_dynamics": classify_temporal_dynamics,
-    "attention_flow": classify_attention_flow,
-    "gate_features": classify_gate_features,
-    "contrastive_projection": classify_contrastive_projection,
+    TEMPORAL_DYNAMICS: classify_temporal_dynamics,
+    ATTENTION_FLOW: classify_attention_flow,
+    GATE_FEATURES: classify_gate_features,
+    CONTRASTIVE_PROJECTION: classify_contrastive_projection,
 }
 """Which classifier reads which family's names. A family absent from this table has
 no sub-family convention to read, which is a fact about its naming rather than a
@@ -212,25 +218,25 @@ class SubsetAccuracy(BaseModel):
     error: str | None = None
 
 
-def feature_names_for(data: Run4Data, tier: str) -> list[str]:
-    """A tier's feature names, checked against the width of its matrix.
+def feature_names_for(data: Run4Data, block: str) -> list[str]:
+    """A block's feature names, checked against the width of its matrix.
 
     The loader takes the names from the slice table the bank's own metadata carries.
-    Where that table is absent the names cannot be assigned to a tier at all, and
+    Where that table is absent the names cannot be assigned to a block at all, and
     where they disagree with the matrix's width the mapping from name to column is
     wrong — both refuse here, because the decomposition's whole output is that
     mapping.
     """
-    names = data.tier_feature_names.get(tier)
+    names = data.block_feature_names.get(block)
     if names is None or len(names) == 0:
         raise KeyError(
-            f"no feature names for tier {tier!r}: the bank's metadata carries no slice "
+            f"no feature names for block {block!r}: the bank's metadata carries no slice "
             f"table for it, so its columns cannot be named"
         )
-    width = int(data.get_tier(tier).shape[1])
+    width = int(data.get_block(block).shape[1])
     if len(names) != width:
         raise ValueError(
-            f"tier {tier!r} has {width} columns but {len(names)} names — a sub-family "
+            f"block {block!r} has {width} columns but {len(names)} names — a sub-family "
             f"cut would map names onto the wrong columns"
         )
     return [str(n) for n in names]
@@ -280,12 +286,12 @@ def _mask_for(width: int, indices: Sequence[int]) -> NDArray[np.bool_]:
 
 def decompose_family(
     data: Run4Data,
-    tier: str,
+    block: str,
     feature_names: Sequence[str],
     classifier: Callable[[str], str],
 ) -> dict[str, SubsetAccuracy]:
     """Cut one family into sub-families and score each, plus the whole family."""
-    X = data.get_tier(tier)
+    X = data.get_block(block)
     y = data.modes
     subfamilies: dict[str, list[int]] = {}
     for index, name in enumerate(feature_names):
@@ -308,13 +314,13 @@ def decompose_family(
 
 def decompose_by_groups(
     data: Run4Data,
-    tier: str,
+    block: str,
     feature_names: Sequence[str],
     classifier: Callable[[str], str],
     groups: Mapping[str, Sequence[str]],
 ) -> dict[str, SubsetAccuracy]:
     """Score named unions of sub-families — the coarse and operator cuts."""
-    X = data.get_tier(tier)
+    X = data.get_block(block)
     y = data.modes
     labels = [classifier(name) for name in feature_names]
     results: dict[str, SubsetAccuracy] = {}
@@ -336,24 +342,24 @@ def decompose_run(data: Run4Data) -> dict[str, dict[str, SubsetAccuracy]]:
     reads as a family with no signal.
     """
     out: dict[str, dict[str, SubsetAccuracy]] = {}
-    for tier, classifier in SUBFAMILY_CLASSIFIERS.items():
-        if tier not in data.tier_features:
+    for block, classifier in SUBFAMILY_CLASSIFIERS.items():
+        if block not in data.block_features:
             continue
         try:
-            names = feature_names_for(data, tier)
+            names = feature_names_for(data, block)
         except (KeyError, ValueError) as exc:
-            logger.warning(f"{tier}: not decomposed ({exc})")
+            logger.warning(f"{block}: not decomposed ({exc})")
             continue
-        logger.info(f"  --- {tier} ({len(names)} features) ---")
-        out[f"{tier}_by_signal"] = decompose_family(data, tier, names, classifier)
-        if tier == "temporal_dynamics":
+        logger.info(f"  --- {block} ({len(names)} features) ---")
+        out[f"{block}_by_signal"] = decompose_family(data, block, names, classifier)
+        if block == TEMPORAL_DYNAMICS:
             logger.info("  coarse cut, by the substrate each signal is a series of:")
             out["td_coarse"] = decompose_by_groups(
-                data, tier, names, classify_temporal_dynamics, TD_COARSE_GROUPS
+                data, block, names, classify_temporal_dynamics, TD_COARSE_GROUPS
             )
             logger.info("  operator cut, by window and spectral treatment:")
             out["td_by_operator"] = decompose_by_groups(
-                data, tier, names, classify_temporal_operator, TD_OPERATOR_GROUPS
+                data, block, names, classify_temporal_operator, TD_OPERATOR_GROUPS
             )
     return out
 

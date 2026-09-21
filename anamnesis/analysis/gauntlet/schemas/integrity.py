@@ -1,7 +1,7 @@
 """Section 1 schemas: data integrity and descriptive statistics.
 
-What the gauntlet checked before it measured anything: sample balance, tier
-dimensions, NaN/Inf counts, per-tier variance, generation lengths and feature
+What the gauntlet checked before it measured anything: sample balance, block
+dimensions, NaN/Inf counts, per-block variance, generation lengths and feature
 value ranges. ``all_clean`` is the field the orchestrator reads to shout.
 """
 
@@ -13,8 +13,8 @@ from anamnesis.analysis.gauntlet.schemas.base import _FORBID
 
 
 class NanInfCount(BaseModel):
-    """NaN/Inf counts for a single tier. ``error`` populated only when the
-    tier could not be loaded (in which case ``nan``/``inf`` are sentinel -1).
+    """NaN/Inf counts for a single block. ``error`` populated only when the
+    block could not be loaded (in which case ``nan``/``inf`` are sentinel -1).
     """
 
     model_config = _FORBID
@@ -24,8 +24,8 @@ class NanInfCount(BaseModel):
     error: str | None = None
 
 
-class TierVarianceReport(BaseModel):
-    """Per-tier variance diagnostics: constant/near-constant feature counts."""
+class BlockVarianceReport(BaseModel):
+    """Per-block variance diagnostics: constant/near-constant feature counts."""
 
     model_config = _FORBID
 
@@ -57,8 +57,8 @@ class LengthOverallStats(BaseModel):
     max: int
 
 
-class TierValueRange(BaseModel):
-    """Per-tier feature-value range summary."""
+class BlockValueRange(BaseModel):
+    """Per-block feature-value range summary."""
 
     model_config = _FORBID
 
@@ -84,11 +84,11 @@ class IntegrityResult(BaseModel):
     samples_per_mode: dict[str, int]
     samples_per_topic: dict[str, int]
     balanced: bool
-    tier_dims: dict[str, int]
+    block_dims: dict[str, int]
     total_features: int
     nan_inf: dict[str, NanInfCount]
     all_clean: bool
-    variance_report: dict[str, TierVarianceReport]
+    variance_report: dict[str, BlockVarianceReport]
     length_by_mode: dict[str, LengthByModeStats] | None = None
     length_overall: LengthOverallStats | None = None
-    value_ranges: dict[str, TierValueRange]
+    value_ranges: dict[str, BlockValueRange]
