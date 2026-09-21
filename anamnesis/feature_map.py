@@ -61,9 +61,11 @@ class Source(str, Enum):
     values = "values"          # v_proj (future — banked, not yet featurized)
     qk = "qk"                  # post-RoPE QK geometry (future)
     routing = "routing"        # cross-block attention-residual routing weights (block-routing architectures)
-    expert_routing = "expert_routing"  # MoE router: expert-allocation reads (vmb arm A7, M6-class
-                               # models; NEW source — deliberately distinct from `routing`, which is
-                               # ALREADY TAKEN by cross-block attention-residual routing. Prereg A7 note.)
+    expert_routing = "expert_routing"  # MoE router: expert-allocation reads. Distinct from
+                               # `routing` above, which is cross-block attention-residual routing:
+                               # one reads which expert a token was sent to, the other how much of
+                               # its own history a block attended over. Mixture-of-experts models
+                               # only; a dense model has no expert allocation to read.
     unknown = "unknown"        # flagged: classifier did not match (audit these)
 
 
