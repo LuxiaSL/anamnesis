@@ -265,15 +265,23 @@ def _contrastive_topic_heldout(
     X_sbert: NDArray | None,
     y: NDArray, topics: NDArray, seed: int = 42,
 ) -> ContrastiveProjectionComparisonResult:
-    """Compare contrastive projection across feature types, topic-heldout."""
-    try:
-        from .contrastive import _train_contrastive_mlp, _embed, _build_topic_folds
-    except ImportError:
+    """Compare contrastive projection across feature types, topic-heldout.
+
+    The fit is the same law section 8 trains under, and the folds are section 8's
+    own :func:`~anamnesis.analysis.gauntlet.contrastive.build_topic_folds`: the
+    reading here is text features against compute features, so anything that
+    differed between the two sections' fits would show up as that contrast.
+    """
+    from anamnesis.analysis.contrastive_mlp import embed, train_embedding
+
+    from .contrastive import HAS_TORCH, build_topic_folds
+
+    if not HAS_TORCH:
         return ContrastiveProjectionComparisonResult(
-            error="contrastive module not available (torch missing?)",
+            error="torch is not installed, so no contrastive projection can be fitted",
         )
 
-    folds = _build_topic_folds(topics, n_folds=5, seed=seed)
+    folds = build_topic_folds(topics, n_folds=5, seed=seed)
 
     conditions: dict[str, NDArray] = {
         "tfidf": StandardScaler().fit_transform(X_tfidf),
@@ -293,9 +301,9 @@ def _contrastive_topic_heldout(
 
         for train_mask, test_mask in folds:
             try:
-                model = _train_contrastive_mlp(X[train_mask], y[train_mask])
-                emb_train = _embed(model, X[train_mask])
-                emb_test = _embed(model, X[test_mask])
+                model, _loss = train_embedding(X[train_mask], y[train_mask])
+                emb_train = embed(model, X[train_mask])
+                emb_test = embed(model, X[test_mask])
 
                 knn = KNeighborsClassifier(n_neighbors=3)
                 knn.fit(emb_train, y[train_mask])

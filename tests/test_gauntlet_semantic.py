@@ -5,7 +5,14 @@ sentence-transformers and a download. ``_mantel_test`` needs neither — it is t
 distance matrices, a correlation and a permutation null — so the property that
 matters is tested directly.
 
-That property is the p-value's convention. A Mantel test is a permutation test,
+``_contrastive_topic_heldout`` is called, because its per-fold failure handling turns
+any error into a fold accuracy of zero — so the only way to know it fits anything at
+all is to hand it a corpus where compute features separate the modes and text features
+do not, and read the contrast back. That is also what pins it to the same projection
+law section 8 trains under: the two sections' numbers are compared, and a fit that
+differed between them would make the comparison meaningless.
+
+The other property here is the p-value's convention. A Mantel test is a permutation test,
 so its p is the add-one statistic from ``anamnesis.analysis.battery.stats`` like
 every other permutation p in the package: ``(hits + 1) / (n + 1)``, never zero and
 never finer than ``1 / (n_permutations + 1)``. The section is checked against that
@@ -21,7 +28,9 @@ import pytest
 
 from anamnesis.analysis.battery.stats import permutation_pvalue, permutation_resolution
 from anamnesis.analysis.gauntlet.schemas import MantelResult
-from anamnesis.analysis.gauntlet.semantic import _mantel_test
+from anamnesis.analysis.gauntlet.semantic import _contrastive_topic_heldout, _mantel_test
+
+MODES = ["linear", "socratic", "contrastive", "dialectical", "analogical"]
 
 
 def distance_matrix(rng: np.random.Generator, n: int, dims: int = 4) -> np.ndarray:
@@ -129,3 +138,64 @@ def test_a_matrix_against_itself_reports_the_finest_p_available() -> None:
     assert result.r == pytest.approx(1.0)
     assert result.p_value == pytest.approx(permutation_resolution(n_permutations))
     assert result.p_value > 0.0
+
+
+def mode_separated_corpus(
+    n_topics: int = 10, dims: int = 6, seed: int = 20260921,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute features that carry the mode, text features that carry only the topic.
+
+    This is the contrast section 9 exists to draw, built so the answer is known:
+    a projection fitted on the compute block must generalise to held-out topics,
+    and one fitted on the text block cannot.
+    """
+    rng = np.random.default_rng(seed)
+    compute, text, modes, topics = [], [], [], []
+    for topic_index in range(n_topics):
+        fingerprint = 6.0 * rng.standard_normal(dims)
+        for mode_index, mode in enumerate(MODES):
+            compute.append(
+                np.full(dims, float(mode_index)) + 0.25 * rng.standard_normal(dims)
+            )
+            text.append(fingerprint + 0.25 * rng.standard_normal(dims))
+            modes.append(mode)
+            topics.append(f"topic_{topic_index}")
+    return (
+        np.array(text),
+        np.array(compute),
+        np.array(modes),
+        np.array(topics),
+    )
+
+
+def test_the_projection_comparison_fits_and_separates_what_it_should() -> None:
+    """Section 9 trains a real embedding, and reads compute against text with it.
+
+    Every fold failure in this comparison becomes an accuracy of zero, so a broken
+    fit would show up as a mean near zero rather than as an error. Asserting the
+    compute condition above chance is what makes the whole path load-bearing.
+    """
+    X_text, X_compute, y, topics = mode_separated_corpus()
+
+    result = _contrastive_topic_heldout(X_text, X_compute, None, y, topics)
+    assert result.error is None
+    assert result.sbert is None and result.combined_compute_sbert is None
+
+    compute = result.compute_attention_and_cache
+    assert compute is not None
+    chance = 1.0 / len(MODES)
+    assert compute.test_knn_accuracy > 0.6, (
+        f"the mode is in the compute block; chance is {chance:.2f}"
+    )
+    assert len(compute.fold_accs) == 5 and min(compute.fold_accs) > 0.0, (
+        "a fold that scored zero is a fold that raised"
+    )
+    assert compute.train_test_gap == pytest.approx(
+        compute.train_knn_accuracy - compute.test_knn_accuracy
+    )
+
+    tfidf = result.tfidf
+    assert tfidf is not None
+    assert tfidf.test_knn_accuracy < compute.test_knn_accuracy, (
+        "text features carry the topic, which the held-out folds make worthless"
+    )

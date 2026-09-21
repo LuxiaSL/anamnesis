@@ -16,13 +16,20 @@ and about the sampling that feeds the banked one:
   * the temporal sample indices are evenly spaced with both endpoints, and the layer read is
     offset by one because the embedding output sits first;
   * the corpus loader excludes prompt-swap generations, keys the group to the generation,
-    and applies the positional correction at the absolute position of each sampled step.
+    and applies the positional correction at the absolute position of each sampled step;
+  * the width of the network is an argument, because the capacity sweep in the gauntlet's
+    section 8 is the same law read at four widths;
+  * these two laws are the only ones in the package. The gauntlet's sections train under
+    the analysis law defined here rather than carrying a trainer each, and the check is
+    over their source: a second implementation passes every test either one has, and then
+    banks numbers under a law nobody compared.
 
 CPU only; the networks are tiny and trained for a handful of epochs.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -31,6 +38,7 @@ import pytest
 
 from anamnesis.analysis.contrastive_mlp import (
     EMBEDDING_OFFSET,
+    HIDDEN_DIM,
     embed,
     load_hidden_state_samples,
     mine_balanced_triplets,
@@ -40,6 +48,8 @@ from anamnesis.analysis.contrastive_mlp import (
     train_embedding,
     train_projection,
 )
+
+GAUNTLET = Path(__file__).resolve().parent.parent / "anamnesis" / "analysis" / "gauntlet"
 
 
 def two_class_corpus(n: int = 24, d: int = 6, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
@@ -131,6 +141,53 @@ def test_the_embedding_lives_on_the_unit_sphere() -> None:
     assert embedded.shape == (len(X), 4)
     assert np.allclose(np.linalg.norm(embedded, axis=1), 1.0, atol=1e-5)
     assert loss >= 0.0
+
+
+def test_the_analysis_law_trains_at_the_width_it_is_given() -> None:
+    """The capacity sweep needs the width to move and nothing else to."""
+    X, y = two_class_corpus()
+    narrow, _loss = train_embedding(X, y, hidden_dim=8, n_epochs=3, n_triplets=16, seed=5)
+    default, _loss = train_embedding(X, y, n_epochs=3, n_triplets=16, seed=5)
+    assert narrow[0].out_features == 8
+    assert default[0].out_features == HIDDEN_DIM
+
+
+def test_the_gauntlet_sections_carry_no_trainer_of_their_own() -> None:
+    """One implementation of the law, named once, imported where it is needed.
+
+    The markers are the two ways a second trainer comes back: the loss it would have
+    to construct, and the name the duplicate went by. A section that grows its own
+    fit would report numbers under a law nothing here describes.
+    """
+    offenders = [
+        f"{path.name} names {marker}"
+        for path in sorted(GAUNTLET.glob("*.py"))
+        for marker in ("TripletMarginLoss", "_train_contrastive_mlp")
+        if marker in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], (
+        f"{offenders}: the contrastive law lives in anamnesis.analysis.contrastive_mlp"
+    )
+
+
+def test_no_gauntlet_section_reaches_into_a_sibling_sections_private_names() -> None:
+    """A private name is a module's own business; across modules it is a coupling.
+
+    Reaching for one makes two sections share an implementation that neither
+    documents and that a reader of either would not know was load-bearing.
+    """
+    reaches: list[str] = []
+    for path in sorted(GAUNTLET.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or not node.level:
+                continue
+            reaches.extend(
+                f"{path.name} imports {alias.name} from {'.' * node.level}{node.module or ''}"
+                for alias in node.names
+                if alias.name.startswith("_")
+            )
+    assert reaches == [], str(reaches)
 
 
 def test_the_network_shape_is_the_one_the_banked_weights_describe() -> None:

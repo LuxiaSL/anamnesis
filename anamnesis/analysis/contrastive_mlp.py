@@ -193,8 +193,9 @@ def embed(model: Any, X: F32) -> F32:
 
 def train_embedding(
     X: F32,
-    y: NDArray[np.int64],
+    y: NDArray[Any],
     *,
+    hidden_dim: int = HIDDEN_DIM,
     bottleneck_dim: int = BOTTLENECK_DIM,
     n_epochs: int = ANALYSIS_EPOCHS,
     n_triplets: int = ANALYSIS_TRIPLETS,
@@ -206,10 +207,24 @@ def train_embedding(
 ) -> tuple[Any, float]:
     """The analysis law: full data, anchor-uniform mining, fixed epochs, no holdout.
 
+    ``y`` carries whatever labels the analysis holds — mode names as strings are the
+    usual case — because mining only ever compares labels for equality.
+
+    ``hidden_dim`` is an argument rather than the constant because one of the
+    analyses that trains under this law is a capacity sweep: the same law at four
+    widths is the reading, so the width has to move while nothing else does.
+
     Returns the trained network and its last loss. Nothing is held out on purpose —
     the embedding is a lens this analysis looks through once, and the claim it
     supports comes from repeating the whole fit under several seeds rather than from
     a validation number inside one.
+
+    Raises
+    ------
+    ValueError
+        When fewer than two classes are present: a triplet loss over one class has
+        no negatives to push against, and a network returned untrained from that
+        would read as a fitted embedding.
     """
     torch, nn, optim = _torch()
     if len(np.unique(y)) < 2:
@@ -218,7 +233,9 @@ def train_embedding(
     rng = np.random.RandomState(seed)
 
     rows = torch.tensor(X, dtype=torch.float32)
-    model = projection_network(X.shape[1], output_dim=bottleneck_dim, dropout=dropout)
+    model = projection_network(
+        X.shape[1], hidden_dim=hidden_dim, output_dim=bottleneck_dim, dropout=dropout
+    )
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = nn.TripletMarginLoss(margin=margin)
 
