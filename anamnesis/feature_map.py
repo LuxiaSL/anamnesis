@@ -36,6 +36,9 @@ over the frozen v3 names.)
 
 Run as a script to validate the taxonomy + coverage on a real run:
     ANAMNESIS_RUNS=/models/anamnesis-extract/runs python -m anamnesis.feature_map 8b_fat_01
+A run whose model is not in `MODEL_LAYERS` takes its layer count as a second
+argument, because depth bands are fractions of the network and no default is right
+for an unnamed model.
 """
 from __future__ import annotations
 
@@ -50,6 +53,39 @@ from pydantic import BaseModel, ConfigDict
 MODEL_LAYERS = {"3b": 28, "8b": 32, "kotodama_3b": 28,
                 "olmo2-7b": 32, "gemma3-27b": 62, "qwen-7b": 28,
                 "dsv2": 27, "dsv2_lite": 27, "dsv2-lite": 27}  # M6 DeepSeek-V2-Lite (27 layers)
+
+
+class UnknownDepthError(ValueError):
+    """A run's layer count is not known, so its depth bands cannot be assigned."""
+
+
+def layers_for_run(run: str) -> int:
+    """The layer count of the model a run name identifies, by longest prefix.
+
+    A band is a fraction of the network, so the layer count is the denominator of
+    every early/mid/late label. Getting it wrong does not fail: it relabels the
+    bands and reports a plausible map of where signal lives, over the wrong depths.
+    There is no count that is safe to assume for an unnamed model, so an unmatched
+    run refuses and the caller states the depth instead.
+
+    Longest prefix rather than first match, because the keys nest: a run beginning
+    ``dsv2_lite`` also begins ``dsv2``, and a shorter key that happened to be
+    ordered first would answer for a model it does not name.
+
+    Raises
+    ------
+    UnknownDepthError
+        When no key of :data:`MODEL_LAYERS` prefixes ``run``. Add the model there,
+        or pass the count.
+    """
+    matches = [k for k in MODEL_LAYERS if run.startswith(k)]
+    if not matches:
+        raise UnknownDepthError(
+            f"no layer count known for run {run!r}; add its model to MODEL_LAYERS "
+            f"in anamnesis/feature_map.py or state the layer count at the call site "
+            f"(known prefixes: {sorted(MODEL_LAYERS)})"
+        )
+    return MODEL_LAYERS[max(matches, key=len)]
 
 
 class Source(str, Enum):
@@ -239,6 +275,12 @@ def _band(layer: Optional[int], n_layers: int) -> Optional[Band]:
 
 
 def classify(name: str, n_layers: int) -> FeatureTag:
+    """Tag one feature name. ``n_layers`` is the denominator of its depth band."""
+    if n_layers <= 0:
+        raise UnknownDepthError(
+            f"n_layers={n_layers}: a band is a fraction of the network, and a "
+            "non-positive layer count would label every layer 'late'"
+        )
     L = _layer(name)
     src = _source(name)
     return FeatureTag(name=name, source=src, method=_method(name, src), dynamic=_dynamic(name),
@@ -251,6 +293,11 @@ class FeatureMap:
     """Tags a fixed feature-name list and slices it by any axis or (source,method,depth) cell."""
 
     def __init__(self, names: list[str], n_layers: int):
+        if n_layers <= 0:
+            raise UnknownDepthError(
+                f"n_layers={n_layers}: state the model's layer count, which is what "
+                "the early/mid/late bands are cut on"
+            )
         self.names = list(names)
         self.n_layers = n_layers
         self.tags = [classify(n, n_layers) for n in self.names]
@@ -298,8 +345,12 @@ class FeatureMap:
 
 # ---------------------------------------------------------------------------- validation CLI
 
-def _load_names(run: str) -> tuple[list[str], int]:
-    import json
+def _load_names(run: str, n_layers: int | None = None) -> tuple[list[str], int]:
+    """One run's banked feature names, with the layer count its bands are cut on.
+
+    ``n_layers`` is what a caller states for a model the map does not know; left
+    out, :func:`layers_for_run` answers or refuses.
+    """
     import os
     from pathlib import Path
     runs = Path(os.environ.get("ANAMNESIS_RUNS", "outputs/runs"))
@@ -307,14 +358,14 @@ def _load_names(run: str) -> tuple[list[str], int]:
     p = sorted(sd.glob("gen_*.npz"))[0]
     z = np.load(p, allow_pickle=True)
     names = [str(x) for x in z["feature_names"]]
-    nl = next((v for k, v in MODEL_LAYERS.items() if run.startswith(k)), 32)
-    return names, nl
+    return names, layers_for_run(run) if n_layers is None else n_layers
 
 
 def main():
     import sys
     run = sys.argv[1] if len(sys.argv) > 1 else "8b_fat_01"
-    names, nl = _load_names(run)
+    stated = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    names, nl = _load_names(run, stated)
     fm = FeatureMap(names, nl)
     s = fm.summary()
     print(f"=== {run}  n={s['n']}  n_layers={nl} ===")
