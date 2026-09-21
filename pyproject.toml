@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "anamnesis"
+version = "0.1.0"
+description = "Computational state signatures: instrument for how a forward pass ran, not what it read."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "numpy>=1.26"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["tools"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
