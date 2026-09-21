@@ -173,3 +173,81 @@ until a checkpoint is reachable.
 | — | `tests/test_replay_manifest.py` | New. The schema and its round trip, and every way reconstruction declines to cover a generation: template drift, an empty text, a round trip that will not close, a token count that disagrees with the bank, absent tensors. A declined generation is named with a reason, never dropped. |
 | — | `tests/test_cache_surgery_snapshot.py` | New. The rotation's exactness and the check that refuses a scheme where it would not hold; that values are position-free and never touched; the keep geometry's protections; and the value gate on the frequency table, which catches the wrong table where the homomorphism check cannot. |
 | — | `tests/test_runtime_on_a_real_checkpoint.py` | New. What only real weights can show: a checkpoint loading with its hooks on the module names its architecture uses, its own rotary buffer matching the reconstruction, and a replay of a generation reproducing it. Skipped with a named reason unless `ANAMNESIS_TEST_MODEL` points at a checkpoint; one case additionally needs an accelerator. The skips are the standing statement of what a box must have. |
+
+## Extraction — the primary implementation, and the proof that it agrees
+
+The refounded `extraction/` is three things a reader should be able to tell apart: a
+**specification** (`state_extractor`, pure numpy, no torch and no model), a **primary
+implementation** (the fast lane), and a **proof that the two agree** on a given
+machine. The old tree had all three as flat `gpu_*` siblings of the specification they
+are defined against, which said nothing about which was which.
+
+So the lane groups under `fast/` and the harness under `equivalence/`. The names drop
+the `gpu_` prefix because the prefix named a device rather than a role, and the lane
+runs on whatever device it is handed — a CPU included, which is what lets its agreement
+with the specification be a test rather than a claim. Nothing in the grouping is a
+fork: the lane imports the families' naming and slicing and derives its whole output
+schema from the canonical pipeline, so the families are load-bearing for the primary
+path.
+
+`replay_config` sits above both lanes rather than beside either. It declares which
+features a replay computes, and an arithmetic backend is a way of computing features,
+not a licence to redefine which exist.
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/extraction/gpu_features.py` | `anamnesis/extraction/fast/features.py` | The lane entry point, logic-identical. `GpuFeatureLane`, `GpuFeatureResult` and `replay_span` / `replay_batch` keep their names, which the record cites. Two adaptations: the module docstring now states the scope and the refusals in the present tense, and the self-hashing source list names the four renamed siblings. That list feeds `lane_id`, so a lane id computed here differs from one computed in the frozen repository — as it should, since a lane id is a digest of the exact code that produced a vector. |
+| `anamnesis/extraction/gpu_ops.py` | `anamnesis/extraction/fast/ops.py` | Byte-identical but for import paths. The float32→float64→float32 boundaries and the population standard deviation are the specification's, deliberately, and `FeatureCollector.finish` refuses a vector whose names are not exactly the declared schema. |
+| `anamnesis/extraction/gpu_attention.py` | `anamnesis/extraction/fast/attention.py` | Byte-identical but for import paths. |
+| `anamnesis/extraction/gpu_families.py` | `anamnesis/extraction/fast/families.py` | Byte-identical but for import paths, including the named host-transfer exception for the top-k Jaccard feature, whose definition includes numpy's argsort tie order. |
+| `anamnesis/extraction/gpu_schema.py` | `anamnesis/extraction/fast/schema.py` | Byte-identical but for import paths. `resolve_gpu_schema` keeps its name. |
+| `anamnesis/extraction/batch_layout.py` | `anamnesis/extraction/fast/batch_layout.py` | Byte-identical. It moves under `fast/` because ragged packing exists for the lane's throughput; nothing else reads it. |
+| `anamnesis/extraction/fidelity.py` | `anamnesis/extraction/equivalence/fidelity.py` | Byte-identical but for one docstring sentence that carried the date of the ruling rather than the ruling. |
+| `anamnesis/extraction/path_floor.py` | `anamnesis/extraction/equivalence/path_floor.py` | Byte-identical but for import paths. |
+| `anamnesis/extraction/replay_config.py` | `anamnesis/extraction/replay_config.py` | Byte-identical, at the same path. |
+| `anamnesis/analysis/lane_guard.py` | `anamnesis/analysis/lane_guard.py` | Byte-identical, at the same path, and it stays in `analysis/`: lane guarding is a read-side gate on scientific inputs. It ports with the lane under the "together or not at all" rule — a primary lane shipped without the guard that keeps its outputs from being joined to another lane's ships the confound. Its golden-path consumer is the gauntlet's signature loader, which arrives with the gauntlet. |
+| — | `anamnesis/extraction/fast/__init__.py` | New. Documents the six modules, states that the lane reuses the family definitions rather than copying them, and imports none of them so the layout arithmetic is readable without torch. |
+| — | `anamnesis/extraction/equivalence/__init__.py` | New. Documents the two modules and states the doctrine they exist for: agreement is a property of a box, different hardware gives different numbers, and outputs from different boxes or lanes must not be joined inside one contrast. |
+| — | `anamnesis/analysis/__init__.py` | New. Documents why the lane guard is analysis rather than extraction. |
+
+### The entry points
+
+| old path | new home | notes |
+|---|---|---|
+| `anamnesis/scripts/run_gpu_replay.py` | `anamnesis/scripts/run_gpu_replay.py` | **Ported as qualified-primary.** The `--experimental-feature-only` flag is gone: the configuration it demanded acknowledgement for — dense 3B/8B Llama, one full teacher-forced pass, the complete battery, one device — is the configuration the lane tests and the equivalence suite cover, so a covered command line runs without ceremony. The fence stays exactly where the qualification stops: adapters, activation interventions and batched submission are not arguments here, and a command line naming one is rejected rather than reinterpreted as the covered case. The docstring states that boundary in the present tense, as what is and is not covered, and names `qualify_box.py` as where agreement is measured. It also gains a local `load_calibration`, because the calibration reader it imported belongs to a script that ports later; when that script lands the two must converge on one definition rather than drift. |
+| — | `anamnesis/scripts/qualify_box.py` | New, and the golden path the equivalence harness existed without. It replays a small sample of a banked run's spans twice through the lane and once through the anchor on *this* machine, prices each row's path bound from the first incremental step, hands all of it to `fidelity.verify_vectors`, and prints three things a user can act on: whether the box reproduces its own vectors, whether its two paths agree, and the lane identity its outputs will carry. The ruler is unit-scaled and says so, because a standardizing ruler belongs to a cohort and a cohort is a deployment's own. A pass is not a certification: certification belongs to deployments, never to this repository. This closes the two proof modules' zero-consumer orphaning — `fidelity` and `path_floor` now have an in-package caller. |
+
+### Tests
+
+Eleven lane tests were candidates. Nine port, and every one of them runs on a CPU with
+no checkpoint and no accelerator — including the whole agreement proof, which is the
+point: the claim that the two extraction paths compute the same features is now a test
+that runs wherever the suite runs, on a real `LlamaForCausalLM` with random weights.
+The hand-built decoder in `tests/synthetic_runtime.py` cannot serve here, because the
+lane reads eager attention weights out of `self_attn`'s forward hook and refuses a
+model whose `model_type` is not `llama`.
+
+Where a case's reference came from the measurement campaign in `anamnesis-pl`'s
+top-level `scripts/`, the case does not port. The campaign subset is empty by ruling,
+and a test whose subject is a frozen measurement harness belongs beside it.
+
+Every ported test grew, by its header: a test in this repository states what the claim
+is and why the fixture can establish it. Configuration constructions also gained the
+layer plan and band cutoffs explicitly, which the refounded configuration classes
+require.
+
+| old path | new home | notes |
+|---|---|---|
+| `tests/test_gpu_replay.py` | `tests/test_fast_lane_equivalence.py` | Renamed for what it proves, and paired with `test_extraction_equivalence.py`: one checks the specification against its golden master, this one checks the specification against the primary implementation. All 22 cases run on a CPU. It also homes `tiny_loaded`, the real hooked Llama the other lane tests import. |
+| `tests/test_gpu_batch.py` | `tests/test_fast_batch.py` | Unchanged but for import paths, configuration fields and its header. |
+| `tests/test_gpu_attention.py` | `tests/test_fast_attention.py` | Same. |
+| `tests/test_gpu_families.py` | `tests/test_fast_families.py` | Same. |
+| `tests/test_batch_layout.py` | `tests/test_batch_layout.py` | Same. |
+| `tests/test_fidelity.py` | `tests/test_fidelity.py` | Same; pure numpy, no lane and no device. |
+| `tests/test_replay_config.py` | `tests/test_replay_config.py` | Same. |
+| `tests/test_path_floor.py` | `tests/test_path_floor.py` | **Two of three cases.** The coordinate-identity and lower-bound cases port. `test_first_forward_matches_full_incremental_replay` does not: its reference is `incremental_raw` from the campaign's `extraction_perf_phase0.py`, loaded by file path. The capability it checked — that a fresh-prefix single incremental forward reproduces the anchor's first-position coordinates — is exercised instead by `qualify_box.py`, which calls `first_incremental_coordinates` on a real model. |
+| `tests/test_lane_guard.py` | `tests/test_lane_guard.py` | **Two of six cases.** The two that test the guard port now, with the guard. The four that drive `geometric_trio/data_loader.load_run4` test the loader's use of it, and arrive with the loader. |
+| `tests/test_gpu_replay_cli.py` | `tests/test_run_gpu_replay.py` | Renamed after its subject. The acknowledgement-flag case is replaced by its inverse — a covered command line parses — and the three refusal cases are unchanged, so the qualification boundary is still pinned by test rather than by prose. |
+| `tests/test_extraction_perf_phase0.py` | *record* | Not ported. Classified as a lane test by module import, but its single case loads `scripts/extraction_perf_phase0.py` by file path and exercises that module's `incremental_raw`. Its subject is the campaign hub, not the lane. |
+| `tests/test_verify_batch_schedule.py` | *record* | Not ported. Every case calls `validate_batch_schedule` from the campaign; `batch_layout.pack_spans` appears only inside the fixture, as the digest the campaign's receipts are checked against. There are no batch-layout assertions to separate out. |
+| — | `tests/test_qualify_box.py` | New. What the golden path asks for, the refusals that stop a meaningless measurement before a model loads, and the verdict's three distinguishable states with the exit status that follows them. The sentence about not mixing boxes is asserted, not merely written. |
