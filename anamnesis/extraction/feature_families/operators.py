@@ -75,7 +75,8 @@ def windowed_stats(
 
     Returns
     -------
-    (features, names) — same contract as extract_tier*().
+    (features, names) — same contract as the extract_* block functions in
+    `anamnesis/extraction/state_extractor.py`.
     """
     T = len(time_series)
     features: list[float] = []

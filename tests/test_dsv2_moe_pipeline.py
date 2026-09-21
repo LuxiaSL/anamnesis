@@ -59,9 +59,9 @@ def _run_full_v2_pipeline() -> tuple[ExtractionResult, list[int]]:
     p = MODEL_PRESETS["dsv2-lite"]
     ec = ExtractionConfig(sampled_layers=sl, pca_layers=p.pca_layers,
                           early_layer_cutoff=p.early_layer_cutoff,
-                          late_layer_cutoff=p.late_layer_cutoff, enable_tier3=False)
+                          late_layer_cutoff=p.late_layer_cutoff, enable_residual_pca=False)
     fc = FeaturePipelineConfig(
-        include_baseline_tiers=True, enable_residual_trajectory=True, enable_attention_flow=True,
+        include_core_blocks=True, enable_residual_trajectory=True, enable_attention_flow=True,
         enable_gate_features=True, enable_temporal_dynamics=False, enable_per_head=True,
         enable_stft=True, enable_contrastive_projection=False, enable_value_geometry=True,
         enable_qk_geometry=True, enable_kv_cka=True, enable_expert_routing=True,

@@ -267,7 +267,7 @@ def test_reads_the_banked_8b_signatures() -> None:
 
     CI has no banked data, so absence is a skip rather than a failure. What this
     catches that synthetic npz files cannot: the real feature-name arrays, the
-    real tier_slices, the real repetition structure the core filter reduces, and
+    real block_slices, the real repetition structure the core filter reduces, and
     the lane field a legacy bank does not carry.
     """
     sig_dir = outputs_root() / "runs" / BANKED_RUN / BANKED_SUBDIR

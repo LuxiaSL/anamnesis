@@ -32,7 +32,7 @@ from anamnesis.extraction.raw_saver import (
 )
 from anamnesis.extraction.state_extractor import (
     RawGenerationData,
-    extract_tier2_5,
+    extract_cache_and_keys,
 )
 
 # Small synthetic model geometry (fast, CPU-only)
@@ -107,7 +107,7 @@ def _config() -> ExtractionConfig:
     return ExtractionConfig(
         sampled_layers=SAMPLED_LAYERS,
         pca_layers=[2, 4],
-        enable_tier3=False,          # needs a fitted PCA model
+        enable_residual_pca=False,          # needs a fitted PCA model
         enable_knnlm_baseline=False,  # ditto
         early_layer_cutoff=1,
         late_layer_cutoff=4,
@@ -162,19 +162,20 @@ def _check_one_schema(raw_dir: Path, label: str) -> None:
                 assert not np.any(lean_sub.attentions[t][l]), f"attn t={t} l={l} not zeroed"
 
     # ── Feature-level equivalence for sampled-only readers ──
-    # NOTE: the baseline Tier 2 attention features (attn_entropy_*/head_agreement_*)
-    # deliberately read ALL attention layers present, so attn_layers=sampled is NOT
-    # feature-identical for full baseline tiers on all-layer banks. Everything that
-    # reads attention at sampled layers only (Tier 2.5, attention_flow, per_head,
-    # temporal_dynamics) must be bit-identical:
+    # NOTE: attn_entropy_* and head_agreement_* deliberately read ALL attention layers
+    # present, so attn_layers=sampled is NOT feature-identical for the whole set of core
+    # blocks on all-layer banks. Everything that reads attention at sampled layers only
+    # (cache-and-keys, attention_flow, per_head, temporal_dynamics) must be bit-identical:
     config = _config()
-    t25_full, t25_names_full = extract_tier2_5(full, config)
-    t25_lean, t25_names_lean = extract_tier2_5(lean_sub, config)
-    assert t25_names_full == t25_names_lean
-    np.testing.assert_array_equal(t25_full, t25_lean, err_msg="tier2_5 differs under attn_layers=sampled")
+    ck_full, ck_names_full = extract_cache_and_keys(full, config)
+    ck_lean, ck_names_lean = extract_cache_and_keys(lean_sub, config)
+    assert ck_names_full == ck_names_lean
+    np.testing.assert_array_equal(
+        ck_full, ck_lean, err_msg="cache and keys differ under attn_layers=sampled"
+    )
 
     fam_cfg = FeaturePipelineConfig(
-        include_baseline_tiers=False,
+        include_core_blocks=False,
         enable_attention_flow=True,
         enable_temporal_dynamics=True,
         enable_per_head=True,

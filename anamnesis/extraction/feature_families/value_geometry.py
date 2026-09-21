@@ -1,6 +1,6 @@
 """Value-vector (v_proj) geometry — the OV-circuit storage surface.
 
-The KV-cache "address" side (keys) is featurized in Tier-2.5 (`kv_key_*`); the **content** side
+The KV-cache "address" side (keys) is featurized by `kv_key_*`; the **content** side
 (values — what gets pulled back when the model attends) has **never been featurized**. v3 raw banks
 `v_proj_values` all-layer per-KV-head, so this is CPU-only on banked tensors.
 

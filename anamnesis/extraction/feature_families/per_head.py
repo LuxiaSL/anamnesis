@@ -1,6 +1,6 @@
 """Per-head feature family: preserve head heterogeneity that head-averaging destroys.
 
-The baseline tiers and the other families collapse attention over query heads
+The core blocks and the other families collapse attention over query heads
 (`attn.mean(axis=0)`) and keys over KV heads (`k.mean(axis=0)`). Attention heads are
 functionally specialized — attention-sink heads, positional heads, induction heads —
 so the mean blends heterogeneous behaviors into one number. The raw tensors are

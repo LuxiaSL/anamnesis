@@ -135,9 +135,9 @@ def test_recompute_family_set_is_the_one_the_banked_vectors_carry() -> None:
     extraction, families = run_recompute.configs(MODEL)
     preset = resolve_preset(MODEL)
     assert extraction.sampled_layers == list(preset.sampled_layers)
-    assert extraction.enable_tier3
+    assert extraction.enable_residual_pca
     on = {
-        families.include_baseline_tiers,
+        families.include_core_blocks,
         families.enable_residual_trajectory,
         families.enable_attention_flow,
         families.enable_gate_features,
@@ -175,10 +175,10 @@ def test_recompute_configs_match_the_records_own_construction(model: str) -> Non
         pca_layers=preset.pca_layers,
         early_layer_cutoff=preset.early_layer_cutoff,
         late_layer_cutoff=preset.late_layer_cutoff,
-        enable_tier3=True,
+        enable_residual_pca=True,
     )
     record_families = FeaturePipelineConfig(
-        include_baseline_tiers=True,
+        include_core_blocks=True,
         enable_residual_trajectory=True,
         enable_attention_flow=True,
         enable_gate_features=True,

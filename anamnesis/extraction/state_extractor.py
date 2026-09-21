@@ -3,17 +3,26 @@
 This module has NO model awareness. It operates on pre-collected tensors
 and can be tested offline with saved tensor samples.
 
-Feature groups (LEGACY tier labels, retired by the 2026-07-11 ruling — the interpretable
-taxonomy is source × method × depth, in `anamnesis/feature_map.py`; the group names below
-are kept only because feature-name prefixes and stored signatures still reference them,
-and a stored signature's `tier_slices` keys are read back by name):
-  "T1"  — Activation norms (residual/magnitude), logit statistics (output/distributional)
-  "T2"  — Attention entropy + head agreement (attention), residual deltas (residual),
-          spectral graph features
-  "T2.5"— cache_* attention-read profiles (SOURCE: attention) + kv_*/epoch_* key-space
-          geometry (SOURCE: keys) — two different substrates in one legacy bin
-  "T3"  — Residual stream PCA projections (residual/geometry)
-  Baseline — kNN-LM single-layer signature
+The vector is built from four blocks, each an ``extract_*`` function here. A block is a
+contiguous span of columns, not a claim about what the span measures: the taxonomy that
+says what a feature reads is source × method × depth, in `anamnesis/feature_map.py`, and
+three of these four blocks span more than one source.
+
+  `extract_norms_and_output_stats`  per-layer residual activation norms (residual /
+      magnitude) and logit / token-distribution statistics (output / distributional).
+  `extract_attention_and_deltas`  attention entropy and head agreement (attention /
+      distributional), cross-layer residual deltas (residual / magnitude and geometry),
+      and spectral reads of a graph built from attention distributions (attention /
+      spectral).
+  `extract_cache_and_keys`  `cache_*` profiles of what the attention weights read out of
+      the cache (attention / distributional) and `kv_*` / `epoch_*` geometry of the
+      pre-RoPE key vectors (keys / geometry). Two substrates in one block, and the block
+      exists as a unit only because the stored column layout puts them adjacent.
+  `extract_residual_pca`  residual-stream projections onto a pre-fitted basis (residual /
+      geometry).
+
+`extract_all_features` concatenates whichever blocks the config enables, and
+`extract_knnlm_baseline` builds the single-layer kNN-LM comparison vector beside them.
 """
 
 from __future__ import annotations
@@ -113,7 +122,7 @@ class RawGenerationData:
         """Per-step head-mean attention rows for one layer: T entries of
         float64 [seq_len_t] — exactly attentions[t][l_idx].mean(axis=0)
         .astype(np.float64), built once per (gen, layer) and shared (C2: the
-        tier-2.5 cache profiles, attention decay, spectral similarity, and
+        cache-read profiles, attention decay, spectral similarity, and
         attention_flow all re-derived this same reduction). Callers must not
         mutate the returned arrays."""
         if l_idx not in self._mean_attn_cache:
@@ -125,7 +134,7 @@ class RawGenerationData:
 
     def hidden_states_array(self) -> F32:
         """[T, num_layers+1, hidden_dim] — np.stack(self.hidden_states), built once
-        per gen and cached: tier1 and tier2 both read it, and the cache is what
+        per gen and cached: the norms block and the attention block both read it, and the cache is what
         keeps this ~270MB array from being rebuilt per call. Callers must not
         mutate the returned array in place."""
         if self._hs_array_cache is None:
@@ -139,8 +148,21 @@ class ExtractionResult:
 
     features: F32                  # flat feature vector
     feature_names: list[str]       # one name per feature dimension
-    tier_slices: dict[str, tuple[int, int]]  # tier name → (start, end) indices
+    block_slices: dict[str, tuple[int, int]]  # stored block name → (start, end) indices
     knnlm_baseline: F32 | None     # raw kNN-LM vector (before PCA)
+
+
+# The stored names of the four blocks, and of the sidecar key that carries their bounds.
+# A banked signature holds a block's columns under `features_<name>` in its npz and the
+# block's bounds under `<name>` inside STORED_BLOCK_SLICES_KEY in its JSON sidecar. These
+# five strings are a wire format, not a description: every signature ever banked indexes
+# into its vector with exactly them, so they are fixed here, every reader and writer takes
+# them from here, and what a block reads is said in the block's own name instead.
+STORED_NORMS_AND_OUTPUT_STATS = "tier1"
+STORED_ATTENTION_AND_DELTAS = "tier2"
+STORED_CACHE_AND_KEYS = "tier2_5"
+STORED_RESIDUAL_PCA = "tier3"
+STORED_BLOCK_SLICES_KEY = "tier_slices"
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -306,13 +328,13 @@ def _correct_hidden_state(
     return h - positional_means[layer_idx, pos]
 
 
-# ── Tier 1: Cheap, High Prior ──────────────────────────────────────────────────
+# ── Residual activation norms + output statistics ──────────────────────────────
 
-def extract_tier1(
+def extract_norms_and_output_stats(
     data: RawGenerationData,
     config: ExtractionConfig,
 ) -> tuple[F32, list[str]]:
-    """Extract Tier 1 features: activation norms, logit stats, token dynamics.
+    """Per-layer residual activation norms, logit statistics and token dynamics.
 
     Returns (feature_vector, feature_names), both of length
     ``num_layers * (2 + n_traj) + 10 + 3 * n_traj`` with
@@ -359,7 +381,7 @@ def extract_tier1(
 
     traj_idx = _trajectory_indices(T, n_traj)
 
-    # ── Pre-stack for vectorized ops (built once per gen, shared with tier2) ──
+    # ── Pre-stack for vectorized ops (built once per gen, shared with the attention block) ──
     hs_array = data.hidden_states_array()  # [T, num_layers+1, hidden_dim]
 
     # ── 1.1 Per-Layer Activation Norms ──
@@ -448,20 +470,20 @@ def extract_tier1(
     return np.array(features, dtype=np.float32), names
 
 
-# ── Tier 2: Moderate Cost ──────────────────────────────────────────────────────
+# ── Attention distributions + cross-layer residual deltas ─────────────────────
 
-def extract_tier2(
+def extract_attention_and_deltas(
     data: RawGenerationData,
     config: ExtractionConfig,
 ) -> tuple[F32, list[str]]:
-    """Extract Tier 2 features: attention entropy, head agreement, residual deltas, spectral.
+    """Attention entropy, head agreement, cross-layer residual deltas and spectral reads.
 
     Returns (feature_vector, feature_names), both of length
     ``4 * num_layers + 3 * (num_layers - 1) + 4 * len(config.sampled_layers)`` —
     221 at 28 layers with the 7 sampled layers of the default preset.
 
     With no attention steps the names and the length are unchanged and every value is
-    0.0, for the same reason Tier 1 zero-fills: the column layout is part of the
+    0.0, for the same reason the norms-and-output-stats block zero-fills: the column layout is part of the
     signature's identity. The layer count is then taken from `hidden_states`, or
     falls back to 28 when those are absent too, and the head count to 24.
     """
@@ -702,13 +724,13 @@ def _extract_spectral_features(
     ]
 
 
-# ── Tier 2.5: KV Cache Analysis ───────────────────────────────────────────────
+# ── Cache-read profiles + pre-RoPE key geometry ───────────────────────────────
 
-def extract_tier2_5(
+def extract_cache_and_keys(
     data: RawGenerationData,
     config: ExtractionConfig,
 ) -> tuple[F32, list[str]]:
-    """Extract Tier 2.5: KV cache attention profiles, key geometry, cross-layer, epochs.
+    """Cache-read attention profiles, pre-RoPE key geometry, cross-layer reads and epochs.
 
     Returns (feature_vector, feature_names), both of length
     ``19 * len(config.sampled_layers) + 9`` — 9 cache-profile and 10 key-geometry
@@ -716,7 +738,7 @@ def extract_tier2_5(
     layers.
 
     With no attention steps the names and the length are unchanged and every value is
-    0.0, as in the other tiers. A sampled layer index the model does not have is
+    0.0, as in the other blocks. A sampled layer index the model does not have is
     zero-filled under its own names by the same rule, so a layer list written for a
     deeper model does not shorten the vector.
     """
@@ -1120,15 +1142,15 @@ def _extract_epoch_features(
     return results
 
 
-# ── Tier 3: Residual PCA ───────────────────────────────────────────────────────
+# ── Residual-stream PCA projections ───────────────────────────────────────────
 
-def extract_tier3(
+def extract_residual_pca(
     data: RawGenerationData,
     config: ExtractionConfig,
     pca_components: F32 | None,
     pca_mean: F32 | None,
 ) -> tuple[F32, list[str]]:
-    """Extract Tier 3: project hidden states onto pre-fitted PCA basis.
+    """Project hidden states onto a pre-fitted PCA basis.
 
     Args:
         pca_components: PCA basis. Either a single [n_components, hidden_dim] array (pooled,
@@ -1141,10 +1163,10 @@ def extract_tier3(
     ``len(config.pca_layers) * config.pca_temporal_samples * config.pca_components``
     — 500 at the default two PCA layers, 5 temporal samples and 50 components.
 
-    This tier does NOT zero-fill. With no generation steps, or with no fitted basis
+    This block does NOT zero-fill. With no generation steps, or with no fitted basis
     passed, it returns an empty vector and an empty name list: a projection onto a
     basis that was never fitted is not a measurement of zero, and the caller records
-    the tier as absent rather than as flat. A per-layer basis missing a layer drops
+    the block as absent rather than as flat. A per-layer basis missing a layer drops
     that layer's columns for the same reason.
     """
     features: list[float] = []
@@ -1214,43 +1236,48 @@ def extract_all_features(
     pca_components: F32 | None = None,
     pca_mean: F32 | None = None,
 ) -> ExtractionResult:
-    """Run all enabled tiers and concatenate into a single feature vector."""
+    """Run every enabled block and concatenate into a single feature vector.
+
+    Block order is fixed and is part of the signature's identity: the slices recorded
+    beside the vector are offsets into this concatenation, so a reordering would leave
+    every banked slice pointing at the wrong columns.
+    """
     all_features: list[F32] = []
     all_names: list[str] = []
-    tier_slices: dict[str, tuple[int, int]] = {}
+    block_slices: dict[str, tuple[int, int]] = {}
     offset = 0
 
-    if config.enable_tier1:
-        f, n = extract_tier1(data, config)
-        tier_slices["tier1"] = (offset, offset + len(f))
+    if config.enable_norms_and_output_stats:
+        f, n = extract_norms_and_output_stats(data, config)
+        block_slices[STORED_NORMS_AND_OUTPUT_STATS] = (offset, offset + len(f))
         all_features.append(f)
         all_names.extend(n)
         offset += len(f)
-        logger.debug(f"Tier 1: {len(f)} features")
+        logger.debug("norms and output stats: %d features", len(f))
 
-    if config.enable_tier2:
-        f, n = extract_tier2(data, config)
-        tier_slices["tier2"] = (offset, offset + len(f))
+    if config.enable_attention_and_deltas:
+        f, n = extract_attention_and_deltas(data, config)
+        block_slices[STORED_ATTENTION_AND_DELTAS] = (offset, offset + len(f))
         all_features.append(f)
         all_names.extend(n)
         offset += len(f)
-        logger.debug(f"Tier 2: {len(f)} features")
+        logger.debug("attention and residual deltas: %d features", len(f))
 
-    if config.enable_tier2_5:
-        f, n = extract_tier2_5(data, config)
-        tier_slices["tier2_5"] = (offset, offset + len(f))
+    if config.enable_cache_and_keys:
+        f, n = extract_cache_and_keys(data, config)
+        block_slices[STORED_CACHE_AND_KEYS] = (offset, offset + len(f))
         all_features.append(f)
         all_names.extend(n)
         offset += len(f)
-        logger.debug(f"Tier 2.5: {len(f)} features")
+        logger.debug("cache reads and key geometry: %d features", len(f))
 
-    if config.enable_tier3:
-        f, n = extract_tier3(data, config, pca_components, pca_mean)
-        tier_slices["tier3"] = (offset, offset + len(f))
+    if config.enable_residual_pca:
+        f, n = extract_residual_pca(data, config, pca_components, pca_mean)
+        block_slices[STORED_RESIDUAL_PCA] = (offset, offset + len(f))
         all_features.append(f)
         all_names.extend(n)
         offset += len(f)
-        logger.debug(f"Tier 3: {len(f)} features")
+        logger.debug("residual PCA: %d features", len(f))
 
     knnlm = None
     if config.enable_knnlm_baseline:
@@ -1266,6 +1293,6 @@ def extract_all_features(
     return ExtractionResult(
         features=combined,
         feature_names=all_names,
-        tier_slices=tier_slices,
+        block_slices=block_slices,
         knnlm_baseline=knnlm,
     )

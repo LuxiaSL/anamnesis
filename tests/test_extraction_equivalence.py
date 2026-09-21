@@ -30,9 +30,9 @@ from anamnesis.extraction.state_extractor import (
     ExtractionResult,
     RawGenerationData,
     extract_all_features,
-    extract_tier1,
-    extract_tier2,
-    extract_tier2_5,
+    extract_norms_and_output_stats,
+    extract_attention_and_deltas,
+    extract_cache_and_keys,
 )
 
 
@@ -103,16 +103,16 @@ DEFAULT_ATOL = 1e-5
 
 
 def _config() -> ExtractionConfig:
-    """Tier 3 is off: it needs a fitted PCA basis, which is banked data, not synthetic."""
+    """Residual PCA is off: it needs a fitted basis, which is banked data, not synthetic."""
     return ExtractionConfig(
         sampled_layers=[0, 8, 16, 20, 24, 28, 31],
         pca_layers=[8, 16, 20, 24, 28],
         early_layer_cutoff=8,
         late_layer_cutoff=24,
-        enable_tier1=True,
-        enable_tier2=True,
-        enable_tier2_5=True,
-        enable_tier3=False,
+        enable_norms_and_output_stats=True,
+        enable_attention_and_deltas=True,
+        enable_cache_and_keys=True,
+        enable_residual_pca=False,
         enable_knnlm_baseline=True,
     )
 
@@ -186,8 +186,8 @@ def _compare(
         if verbose:
             issues.extend(sample_diffs)
 
-    if ref.tier_slices != opt.tier_slices:
-        issues.append(f"{label}: tier_slices differ: ref={ref.tier_slices} opt={opt.tier_slices}")
+    if ref.block_slices != opt.block_slices:
+        issues.append(f"{label}: block_slices differ: ref={ref.block_slices} opt={opt.block_slices}")
 
     return len(issues) == 0, issues
 
@@ -216,7 +216,7 @@ def test_names_are_one_per_feature(label: str, T: int, vocab_size: int) -> None:
     """
     result = _run_optimized(_case_data(T, vocab_size), _config())
     assert len(result.feature_names) == len(result.features)
-    bounds = sorted(result.tier_slices.values())
+    bounds = sorted(result.block_slices.values())
     assert bounds[0][0] == 0
     for (_, end), (next_start, _) in zip(bounds, bounds[1:]):
         assert end == next_start

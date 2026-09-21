@@ -1,8 +1,8 @@
 """Layer 2: Pluggable feature computation from saved raw tensors.
 
 Reads raw per-token tensors from disk and computes feature vectors
-using configurable feature extraction. The baseline config reproduces
-the existing T1/T2/T2.5/T3 pipeline via state_extractor.
+using configurable feature extraction. With no family enabled it reproduces
+exactly the four blocks `anamnesis/extraction/state_extractor.py` builds.
 
 Usage:
     # Recompute features for all raw tensor files
@@ -38,6 +38,7 @@ from anamnesis.config import (
 )
 from anamnesis.extraction.raw_saver import list_raw_tensor_ids, load_raw_tensors
 from anamnesis.extraction.state_extractor import (
+    STORED_BLOCK_SLICES_KEY,
     ExtractionResult,
     RawGenerationData,
     extract_all_features,
@@ -70,21 +71,20 @@ def compute_features_from_raw(
     config : ExtractionConfig
         Feature extraction configuration.
     pca_components, pca_mean : arrays, optional
-        Pre-fitted PCA model for Tier 3 features.
+        Pre-fitted PCA model for the residual-PCA block.
     positional_means : array, optional
         Injected only if the loaded raw_data has none (v3 deduped raw stores
         positional_means once in the calibration dir, not per-gen).
     surfaces, attn_layers : optional (keyword-only)
         Lean-load passthrough to load_raw_tensors. Defaults (None) load
-        everything — the exact historical behavior. CAUTION: the baseline
-        Tier 2 attention features (attn_entropy/head_agreement) read ALL
-        attention layers present, so restricting attn_layers changes those
-        features on v3 all-layer banks. Only restrict when every enabled
-        consumer reads sampled layers only.
+        everything — the exact historical behavior. CAUTION: attn_entropy and
+        head_agreement read ALL attention layers present, so restricting
+        attn_layers changes those features on v3 all-layer banks. Only restrict
+        when every enabled consumer reads sampled layers only.
 
     Returns
     -------
-    ExtractionResult with features, names, tier slices.
+    ExtractionResult with features, names and block slices.
     """
     raw_data = load_raw_tensors(gen_id, raw_dir, surfaces=surfaces, attn_layers=attn_layers)
     if raw_data.positional_means is None and positional_means is not None:
@@ -122,7 +122,7 @@ def compute_features_v2(
         Injected only if the loaded raw_data has none (v3 deduped raw).
     surfaces, attn_layers : optional (keyword-only)
         Lean-load passthrough to load_raw_tensors (see compute_features_from_raw
-        for the Tier 2 all-layer caveat). Defaults preserve exact behavior.
+        for the all-layer attention caveat). Defaults preserve exact behavior.
     """
     raw_data = load_raw_tensors(gen_id, raw_dir, surfaces=surfaces, attn_layers=attn_layers)
     if raw_data.positional_means is None and positional_means is not None:
@@ -139,22 +139,22 @@ def compute_features_v2_from_data(
     pca_components: F32 | None = None,
     pca_mean: F32 | None = None,
 ) -> ExtractionResult:
-    """Compute baseline tiers + pluggable feature families from in-memory raw_data.
+    """Compute the core blocks plus the pluggable feature families from in-memory raw_data.
 
-    The GPU-free feature loop: baseline features, then enabled families, concatenated.
+    The GPU-free feature loop: the core blocks, then the enabled families, concatenated.
     Used by replay-extract (in-memory raw_data) and compute_features_v2 (from disk).
-    Caller is responsible for setting raw_data.positional_means (for positional
-    correction in T2.5/T3/per-head/residual families).
+    Caller is responsible for setting raw_data.positional_means, which the cache-and-keys
+    block, the residual-PCA block and the per-head and residual families all correct with.
     """
 
-    # Baseline tiers
-    if family_config.include_baseline_tiers:
-        baseline = extract_all_features(raw_data, config, pca_components, pca_mean)
-        all_features = [baseline.features]
-        all_names = list(baseline.feature_names)
-        all_slices = dict(baseline.tier_slices)
-        offset = len(baseline.features)
-        knnlm = baseline.knnlm_baseline
+    # The blocks the numeric anchor builds
+    if family_config.include_core_blocks:
+        core = extract_all_features(raw_data, config, pca_components, pca_mean)
+        all_features = [core.features]
+        all_names = list(core.feature_names)
+        all_slices = dict(core.block_slices)
+        offset = len(core.features)
+        knnlm = core.knnlm_baseline
     else:
         all_features = []
         all_names = []
@@ -381,7 +381,7 @@ def compute_features_v2_from_data(
     return ExtractionResult(
         features=combined,
         feature_names=all_names,
-        tier_slices=all_slices,
+        block_slices=all_slices,
         knnlm_baseline=knnlm,
     )
 
@@ -403,8 +403,8 @@ def save_features(
     if result.knnlm_baseline is not None:
         save_dict["knnlm_baseline"] = result.knnlm_baseline
 
-    for tier_name, (start, end) in result.tier_slices.items():
-        save_dict[f"features_{tier_name}"] = result.features[start:end]
+    for block_name, (start, end) in result.block_slices.items():
+        save_dict[f"features_{block_name}"] = result.features[start:end]
 
     np.savez_compressed(npz_path, **save_dict)
 
@@ -412,13 +412,15 @@ def save_features(
     if metadata is not None:
         json_path = output_dir / f"gen_{gen_id:03d}.json"
         meta_copy = metadata.copy()
-        if "tier_slices" in meta_copy:
-            meta_copy["tier_slices"] = {
+        if STORED_BLOCK_SLICES_KEY in meta_copy:
+            meta_copy[STORED_BLOCK_SLICES_KEY] = {
                 k: list(v) if isinstance(v, tuple) else v
-                for k, v in meta_copy["tier_slices"].items()
+                for k, v in meta_copy[STORED_BLOCK_SLICES_KEY].items()
             }
-        # Update tier slices from the new result
-        meta_copy["tier_slices"] = {k: list(v) for k, v in result.tier_slices.items()}
+        # Bounds come from this result, not from the metadata being copied
+        meta_copy[STORED_BLOCK_SLICES_KEY] = {
+            k: list(v) for k, v in result.block_slices.items()
+        }
         meta_copy["num_features"] = len(result.features)
         with open(json_path, "w") as f:
             json.dump(meta_copy, f, indent=2, default=str)
@@ -527,7 +529,7 @@ def recompute_all_features(
         If None, uses the signatures dir adjacent to raw_dir.
     family_config : FeaturePipelineConfig, optional
         When provided, uses compute_features_v2() with pluggable families.
-        When None, uses baseline-only compute_features_from_raw().
+        When None, uses compute_features_from_raw(), which runs the core blocks alone.
     n_workers : int, optional
         Number of parallel workers. None (default) resolves to a cpu-based
         count (cpu_count - 2, capped at 32); pass 1 to force sequential.
@@ -555,15 +557,15 @@ def recompute_all_features(
     t_start = time.perf_counter()
 
     use_v2 = family_config is not None
-    label = "v2" if use_v2 else "v1 (baseline)"
+    label = "v2" if use_v2 else "v1 (core blocks only)"
     logger.info(f"Recomputing features ({label}) for {len(gen_ids)} generations...")
     logger.info(f"  Raw tensors: {raw_dir}")
     logger.info(f"  Output: {output_dir}")
     logger.info(f"  Workers: {n_workers}")
     if use_v2:
         enabled = []
-        if family_config.include_baseline_tiers:
-            enabled.append("baseline")
+        if family_config.include_core_blocks:
+            enabled.append("core blocks")
         if family_config.enable_residual_trajectory:
             enabled.append("trajectory")
         if family_config.enable_attention_flow:
@@ -696,11 +698,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--pca-model", type=Path, default=None,
-        help="Path to PCA model pickle (for Tier 3 features)",
+        help="Path to PCA model pickle (for the residual-PCA block)",
     )
     parser.add_argument(
-        "--no-tier3", action="store_true",
-        help="Disable Tier 3 PCA features",
+        "--no-residual-pca", action="store_true",
+        help="Disable the residual-PCA block",
     )
     parser.add_argument(
         "--metadata-dir", type=Path, default=None,
@@ -733,15 +735,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--no-temporal-dynamics", action="store_true",
-        help="Disable temporal decomposition of T2/T2.5 metrics (v2 only)",
+        help="Disable temporal decomposition of the attention and cache metrics (v2 only)",
     )
     parser.add_argument(
         "--no-stft", action="store_true",
         help="Disable STFT spectral features in temporal operators (v2 only)",
     )
     parser.add_argument(
-        "--no-baseline", action="store_true",
-        help="Disable baseline T1/T2/T2.5/T3 tiers (v2 only, for ablation)",
+        "--no-core-blocks", action="store_true",
+        help="Compute only the families, without the four blocks the numeric anchor "
+             "builds (v2 only, for ablation)",
     )
     parser.add_argument(
         "--contrastive-model", type=Path, default=None,
@@ -759,12 +762,12 @@ def main() -> None:
 
     # Build ExtractionConfig with model-specific layers
     config = ExtractionConfig.from_preset(args.model)
-    if args.no_tier3:
-        config.enable_tier3 = False
+    if args.no_residual_pca:
+        config.enable_residual_pca = False
 
     pca_components: F32 | None = None
     pca_mean: F32 | None = None
-    if args.pca_model and not args.no_tier3:
+    if args.pca_model and not args.no_residual_pca:
         pca_components, pca_mean = _load_pca_model(args.pca_model)
         if pca_components is not None:
             logger.info(f"Loaded PCA model: {pca_components.shape}")
@@ -773,7 +776,7 @@ def main() -> None:
     family_config: FeaturePipelineConfig | None = None
     if args.v2:
         family_kwargs: dict = {
-            "include_baseline_tiers": not args.no_baseline,
+            "include_core_blocks": not args.no_core_blocks,
             "enable_residual_trajectory": not args.no_trajectory,
             "enable_attention_flow": not args.no_attention_flow,
             "enable_gate_features": not args.no_gate,

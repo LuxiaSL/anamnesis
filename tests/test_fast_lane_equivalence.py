@@ -148,7 +148,7 @@ def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
         early_layer_cutoff=8, late_layer_cutoff=24,
     )
     families = FeaturePipelineConfig(
-        include_baseline_tiers=True,
+        include_core_blocks=True,
         enable_residual_trajectory=True,
         trajectory_layers=[1],
         enable_attention_flow=True,
@@ -176,7 +176,7 @@ def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
     ref = compute_features_v2_from_data(raw, extraction, families, components, mean)
     schema = resolve_gpu_schema(3, continuation - 1, extraction, families, components)
     assert schema.feature_names == tuple(ref.feature_names)
-    assert schema.family_slices == ref.tier_slices
+    assert schema.family_slices == ref.block_slices
     original_hooks = [
         tuple(module.self_attn._forward_hooks) for module in loaded.model.model.layers
     ]
@@ -221,7 +221,7 @@ def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
 
 def test_replay_path_is_part_of_lane_identity():
     families = FeaturePipelineConfig(
-        include_baseline_tiers=True,
+        include_core_blocks=True,
         enable_residual_trajectory=True,
         enable_attention_flow=True,
         enable_gate_features=True,
@@ -252,7 +252,7 @@ def test_replay_path_is_part_of_lane_identity():
 def test_rejects_non_eager_before_capturing():
     loaded = tiny_loaded()
     families = FeaturePipelineConfig(
-        include_baseline_tiers=True,
+        include_core_blocks=True,
         enable_residual_trajectory=True,
         enable_attention_flow=True,
         enable_gate_features=True,

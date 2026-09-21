@@ -5,8 +5,8 @@ The T1/T2/T2.5/T3 tier names remain a compatibility surface, and both halves of 
 sentence are load-bearing. A tier is a diagonal smear across three orthogonal axes — T2.5
 alone mixes attention-weight reads with key-vector geometry, two different substrates — so a
 tier's accuracy is not a reading of anything, and no new claim is stated in tier terms. But
-the names are frozen on disk: `extract_tier1`..`extract_tier3` in
-`anamnesis/extraction/state_extractor.py` build the vector, the `tier_slices` keys in a
+the names are frozen on disk: `extract_norms_and_output_stats`..`extract_residual_pca` in
+`anamnesis/extraction/state_extractor.py` build the vector, the `block_slices` keys in a
 banked signature's metadata index into it, and
 `anamnesis/analysis/gauntlet/tier_ablation.py` runs as section 3 of the gauntlet off those
 slices. Describe a feature by its cell here; address a stored artifact by its tier name.

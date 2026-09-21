@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from anamnesis.config import ExtractionConfig
-from anamnesis.extraction.state_extractor import RawGenerationData, extract_tier1
+from anamnesis.extraction.state_extractor import RawGenerationData, extract_norms_and_output_stats
 
 if TYPE_CHECKING:
     from anamnesis.extraction.model_loader import LoadedModel
@@ -43,7 +43,7 @@ def first_position_coordinates(
         prompt_length=prefix_length,
         positional_means=positional_means,
     )
-    features, names = extract_tier1(raw, config)
+    features, names = extract_norms_and_output_stats(raw, config)
     indices = [
         i for i, name in enumerate(names) if name.startswith("activation_norm_traj0_L")
     ]

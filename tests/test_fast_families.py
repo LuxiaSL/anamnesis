@@ -28,7 +28,7 @@ from anamnesis.extraction.feature_families.key_cka import extract_key_cka
 from anamnesis.extraction.feature_families.residual_stream import extract_residual_trajectory
 from anamnesis.extraction.fast.families import FamilyReducer
 from anamnesis.extraction.fast.ops import FeatureCollector
-from anamnesis.extraction.state_extractor import RawGenerationData,extract_tier2_5
+from anamnesis.extraction.state_extractor import RawGenerationData,extract_cache_and_keys
 
 
 @pytest.mark.parametrize('steps',[1,3,16,80,127])
@@ -50,7 +50,7 @@ def test_geometry_gate_and_residual_match_reference(steps):
     families=FeaturePipelineConfig(trajectory_layers=list(range(layers)),
                                    contrastive_layers=list(range(layers)))
     expected={}
-    f,n=extract_tier2_5(raw,config)
+    f,n=extract_cache_and_keys(raw,config)
     expected.update((name,value) for name,value in zip(n,f,strict=True) if not name.startswith('cache_'))
     for fn in (extract_value_geometry,extract_qk_geometry,extract_key_cka,extract_gate_features):
         r=fn(raw,sampled_layers=config.sampled_layers)

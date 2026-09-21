@@ -37,6 +37,7 @@ from numpy.typing import NDArray
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, ModelConfig, ModelPreset
 from anamnesis.extraction.interventions import InjectionSpec, check_injection_gating
 from anamnesis.extraction.replay_config import native_replay_configs
+from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
 
 F32 = NDArray[np.float32]
 
@@ -221,10 +222,12 @@ def replay_cell(
             if injection is not None:
                 metadata["injection"] = injection.metadata()
             metadata["num_features"] = int(len(result.features))
-            metadata["tier_slices"] = {k: list(v) for k, v in result.tier_slices.items()}
+            metadata[STORED_BLOCK_SLICES_KEY] = {
+                k: list(v) for k, v in result.block_slices.items()
+            }
             metadata["extraction_version"] = EXTRACTION_VERSION
             metadata["xrt_version"] = (
-                ROUTING_VERSION if ROUTING_FAMILY in result.tier_slices else 0
+                ROUTING_VERSION if ROUTING_FAMILY in result.block_slices else 0
             )
             save_features(gen_id, result, metadata, sig_dir)
             n_done += 1

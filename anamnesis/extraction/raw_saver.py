@@ -383,7 +383,7 @@ def load_raw_tensors(
 
     The returned object is compatible with state_extractor.extract_all_features(),
     with the caveat that only sampled layers are populated — features that require
-    all layers (like per-layer norms in Tier 1) will only have data at saved layers.
+    all layers (like the per-layer activation norms) will only have data at saved layers.
 
     Parameters
     ----------
