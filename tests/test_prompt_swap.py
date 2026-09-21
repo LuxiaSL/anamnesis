@@ -13,7 +13,8 @@ Also pinned:
   * a block is used only where **every** swap generation has it, because a block present for
     some and absent for others would train and predict over different feature sets under
     one name;
-  * composites are built from the blocks that survived that filter;
+  * a union is built only where **every** block its label names survived that filter, so a
+    label cannot stand for a narrower feature set than it claims;
   * the pooled direction needs more than a bare majority: at 1.5:1 the reading is a
     direction and below it the reading is ``ambiguous``, which is a verdict rather than a
     missing one;
@@ -42,9 +43,13 @@ from anamnesis.analysis.prompt_swap import (
     swap_report,
 )
 from anamnesis.analysis.gauntlet.signature_io import (
+    ATTENTION_AND_CACHE,
+    ATTENTION_AND_DELTAS,
     ATTENTION_FLOW,
     BLOCK_NPZ_KEYS,
     BLOCK_STORED_NAMES,
+    BLOCK_UNIONS,
+    CACHE_AND_KEYS,
     NORMS_AND_OUTPUT_STATS,
 )
 from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
@@ -169,6 +174,46 @@ def test_a_block_missing_from_some_swap_generations_is_not_used(tmp_path: Path) 
     assert ADDON_NAME not in features, (
         "a block only one generation has would train and predict over different features"
     )
+
+
+def test_a_union_holds_every_block_its_label_names(tmp_path: Path) -> None:
+    """A union is the blocks it names or it is not built.
+
+    This bank holds three of the four core blocks. ``combined`` names all four, so it is
+    absent rather than standing for the three — a union assembled from whichever members
+    were present is a narrower feature set under a label that claims the wider one, and it
+    is then compared against a training matrix built from all four. The pair union, whose
+    two members are both here, is built at their joined width and in their declared order.
+    """
+    attention_key = BLOCK_NPZ_KEYS[ATTENTION_AND_DELTAS]
+    cache_key = BLOCK_NPZ_KEYS[CACHE_AND_KEYS]
+    attention_width, cache_width = 2, 5
+    sig_dir = tmp_path / "union" / "signatures"
+    sig_dir.mkdir(parents=True)
+    for gid in range(3):
+        write_generation(
+            sig_dir, gid, mode="swap_socratic→linear", topic=gid, vector=np.zeros(WIDTH),
+            keys={
+                attention_key: np.full(attention_width, gid, dtype=np.float32),
+                cache_key: np.full(cache_width, -gid, dtype=np.float32),
+            },
+        )
+
+    _samples, features = load_swap_samples(sig_dir)
+    assert BLOCK_UNIONS[ATTENTION_AND_CACHE] == [ATTENTION_AND_DELTAS, CACHE_AND_KEYS]
+    union = features[ATTENTION_AND_CACHE]
+    assert all(row.shape == (attention_width + cache_width,) for row in union)
+    assert np.array_equal(
+        union[1],
+        np.concatenate([np.full(attention_width, 1.0), np.full(cache_width, -1.0)]),
+    )
+    for group, members in BLOCK_UNIONS.items():
+        absent = [member for member in members if member not in {
+            BLOCK_LABEL, ATTENTION_AND_DELTAS, CACHE_AND_KEYS
+        }]
+        assert (group in features) == (not absent), (
+            f"'{group}' names {sorted(absent)}, which this bank does not hold"
+        )
 
 
 def test_a_bank_with_no_swap_generations_is_refused(tmp_path: Path) -> None:

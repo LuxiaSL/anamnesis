@@ -139,7 +139,7 @@ class FeatureTag(BaseModel):
     layer: Optional[int]
     band: Optional[Band]
     family: str                  # the family label banked analyses key their per-family
-                                 # numbers by; see `stored_family()` for the label set
+                                 # numbers by; `FAMILY_LABELS` is the whole label set
 
 
 # ---------------------------------------------------------------------------- classification rules
@@ -155,31 +155,99 @@ STORED_FAMILY_ATTENTION_OTHER = "T2_other"
 STORED_FAMILY_RESIDUAL_PCA = "T3"
 STORED_FAMILY_NORMS_AND_OUTPUT_STATS = "T1"
 
+# The families that also have a block of their own in a banked analysis result, named
+# here because `anamnesis/analysis/complementarity.py` keys its block translation on
+# them and a literal repeated in two modules is two vocabularies waiting to diverge.
+FAMILY_ATTENTION_FLOW = "attention_flow"
+FAMILY_GATE = "gate"
+FAMILY_RESIDUAL_TRAJECTORY = "residual_traj"
+FAMILY_TEMPORAL_DYNAMICS = "temporal_dynamics"
+FAMILY_CONTRASTIVE_PROJECTION = "contrastive_projection"
+
+
+class FamilyRule(BaseModel):
+    """One naming rule: the family a feature name is grouped under when it matches.
+
+    A rule matches on a name's prefix, which is how every family but one marks its
+    features. ``contains`` is for the family whose mark is not a prefix, and it is
+    checked in the same pass so that rule order stays the whole story.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    family: str
+    prefixes: tuple[str, ...] = ()
+    contains: tuple[str, ...] = ()
+
+    def matches(self, name: str) -> bool:
+        return name.startswith(self.prefixes) or any(mark in name for mark in self.contains)
+
+
+# The rules, in the order they are tried: the first match wins, so a narrower mark
+# comes before a wider one that would swallow it. Two spellings of one family sit in one
+# rule, because banks disagree on how the engineered families spell their columns —
+# `af_`/`gf_`/`rt_` in some, `attn_flow_`/`gate_`/`res_traj_` in others — and a family is
+# one family however its columns were named.
+FAMILY_RULES: tuple[FamilyRule, ...] = (
+    FamilyRule(family="value_geometry", prefixes=("value_",)),
+    FamilyRule(family="qk_geometry", prefixes=("qk_", "q_")),
+    FamilyRule(family="kv_cka", contains=("cka",)),   # before the kv_ rule, which would take it
+    FamilyRule(family="per_head", prefixes=("ph_",)),
+    FamilyRule(family=FAMILY_ATTENTION_FLOW, prefixes=("attn_flow_", "af_")),
+    FamilyRule(family=FAMILY_GATE, prefixes=("gate_", "gf_")),
+    FamilyRule(family="path_signature", prefixes=("res_sig",)),           # level-2 log-signature
+    FamilyRule(family="path_signature_output", prefixes=("out_sig",)),    # output-statistics path
+    FamilyRule(family="path_signature_attention", prefixes=("attn_sig",)),  # attention-region path
+    FamilyRule(family=FAMILY_RESIDUAL_TRAJECTORY, prefixes=("res_traj", "rt_")),
+    FamilyRule(family=STORED_FAMILY_CACHE_AND_KEYS, prefixes=("cache_", "kv_", "epoch_")),
+    FamilyRule(family=STORED_FAMILY_ATTENTION_SPECTRAL, prefixes=("spectral_",)),
+    FamilyRule(
+        family=STORED_FAMILY_ATTENTION_OTHER,
+        prefixes=("attn_entropy_", "head_agreement_", "delta_"),
+    ),
+    FamilyRule(family="attn_res", prefixes=("attnres_",)),
+    FamilyRule(family="expert_routing", prefixes=("xrt_", "expert_routing_")),  # MoE router
+    FamilyRule(family=FAMILY_TEMPORAL_DYNAMICS, prefixes=("td_",)),
+    FamilyRule(family=FAMILY_CONTRASTIVE_PROJECTION, prefixes=("cp_",)),
+    FamilyRule(family=STORED_FAMILY_RESIDUAL_PCA, prefixes=("pca_",)),
+    # Last, because this family's block is also where the stored layout puts a name
+    # nothing else claims: the rule states the marks it really holds, so that a name
+    # matching none of them is reported as unplaced instead of credited here.
+    FamilyRule(
+        family=STORED_FAMILY_NORMS_AND_OUTPUT_STATS,
+        prefixes=("activation_norm", "logit_", "top1_", "top5_", "surprise", "mean_", "std_"),
+    ),
+)
+
+FAMILY_LABELS: frozenset[str] = frozenset(rule.family for rule in FAMILY_RULES)
+"""Every family label the rules can return. A reader that translates a label into its
+own vocabulary checks itself against this set, so a family added here cannot be silently
+dropped by a table that does not know it."""
+
+
+def named_family(n: str) -> str | None:
+    """The family a rule names for this feature, or None when no rule does.
+
+    :func:`stored_family` answers for every string, because the block an unrecognised
+    name is stored in is also a family. A caller that has to tell a match from that
+    fallback asks here — attributing a number to a block that never held the feature is
+    worse than reporting that the name could not be placed.
+    """
+    for rule in FAMILY_RULES:
+        if rule.matches(n):
+            return rule.family
+    return None
+
 
 def stored_family(n: str) -> str:
     """The family label a feature is grouped under in banked per-family results.
 
     Five labels follow the stored block layout and are held as the STORED_FAMILY_*
-    constants above; the rest name their family directly. What a feature reads is
-    answered by `classify()` and its (source, method, depth) cell, never by this.
+    constants above; the rest name their family directly. A name no rule matches takes
+    the norms-and-output-stats label, which is the block the stored layout ends with.
+    What a feature *reads* is answered by `classify()` and its (source, method, depth)
+    cell, never by this.
     """
-    if n.startswith("value_"): return "value_geometry"
-    if n.startswith(("qk_", "q_")): return "qk_geometry"
-    if "cka" in n: return "kv_cka"
-    if n.startswith("ph_"): return "per_head"
-    if n.startswith("attn_flow_"): return "attention_flow"
-    if n.startswith("gate_"): return "gate"
-    if n.startswith("res_sig"): return "path_signature"   # level-2 log-signature (new; no legacy analog)
-    if n.startswith("out_sig"): return "path_signature_output"      # output-stats path source (2026-09-11 §1a)
-    if n.startswith("attn_sig"): return "path_signature_attention"  # attention-region path source (2026-09-11 §1b)
-    if n.startswith("res_traj"): return "residual_traj"
-    if n.startswith(("cache_", "kv_", "epoch_")): return STORED_FAMILY_CACHE_AND_KEYS
-    if n.startswith("spectral_"): return STORED_FAMILY_ATTENTION_SPECTRAL
-    if n.startswith(("attn_entropy_", "head_agreement_", "delta_")): return STORED_FAMILY_ATTENTION_OTHER
-    if n.startswith("attnres_"): return "attn_res"
-    if n.startswith(("xrt_", "expert_routing_")): return "expert_routing"  # M6 MoE router (new; no legacy analog)
-    if n.startswith("pca_"): return STORED_FAMILY_RESIDUAL_PCA
-    return STORED_FAMILY_NORMS_AND_OUTPUT_STATS
+    return named_family(n) or STORED_FAMILY_NORMS_AND_OUTPUT_STATS
 
 
 def _source(n: str) -> Source:

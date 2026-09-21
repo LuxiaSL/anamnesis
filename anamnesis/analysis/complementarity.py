@@ -65,6 +65,19 @@ from anamnesis.analysis.gauntlet.signature_io import (
     TEMPORAL_DYNAMICS,
 )
 from anamnesis.analysis.gauntlet.utils import error_stub_reason, is_error_stub
+from anamnesis.feature_map import (
+    FAMILY_ATTENTION_FLOW,
+    FAMILY_CONTRASTIVE_PROJECTION,
+    FAMILY_GATE,
+    FAMILY_RESIDUAL_TRAJECTORY,
+    FAMILY_TEMPORAL_DYNAMICS,
+    STORED_FAMILY_ATTENTION_OTHER,
+    STORED_FAMILY_ATTENTION_SPECTRAL,
+    STORED_FAMILY_CACHE_AND_KEYS,
+    STORED_FAMILY_NORMS_AND_OUTPUT_STATS,
+    STORED_FAMILY_RESIDUAL_PCA,
+    named_family,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -123,32 +136,26 @@ V2_COMPOSITES: tuple[str, ...] = (
     ALL_FAMILIES, ATTENTION_AND_CACHE_WITH_FAMILIES, EVERYTHING,
 )
 
-FAMILY_BY_PREFIX: dict[str, str] = {
-    "cp": CONTRASTIVE_PROJECTION,
-    "af": ATTENTION_FLOW,
-    "td": TEMPORAL_DYNAMICS,
-    "rt": RESIDUAL_TRAJECTORY,
-    "gf": GATE_FEATURES,
+BLOCK_BY_FAMILY: dict[str, str] = {
+    STORED_FAMILY_NORMS_AND_OUTPUT_STATS: NORMS_AND_OUTPUT_STATS,
+    STORED_FAMILY_ATTENTION_OTHER: ATTENTION_AND_DELTAS,
+    STORED_FAMILY_ATTENTION_SPECTRAL: ATTENTION_AND_DELTAS,
+    STORED_FAMILY_CACHE_AND_KEYS: CACHE_AND_KEYS,
+    STORED_FAMILY_RESIDUAL_PCA: RESIDUAL_PCA,
+    FAMILY_RESIDUAL_TRAJECTORY: RESIDUAL_TRAJECTORY,
+    FAMILY_ATTENTION_FLOW: ATTENTION_FLOW,
+    FAMILY_GATE: GATE_FEATURES,
+    FAMILY_TEMPORAL_DYNAMICS: TEMPORAL_DYNAMICS,
+    FAMILY_CONTRASTIVE_PROJECTION: CONTRASTIVE_PROJECTION,
 }
-"""Engineered families carry a two-letter prefix. The core blocks do not, which is
-why the fallback below reads their signal names instead."""
+"""The block a family's features are addressed in, for the families that have one.
 
-CORE_BLOCK_BY_SIGNAL: tuple[tuple[str, str], ...] = (
-    ("lookback", CACHE_AND_KEYS),
-    ("key_drift", CACHE_AND_KEYS),
-    ("key_novelty", CACHE_AND_KEYS),
-    ("epoch", CACHE_AND_KEYS),
-    ("attn_entropy", ATTENTION_AND_DELTAS),
-    ("head_agree", ATTENTION_AND_DELTAS),
-    ("residual", ATTENTION_AND_DELTAS),
-    ("pca_", RESIDUAL_PCA),
-    ("act_norm", NORMS_AND_OUTPUT_STATS),
-    ("logit", NORMS_AND_OUTPUT_STATS),
-    ("token", NORMS_AND_OUTPUT_STATS),
-    ("delta", NORMS_AND_OUTPUT_STATS),
-)
-"""Which core block a feature name belongs to, by the signal it names. Order
-matters: the more specific signals are matched first."""
+:func:`anamnesis.feature_map.named_family` is the one classifier of feature names, and
+it answers in families. A family is the finer cut — attention-and-deltas is two of them,
+one reading attention distributions and one reading their graph spectrum — so a family
+maps onto a block and not the other way round. A family in
+:data:`anamnesis.feature_map.FAMILY_LABELS` and absent here has no block of its own in
+any corpus these readings run over, and is reported under its family label."""
 
 
 def pair_name(mode_a: str, mode_b: str) -> str:
@@ -363,14 +370,18 @@ def analyze_complementarity(
 
 
 def feature_family(name: str) -> str:
-    """Which family a banked feature name belongs to."""
-    prefix = name.split("_")[0] if "_" in name else name
-    if prefix in FAMILY_BY_PREFIX:
-        return FAMILY_BY_PREFIX[prefix]
-    for signal, block in CORE_BLOCK_BY_SIGNAL:
-        if name.startswith(signal):
-            return block
-    return f"unknown({name[:20]})"
+    """Which block a banked feature name's importance is credited to.
+
+    The classification is :func:`anamnesis.feature_map.named_family`'s, translated
+    through :data:`BLOCK_BY_FAMILY` so that a summed importance is keyed the way the
+    accuracy tables beside it are. A name that classifier cannot place is reported as
+    unknown rather than credited to a block, because an importance attributed to a block
+    that never held the feature reads as a finding about that block.
+    """
+    family = named_family(name)
+    if family is None:
+        return f"unknown({name[:20]})"
+    return BLOCK_BY_FAMILY.get(family, family)
 
 
 def feature_subfamily(name: str) -> str:
@@ -596,6 +607,7 @@ def complementarity_report(results: Mapping[str, Mapping[str, Any]]) -> dict[str
 
 
 __all__ = [
+    "BLOCK_BY_FAMILY",
     "CORE_BLOCK_ORDER",
     "COMPLEMENTARY_BAR",
     "CORE_RUNS",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -176,6 +177,34 @@ def test_the_artifact_names_are_the_ones_the_reader_resolves() -> None:
     )
     assert PCA_MODEL_NAMES is calibration.PCA_MODEL_NAMES
     assert PCA_MODEL_NAMES[0] == PCA_MODEL_NAME
+
+
+def test_configuration_imports_nothing_else_in_the_package() -> None:
+    """The claim above, checked rather than stated.
+
+    The filenames can live here only while this package is the layer everything else
+    reads and nothing here reads back: one import the other way and the two modules are
+    a cycle, and the home for a name that both a path builder and a reader need moves to
+    whichever of them imports the other. Function-level imports count, which is why this
+    reads the syntax tree rather than the module's namespace.
+    """
+    package = Path(paths.__file__).parent
+    offenders: list[str] = []
+    for module in sorted(package.rglob("*.py")):
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                named = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                named = [node.module or ""]
+            else:
+                continue
+            offenders += [
+                f"{module.name}:{node.lineno} imports {name}"
+                for name in named
+                if name.startswith("anamnesis") and not name.startswith("anamnesis.config")
+            ]
+    assert offenders == [], f"configuration is no longer the dependency leaf: {offenders}"
 
 
 def test_legacy_calibration_is_reached_through_the_hatch(data_roots: Path) -> None:
