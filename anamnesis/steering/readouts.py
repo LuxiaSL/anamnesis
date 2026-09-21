@@ -49,6 +49,7 @@ from numpy.typing import NDArray
 
 from anamnesis.analysis.battery.deltas import load_floor_scale
 from anamnesis.analysis.battery.floors import load_signature_matrix
+from anamnesis.analysis.battery.stats import permutation_pvalue
 from anamnesis.analysis.text_stats import text_stats
 from anamnesis.steering.vectors import F64, unit
 
@@ -387,12 +388,16 @@ def sign_flip_p(projections: NDArray[Any], n_perm: int = 5000, seed: int = 20260
     The null is that the sign of each generation's projection is arbitrary, which
     is the right null for a directional claim: it tests whether the displacements
     agree on a direction, not merely whether they are large.
+
+    The p is ``permutation_pvalue`` from ``anamnesis.analysis.battery.stats``, so a
+    sign-flip p is read under the same add-one convention as every other
+    permutation p in the package and is never zero.
     """
     values = np.asarray(projections, dtype=np.float64)
     rng = np.random.default_rng(seed)
     observed = float(values.mean())
     null = (rng.choice([-1.0, 1.0], size=(int(n_perm), len(values))) * values).mean(axis=1)
-    return float((np.sum(null >= observed) + 1) / (int(n_perm) + 1))
+    return permutation_pvalue(observed, null)
 
 
 def directional_series(

@@ -6,8 +6,12 @@ straddle train/test, and every repetition of a topic shares its prompt, so a
 classifier can recognise the topic and be scored as if it had recognised the mode.
 That leak is what the grouped default exists to prevent. The ungrouped path survives
 only as a fallback when no topic labels exist, and is labeled as legacy in the
-printed output. Pairwise-binary accuracies carry no p-values; read them against the
-fold-noise law (diffs <15pp at n=100 are noise — v3 delta memo).
+printed output. Pairwise-binary accuracies carry no p-values, and the ten-pair grid
+is one family read off one set of signatures rather than ten findings: at n=100 the
+spread between folds is of the same order as the spread between pairs, so a gap
+under roughly 15pp is fold noise. ``cv_stability`` on the key blocks measures that
+spread directly — its ``std`` and 95% interval are what a pairwise gap should be
+weighed against.
 
 The two family-level statistics this module reports — the permutation p-value and
 the BH-FDR adjustment across the per-block permutation family (q_value on
