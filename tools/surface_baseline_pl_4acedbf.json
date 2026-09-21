@@ -1,0 +1,41 @@
+{
+  "groups": {
+    "pipeline/": {
+      "files": 1,
+      "loc": 181,
+      "code_tokens": 0,
+      "doc_words": 1459
+    },
+    "pipeline/anamnesis/": {
+      "files": 400,
+      "loc": 84867,
+      "code_tokens": 585317,
+      "doc_words": 117731
+    },
+    "pipeline/docs/": {
+      "files": 6,
+      "loc": 1486,
+      "code_tokens": 0,
+      "doc_words": 10269
+    },
+    "pipeline/scripts/": {
+      "files": 33,
+      "loc": 6053,
+      "code_tokens": 44649,
+      "doc_words": 770
+    },
+    "pipeline/tests/": {
+      "files": 42,
+      "loc": 4559,
+      "code_tokens": 31710,
+      "doc_words": 2015
+    }
+  },
+  "total": {
+    "files": 482,
+    "loc": 97146,
+    "code_tokens": 661676,
+    "doc_words": 132244
+  },
+  "unreadable": []
+}
