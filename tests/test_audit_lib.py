@@ -47,7 +47,7 @@ from anamnesis.analysis.audit_lib import (
     attention_vector,
     gen_metadata_by_id,
     leak_free_folds,
-    load_signature_matrix,
+    load_merged_signature_matrix,
     preprocess_fold_gpu,
     make_encoder,
     residualize,
@@ -187,7 +187,7 @@ def test_signature_matrix_pins_feature_order_and_zero_fills(tmp_path: Path) -> N
         1: {"f_b": 20.0, "f_a": 10.0},      # same features, different order
         2: {"f_a": 100.0},                  # f_b missing entirely
     })
-    sm = load_signature_matrix(["run_a", "absent_run"], tmp_path)
+    sm = load_merged_signature_matrix(["run_a", "absent_run"], tmp_path)
     assert isinstance(sm, SignatureMatrix)
     assert list(sm.names) == ["f_a", "f_b"]
     assert sm.X.shape == (3, 2)
@@ -202,9 +202,9 @@ def test_signature_matrix_filters_by_mode_and_survives_an_empty_selection(
     tmp_path: Path,
 ) -> None:
     write_signature_run(tmp_path, "run_a", {0: {"f": 1.0}}, mode="rhetorical")
-    empty = load_signature_matrix(["run_a"], tmp_path)          # default modes=HARD
+    empty = load_merged_signature_matrix(["run_a"], tmp_path)          # default modes=HARD
     assert empty.X.size == 0 and empty.names.size == 0
-    kept = load_signature_matrix(["run_a"], tmp_path, modes={"rhetorical"})
+    kept = load_merged_signature_matrix(["run_a"], tmp_path, modes={"rhetorical"})
     assert kept.X.shape == (1, 1)
 
 

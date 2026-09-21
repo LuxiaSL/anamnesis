@@ -23,7 +23,11 @@ files across runs, with labels, topic indices and the length covariates the
 control needs. Feature order is pinned to the first generation seen and missing
 features fill with zero, which is what lets two runs extracted with slightly
 different suite versions enter the same matrix without silently transposing
-columns.
+columns. What it does not let them do is arrive from different arithmetic, so
+:mod:`anamnesis.analysis.lane_guard` gates the merged row set before it is
+stacked: a difference in the last digits of two lanes is not a difference between
+two conditions, and once the rows are in one matrix nothing downstream can tell
+the two apart.
 
 **Surface sampling.** The learned-floor protocol reads raw tensors, not
 signatures, so each surface is turned into a fixed-dimension per-generation
@@ -65,6 +69,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 from sklearn.model_selection import GroupKFold
+
+from anamnesis.analysis.lane_guard import gate_banked_signatures
 
 F64 = NDArray[np.float64]
 
@@ -190,13 +196,17 @@ class SignatureMatrix(BaseModel):
     topic: np.ndarray  # (n,) topic_idx (int)
     C: np.ndarray      # (n, 2) float64 [prompt_length, num_generated_tokens]
     names: np.ndarray  # (P,) feature names (str)
+    lane_id: str | None = None  # the arithmetic lane every row shares; None is
+                                # untagged history, never a certification
 
 
-def load_signature_matrix(
+def load_merged_signature_matrix(
     runs: Sequence[str],
     runs_root: Path | str,
     subdir: str = "signatures_v3",
     modes: Collection[str] = HARD,
+    *,
+    allow_mixed_lanes: bool = False,
 ) -> SignatureMatrix:
     """Load merged per-gen signature vectors across runs (feature order pinned to
     the first gen seen; missing features fill 0.0; matrix nan_to_num'd).
@@ -204,12 +214,18 @@ def load_signature_matrix(
     Runs and directories that do not exist are skipped silently, which is what
     lets one call name a run and its extension corpus without knowing whether
     the extension was banked on this machine.
+
+    Merging several runs is where a lane can be mixed without anybody noticing,
+    so :func:`anamnesis.analysis.lane_guard.gate_banked_signatures` runs once over
+    the rows of every run together rather than per run, and the lane it certifies
+    is stamped on the result. ``allow_mixed_lanes`` names the bypass.
     """
     names: list[str] | None = None
     rows: list[list[float]] = []
     y: list[str] = []
     topic: list[int] = []
     C: list[list[float]] = []
+    kept: list[Path] = []
     for run in runs:
         rd = Path(runs_root) / run
         sd = rd / subdir
@@ -229,12 +245,15 @@ def load_signature_matrix(
             y.append(md[g]["mode"])
             topic.append(md[g]["topic_idx"])
             C.append([md[g]["prompt_length"], md[g]["num_generated_tokens"]])
+            kept.append(p)
+    lane_id = gate_banked_signatures(kept, allow_mixed_lanes=allow_mixed_lanes)
     return SignatureMatrix(
         X=np.nan_to_num(np.array(rows, float)),
         y=np.array(y),
         topic=np.array(topic),
         C=np.array(C, float),
         names=np.array(names if names is not None else [], dtype=object),
+        lane_id=lane_id,
     )
 
 
