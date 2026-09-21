@@ -30,7 +30,11 @@ from typing import Any
 import pytest
 
 from anamnesis.extraction.replay.manifest import load_replay_manifest
-from anamnesis.orchestration.gpu import THREAD_LIMIT_ENV, VISIBLE_DEVICES_ENV
+from anamnesis.orchestration.gpu import (
+    THREAD_LIMIT_ENV,
+    VISIBLE_DEVICES_ENV,
+    resolve_physical_gpus,
+)
 from anamnesis.orchestration.launch import (
     Cell,
     LaunchPlan,
@@ -107,6 +111,41 @@ def test_plan_resolve_refuses_slots_beyond_the_assignment(
     monkeypatch.setenv(VISIBLE_DEVICES_ENV, "5,6")
     with pytest.raises(ValueError, match="exceeds the scheduler assignment"):
         LaunchPlan.resolve("0,1,2", 1, tmp_path / "logs")
+
+
+def test_slot_zero_is_a_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first slot of an assignment, and of a bare box: the boundary the check keeps."""
+    monkeypatch.setenv(VISIBLE_DEVICES_ENV, "3")
+    assert resolve_physical_gpus(["0"]) == ["3"]
+    monkeypatch.delenv(VISIBLE_DEVICES_ENV)
+    assert resolve_physical_gpus(["0", "1"]) == ["0", "1"]
+
+
+@pytest.mark.parametrize("assignment", ["4,5,6", None])
+def test_a_negative_slot_is_refused_with_or_without_an_assignment(
+    assignment: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``-1`` would index the last device of the assignment.
+
+    A fleet asked for slots ``0,-1`` against a two-device assignment would put two
+    workers on one device and report two devices, which reads as a throughput result
+    rather than as a mistake. The refusal does not depend on the job carrying an
+    assignment, because the typo is the same on bare metal.
+    """
+    if assignment is None:
+        monkeypatch.delenv(VISIBLE_DEVICES_ENV, raising=False)
+    else:
+        monkeypatch.setenv(VISIBLE_DEVICES_ENV, assignment)
+    with pytest.raises(ValueError, match="negative"):
+        resolve_physical_gpus(["0", "-1"])
+
+
+def test_a_slot_that_is_not_an_index_is_refused_on_a_bare_box(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(VISIBLE_DEVICES_ENV, raising=False)
+    with pytest.raises(ValueError, match="not an integer"):
+        resolve_physical_gpus(["cuda:0"])
 
 
 def test_launch_confines_each_worker_and_pins_its_threads(tmp_path: Path) -> None:
