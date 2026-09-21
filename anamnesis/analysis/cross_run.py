@@ -38,7 +38,7 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import silhouette_samples, silhouette_score
 from sklearn.neighbors import KNeighborsClassifier
