@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from anamnesis.analysis.complementarity import (
+    BLOCK_BY_FAMILY,
     COMPLEMENTARY_BAR,
     DIVERGENCE_BAR,
     analyze_complementarity,
@@ -50,9 +51,23 @@ from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
     ATTENTION_AND_CACHE,
     ATTENTION_AND_DELTAS,
+    ATTENTION_FLOW,
     CACHE_AND_KEYS,
+    CONTRASTIVE_PROJECTION,
+    GATE_FEATURES,
     NORMS_AND_OUTPUT_STATS,
     RESIDUAL_PCA,
+    RESIDUAL_TRAJECTORY,
+    TEMPORAL_DYNAMICS,
+)
+from anamnesis.feature_map import (
+    FAMILY_ATTENTION_FLOW,
+    FAMILY_CONTRASTIVE_PROJECTION,
+    FAMILY_GATE,
+    FAMILY_LABELS,
+    FAMILY_RESIDUAL_TRAJECTORY,
+    FAMILY_TEMPORAL_DYNAMICS,
+    named_family,
 )
 
 LABELS = ["analogical", "contrastive", "dialectical", "linear", "socratic"]
@@ -242,12 +257,29 @@ def test_the_complementarity_matrix_drops_a_block_with_no_profile(tmp_path: Path
 
 
 def test_feature_names_are_grouped_by_family_and_sub_family() -> None:
-    assert feature_family("cp_L16_t3_d07") == "contrastive_projection"
-    assert feature_family("af_L8_recency_bias") == "attention_flow"
-    assert feature_family("key_drift_L16") == CACHE_AND_KEYS
+    """Every spelling here is one a banked corpus carries.
+
+    Key geometry is written ``kv_key_drift_L16`` and a residual norm
+    ``activation_norm_mean_L0``; a rule keyed on ``key_drift`` or ``act_norm`` matches
+    no column in any bank and credits nothing.
+    """
+    assert feature_family("cp_L16_t3_d07") == CONTRASTIVE_PROJECTION
+    assert feature_family("af_L8_recency_bias") == ATTENTION_FLOW
+    assert feature_family("attn_flow_recency_bias_L16") == ATTENTION_FLOW, (
+        "one family, two spellings — the corpora that named it either way"
+    )
+    assert feature_family("kv_key_drift_L16") == CACHE_AND_KEYS
+    assert feature_family("cache_recency_bias_L8") == CACHE_AND_KEYS
     assert feature_family("attn_entropy_L8") == ATTENTION_AND_DELTAS
+    assert feature_family("spectral_fiedler_L28") == ATTENTION_AND_DELTAS, (
+        "the similarity graph is built from attention distributions"
+    )
+    assert feature_family("delta_norm_mean_L0") == ATTENTION_AND_DELTAS, (
+        "a cross-layer residual delta is addressed in the attention block, not the norms one"
+    )
     assert feature_family("pca_resid_L16") == RESIDUAL_PCA
     assert feature_family("logit_entropy") == NORMS_AND_OUTPUT_STATS
+    assert feature_family("activation_norm_mean_L0") == NORMS_AND_OUTPUT_STATS
     assert feature_family("mystery").startswith("unknown(")
 
     assert feature_subfamily("cp_L16_t3_d07") == "cp_t3"
@@ -257,6 +289,59 @@ def test_feature_names_are_grouped_by_family_and_sub_family() -> None:
     assert feature_subfamily("gf_L16_sparsity_mean") == "gf_sparsity"
     assert feature_subfamily("rt_L24_velocity_norm") == "rt_velocity"
     assert feature_subfamily("something_else").startswith("other(")
+
+
+BLOCKLESS_FAMILIES = frozenset({
+    "value_geometry", "qk_geometry", "kv_cka", "per_head", "attn_res", "expert_routing",
+    "path_signature", "path_signature_output", "path_signature_attention",
+})
+"""Families extracted after these corpora were banked, so no block of a banked result
+holds them. A new family lands in one set or the other by decision, not by default."""
+
+CLASSIFIED_SPELLINGS = (
+    "cp_L16_t3_d07", "af_L8_recency_bias", "attn_flow_recency_bias_L16", "gf_L16_sparsity_mean",
+    "gate_sparsity_mean_L16", "rt_L24_velocity_norm", "res_traj_velocity_L24",
+    "td_L16_key_drift_w0", "kv_key_drift_L16", "cache_recency_bias_L8", "epoch_n_transitions_mean",
+    "attn_entropy_mean_L8", "head_agreement_mean_L8", "delta_norm_mean_L0",
+    "spectral_fiedler_L28", "pca_resid_L16", "logit_entropy_mean", "activation_norm_mean_L0",
+    "top1_prob_mean", "surprise_traj0", "mean_chosen_rank", "std_surprise",
+    "value_key_corr_L8", "qk_align_L8", "kv_value_cka_L8", "ph_head_entropy_L8",
+    "res_sig_lvl2_L16", "out_sig_lvl1_entropy", "attn_sig_lvl2_recent",
+    "attnres_committed_cos_L8", "xrt_switch_rate",
+)
+"""One spelling per family, from the corpora each family's extraction produced."""
+
+
+def test_one_classifier_answers_the_family_question() -> None:
+    """This module classifies no feature name itself: it translates.
+
+    :func:`anamnesis.feature_map.named_family` is the classifier, and the translation
+    table is keyed by the family constants that module defines, so the two cannot drift
+    onto two spellings of one family. Every family the classifier can return is either
+    translated to a block here or declared blockless.
+    """
+    assert set(BLOCK_BY_FAMILY) <= FAMILY_LABELS, (
+        "a label is translated that the classifier never returns"
+    )
+    assert FAMILY_LABELS - set(BLOCK_BY_FAMILY) == BLOCKLESS_FAMILIES, (
+        "a family was added to the taxonomy without saying which block, if any, holds it"
+    )
+    for label, block in (
+        (FAMILY_ATTENTION_FLOW, ATTENTION_FLOW),
+        (FAMILY_GATE, GATE_FEATURES),
+        (FAMILY_RESIDUAL_TRAJECTORY, RESIDUAL_TRAJECTORY),
+        (FAMILY_TEMPORAL_DYNAMICS, TEMPORAL_DYNAMICS),
+        (FAMILY_CONTRASTIVE_PROJECTION, CONTRASTIVE_PROJECTION),
+    ):
+        assert BLOCK_BY_FAMILY[label] == block
+
+    for name in CLASSIFIED_SPELLINGS:
+        family = named_family(name)
+        assert family is not None, f"{name} is a banked spelling and has to classify"
+        assert feature_family(name) == BLOCK_BY_FAMILY.get(family, family)
+    assert {named_family(name) for name in CLASSIFIED_SPELLINGS} == set(FAMILY_LABELS), (
+        "every family needs a spelling here, or the translation is untested for it"
+    )
 
 
 def test_importance_is_summed_per_family_and_per_sub_family(tmp_path: Path) -> None:
