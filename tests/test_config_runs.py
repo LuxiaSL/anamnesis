@@ -26,6 +26,7 @@ EXPECTED_RUNS: dict[str, tuple[str, str, int]] = {
     "3b_run4": ("legacy", "outputs/runs/run4_format_controlled/signatures", 0),
     "8b_v2": ("outputs", "runs/8b_fat_01/signatures_v2", 2),
     "3b_v2": ("outputs", "runs/3b_fat_01/signatures_v2", 1),
+    "synthetic_demo": ("outputs", "runs/synthetic_demo/signatures", 0),
 }
 
 
