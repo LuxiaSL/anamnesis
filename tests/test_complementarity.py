@@ -11,7 +11,7 @@ check the readings by value:
   * the complementarity matrix is over **hard pairs only**, a block at ceiling on all of them
     is dropped by name rather than entering as a flat profile, and the correlation is sorted
     so the most complementary pair reads first;
-  * feature importance is grouped by family and by sub-family, including the baseline blocks
+  * feature importance is grouped by family and by sub-family, including the core blocks
     that carry no family prefix;
   * the hardest confusion is read off the matrix that carries its own labels — the reading
     the frozen record could not produce, because it looked for a field that does not exist;

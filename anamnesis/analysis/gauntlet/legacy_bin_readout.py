@@ -169,7 +169,7 @@ def run_legacy_bin_readout(data: AnalysisData) -> LegacyBinReadoutResult:
                 gain_over_best_pair=acc - best_pair_acc,
             )
 
-    # ── Cross-group: baseline composite + each engineered block ──
+    # ── Cross-group: the baseline composite + each engineered family ──
     cross_group: dict[str, CrossGroupAblation] | None = None
     cross_group_baseline: str | None = None
     if present_families and len(present_core) >= 2:

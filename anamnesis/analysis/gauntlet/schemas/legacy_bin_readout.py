@@ -20,7 +20,7 @@ from anamnesis.analysis.gauntlet.schemas.base import _FORBID
 
 
 class PairwiseBlockCombo(BaseModel):
-    """Accuracy of two baseline blocks concatenated."""
+    """Accuracy of two core blocks concatenated."""
 
     model_config = _FORBID
 
@@ -31,7 +31,7 @@ class PairwiseBlockCombo(BaseModel):
 
 
 class TripleBlockCombo(BaseModel):
-    """Accuracy of three baseline blocks concatenated."""
+    """Accuracy of three core blocks concatenated."""
 
     model_config = _FORBID
 
@@ -153,7 +153,7 @@ class CohensDPerTopicResult(BaseModel):
 
 
 class LegacyBinReadoutResult(BaseModel):
-    """Section 3 result: block ablation + feature importance.
+    """Section 3 result: the per-block readout plus feature importance.
 
     Several fields are present only for v2 runs (``cross_group_ablation``,
     ``top_features_rf``, etc.). ``top_features_rf_combined`` is a legacy

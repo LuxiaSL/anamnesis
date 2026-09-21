@@ -51,7 +51,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--n-epochs", type=int, default=200)
     p.add_argument(
         "--feature-key", default="features",
-        help="Signature npz key holding the vector (default: the baseline blocks)",
+        help="Signature npz key holding the vector (default: the four core blocks)",
     )
     return p
 

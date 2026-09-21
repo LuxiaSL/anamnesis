@@ -119,7 +119,7 @@ def test_blocks_are_discovered_not_declared(tmp_path: Path) -> None:
     assert data.group_features["combined"].shape == (1, 4)
     assert "T2+T2.5" in data.group_features
     assert data.all_features.shape == (1, 10)
-    # all_features concatenates baseline blocks before engineered ones.
+    # all_features concatenates the core blocks before the engineered families.
     assert list(CORE_BLOCKS)[:2] == ["T1", "T2"]
     assert "gate_features" in FAMILY_BLOCKS
     assert set(BLOCK_UNIONS) >= {"combined", "combined_v2"}

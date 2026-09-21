@@ -43,7 +43,13 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
-from anamnesis.analysis.gauntlet.signature_io import Run4Data
+from anamnesis.analysis.gauntlet.signature_io import (
+    ATTENTION_FLOW,
+    CONTRASTIVE_PROJECTION,
+    GATE_FEATURES,
+    TEMPORAL_DYNAMICS,
+    Run4Data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,10 +176,10 @@ def classify_contrastive_projection(name: str) -> str:
 
 
 SUBFAMILY_CLASSIFIERS: dict[str, Callable[[str], str]] = {
-    "temporal_dynamics": classify_temporal_dynamics,
-    "attention_flow": classify_attention_flow,
-    "gate_features": classify_gate_features,
-    "contrastive_projection": classify_contrastive_projection,
+    TEMPORAL_DYNAMICS: classify_temporal_dynamics,
+    ATTENTION_FLOW: classify_attention_flow,
+    GATE_FEATURES: classify_gate_features,
+    CONTRASTIVE_PROJECTION: classify_contrastive_projection,
 }
 """Which classifier reads which family's names. A family absent from this table has
 no sub-family convention to read, which is a fact about its naming rather than a
@@ -346,7 +352,7 @@ def decompose_run(data: Run4Data) -> dict[str, dict[str, SubsetAccuracy]]:
             continue
         logger.info(f"  --- {block} ({len(names)} features) ---")
         out[f"{block}_by_signal"] = decompose_family(data, block, names, classifier)
-        if block == "temporal_dynamics":
+        if block == TEMPORAL_DYNAMICS:
             logger.info("  coarse cut, by the substrate each signal is a series of:")
             out["td_coarse"] = decompose_by_groups(
                 data, block, names, classify_temporal_dynamics, TD_COARSE_GROUPS

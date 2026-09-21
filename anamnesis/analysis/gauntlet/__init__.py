@@ -10,7 +10,7 @@ another beside a length-only baseline that reaches the same number.
 The eleven sections:
   1. Data integrity & descriptive statistics
   2. Classification (5-way mode discrimination)
-  3. Block ablation & feature importance
+  3. The readout over the stored blocks, & feature importance
   4. Intrinsic dimension profiling
   5. CCGP (cross-condition generalization)
   6. Topology & hyperbolicity

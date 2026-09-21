@@ -136,7 +136,9 @@ class ExtractionConfig(BaseModel):
     enable_residual_pca: bool = Field(
         default=True, description="Compute residual-stream projections onto a pre-fitted basis"
     )
-    enable_knnlm_baseline: bool = Field(default=True, description="Compute the kNN-LM baseline block")
+    enable_knnlm_baseline: bool = Field(
+        default=True, description="Compute the kNN-LM comparison vector beside the blocks"
+    )
 
     early_layer_cutoff: int = Field(
         ge=0, description="At or below this a layer counts as early for cross-layer agreement"
