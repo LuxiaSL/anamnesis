@@ -12,6 +12,12 @@ Two claims here matter more than the rest.
 same assignment. That is what makes it legitimate for the assignment to be
 arbitrary: an output does not depend on it.
 
+**A roster is fanned out through one arrangement.** The generation and the replay
+side both hand their roster to :func:`anamnesis.orchestration.launch.fan_out_roster`,
+so there is one answer to where a job file lands, what a dry run prints, and which
+fields of a cell are the launcher's business — target, items, and payload it carries
+without reading.
+
 **Assembly writes the manifest through the manifest's own module.** The frozen
 record holds two launchers that each format ``replay_manifest.json`` from their own
 dict literal, with a copy of the schema each. Assembly here calls
@@ -39,6 +45,7 @@ from anamnesis.orchestration.launch import (
     Cell,
     LaunchPlan,
     assemble_run,
+    fan_out_roster,
     launch,
     plan_multicell,
     round_robin,
@@ -323,3 +330,92 @@ def test_launch_defaults_to_the_real_subprocess_constructor() -> None:
     """The injectable spawner is for tests; the default must be the real one."""
     assert launch.__defaults__ is None
     assert launch.__kwdefaults__["popen"] is subprocess.Popen
+
+
+_ROSTER = [
+    {
+        "run_dir": "/runs/cell_a",
+        "manifest": "/runs/cell_a/replay_manifest.json",
+        "gen_ids": [0, 1, 2],
+        "inject_key": "V3",
+    },
+    {
+        "run_dir": "/runs/cell_b",
+        "manifest": "/runs/cell_b/replay_manifest.json",
+        "gen_ids": [7],
+    },
+]
+
+
+def _fan_out(tmp_path: Path, spawner: Any, **overrides: Any) -> LaunchPlan:
+    plan = _plan(tmp_path, devices=("0",), per_device=2)
+    kwargs: dict[str, Any] = dict(
+        target_fields=("run_dir", "manifest"),
+        item_fields=("gen_ids",),
+        items_key="gen_ids",
+        jobs_dir=tmp_path / "jobs",
+        command_for=lambda worker, jobs_file: ["python", "-m", "x", str(jobs_file)],
+        stem="unit",
+        popen=spawner,
+    )
+    kwargs.update(overrides)
+    fan_out_roster(plan, _ROSTER, lambda row: list(row["gen_ids"]), **kwargs)
+    return plan
+
+
+def test_fan_out_roster_gives_each_worker_one_job_per_cell_it_has_a_share_of(
+    tmp_path: Path,
+) -> None:
+    """The load-once arrangement: a worker's jobs travel in one file it reads itself."""
+    spawner = _Spawner()
+    _fan_out(tmp_path, spawner)
+    assert len(spawner.calls) == 2
+
+    first = json.loads((tmp_path / "jobs" / "jobs_w0.json").read_text())
+    second = json.loads((tmp_path / "jobs" / "jobs_w1.json").read_text())
+    assert [job["run_dir"] for job in first] == ["/runs/cell_a", "/runs/cell_b"]
+    assert [job["gen_ids"] for job in first] == [[0, 2], [7]]
+    assert [job["gen_ids"] for job in second] == [[1]]
+    assert spawner.calls[0].argv[-1] == str(tmp_path / "jobs" / "jobs_w0.json")
+
+
+def test_fan_out_roster_carries_a_payload_through_and_drops_the_item_fields(
+    tmp_path: Path,
+) -> None:
+    """What an intervention means is the worker's business; where the work is, is not."""
+    _fan_out(tmp_path, _Spawner())
+    jobs = json.loads((tmp_path / "jobs" / "jobs_w0.json").read_text())
+    assert jobs[0]["inject_key"] == "V3", "the payload rides through untouched"
+    assert jobs[0]["gen_ids"] == [0, 2], "the worker gets its own slice, not the cell's"
+    assert "inject_key" not in jobs[1], "a cell that named no write carries none"
+
+
+def test_fan_out_roster_dry_run_partitions_without_spawning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    spawner = _Spawner()
+    _fan_out(tmp_path, spawner, dry_run=True)
+    assert not spawner.calls
+    assert not (tmp_path / "jobs").exists(), "a dry run writes no job files either"
+    printed = capsys.readouterr().out
+    assert "worker 0 (0): 2 cells" in printed
+    assert "worker 1 (0): 1 cells" in printed
+
+
+def test_fan_out_roster_raises_when_a_worker_fails(tmp_path: Path) -> None:
+    """A launcher that returned zero here would report a complete pass over a gap."""
+    with pytest.raises(SystemExit, match="workers failed"):
+        _fan_out(tmp_path, _Spawner(returncodes={1: 9}))
+
+
+def test_fan_out_roster_inherits_a_shortfall_status(tmp_path: Path) -> None:
+    from anamnesis.shortfall import EXIT_SHORT
+
+    with pytest.raises(SystemExit) as raised:
+        _fan_out(tmp_path, _Spawner(returncodes={0: EXIT_SHORT, 1: EXIT_SHORT}))
+    assert raised.value.code == EXIT_SHORT
+
+
+def test_fan_out_roster_defaults_to_the_real_subprocess_constructor() -> None:
+    """The fake above is a test's substitution, not the production path."""
+    assert fan_out_roster.__kwdefaults__["popen"] is subprocess.Popen
