@@ -23,25 +23,12 @@ Agreement with the anchor is a property of the machine, measured by
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import pickle
 from pathlib import Path
 import time
 
-import numpy as np
-from numpy.typing import NDArray
-
-F32 = NDArray[np.float32]
-
-
-def file_sha(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(8 * 1024**2), b""):
-            digest.update(block)
-    return digest.hexdigest()
+from anamnesis.provenance import digest_of_shas, file_sha
 
 
 def parser() -> argparse.ArgumentParser:
@@ -63,32 +50,6 @@ def parser() -> argparse.ArgumentParser:
         help="Source generation metadata; defaults to metadata.json beside manifest when present",
     )
     return p
-
-
-def load_calibration(
-    calib_dir: Path, enable_tier3: bool
-) -> tuple[F32 | None, F32 | None, F32 | None]:
-    """Read positional means and, when residual PCA is on, the PCA model.
-
-    Both artifacts are optional on disk and the absence of either is returned as
-    ``None``, so a caller that requires them says so itself rather than being
-    handed silently uncorrected features.
-    """
-    positional_means = pca_components = pca_mean = None
-    pm_path = calib_dir / "positional_means.npz"
-    if pm_path.exists():
-        positional_means = np.load(pm_path)["positional_means"].astype(np.float32)
-    pca_path = calib_dir / "pca_model.pkl"
-    if enable_tier3 and pca_path.exists():
-        with open(pca_path, "rb") as f:
-            pca = pickle.load(f)
-        if isinstance(pca, dict):
-            pca_components = np.asarray(pca["components"], dtype=np.float32)
-            pca_mean = np.asarray(pca["mean"], dtype=np.float32)
-        else:
-            pca_components = np.asarray(pca.components_, dtype=np.float32)
-            pca_mean = np.asarray(pca.mean_, dtype=np.float32)
-    return positional_means, pca_components, pca_mean
 
 
 def read_generation_metadata(path: Path | None) -> dict[int, dict]:
@@ -117,6 +78,7 @@ def main():
         )
     import torch
     from anamnesis.config import MODEL_PRESETS, ModelConfig
+    from anamnesis.extraction.calibration import load_calibration
     from anamnesis.extraction.model_loader import load_model
     from anamnesis.extraction.replay_config import native_replay_configs
     from anamnesis.extraction.fast.schema import resolve_gpu_schema
@@ -150,9 +112,7 @@ def main():
             "local safetensors checkpoint required for explicit provenance"
         )
     model_files = {p.name: file_sha(p) for p in [model_root / "config.json", *weights]}
-    calibration_sha = hashlib.sha256(
-        json.dumps(files, sort_keys=True).encode()
-    ).hexdigest()
+    calibration_sha = digest_of_shas(files)
     pm, components, mean = load_calibration(args.calib_dir, True)
     if any(value is None for value in (pm, components, mean)):
         raise ValueError("complete positional/PCA calibration required")
