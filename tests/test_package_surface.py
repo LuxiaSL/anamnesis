@@ -7,8 +7,16 @@ Two properties are load-bearing beyond tidiness:
 * Configuration imports without torch. The numeric anchor, the analysis layer and
   every test describe runs on machines with no accelerator and no weights, which
   only holds while the description of a run is free of the framework that
-  executes it. The development environment installs no torch, so the suite that
-  proves this is the suite as run.
+  executes it.
+
+Torch is a hard dependency of the instrument, because the capture layer is a model
+runtime and guarding its imports would be a redesign rather than a metadata
+choice. That makes the import-graph claims here and in
+`tests/test_extraction_purity.py` load-bearing rather than incidental: torch is
+installed and importable in this environment, so a probe finding it absent from
+`sys.modules` found a real property of the graph, not an empty shelf. The check
+that torch is installed is therefore part of the pair — without it, every claim
+below about what an import does not pull in could pass for the wrong reason.
 """
 
 from __future__ import annotations
@@ -45,12 +53,22 @@ def test_configuration_imports_without_torch() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_torch_is_absent_from_the_environment_this_suite_runs_in() -> None:
+def test_torch_is_installed_so_the_import_free_claims_are_not_vacuous() -> None:
+    """The counterpart to the probe above: torch is here, and still not reached.
+
+    A probe that looks for torch in `sys.modules` passes trivially when torch
+    cannot be imported at all. The capture layer needs it, so it is installed,
+    and that is what makes "configuration imports without torch" a statement
+    about the import graph.
+    """
     result = run_probe(
         "import importlib.util, sys; "
-        "sys.exit(0 if importlib.util.find_spec('torch') is None else 3)"
+        "sys.exit(0 if importlib.util.find_spec('torch') is not None else 3)"
     )
-    assert result.returncode == 0, "torch is installed, so the import-free claim is untested here"
+    assert result.returncode == 0, (
+        "torch is not installed, so every claim here about what an import does not "
+        "pull in would pass for the wrong reason"
+    )
 
 
 def test_configuration_does_not_import_the_mode_prompts() -> None:

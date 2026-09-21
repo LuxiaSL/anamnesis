@@ -18,6 +18,23 @@ Three layers, kept apart on purpose:
 reason the families can run without a model: what a generation was is banked once
 and re-read as often as the feature set changes.
 
+The model-facing side is three more modules and a subpackage:
+
+* :mod:`anamnesis.extraction.model_loader` — the checkpoint on a device with hooks
+  on it. Keys, values and queries are captured pre-RoPE from the projection
+  modules rather than from the cache, because a post-RoPE key has its position
+  baked in and the geometric features would be reading position. It also hosts the
+  activation-write path and the optional-hook pattern a new architecture extends.
+* :mod:`anamnesis.extraction.streaming_generate` — the autoregressive loop, run so
+  that collecting states costs one transfer per step instead of one tensor object
+  per step per layer.
+* :mod:`anamnesis.extraction.generation_runner` — one pass end to end: prompt,
+  seed, generate, convert, extract, save, and the replay manifest that makes the
+  run reproducible.
+* :mod:`anamnesis.extraction.replay` — the determinism core. Teacher-forcing a
+  realized token sequence reproduces the states that produced it, which is what
+  makes a signature an object about a span of text rather than about a generation.
+
 This module imports none of them. A submodule is addressed by name, which keeps
 importing the package free of the heaviest dependency any one member happens to
 need, and keeps the anchor's purity a property a test can assert.
