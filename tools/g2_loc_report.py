@@ -68,6 +68,23 @@ class ConsolidationResult:
         return None if self.actual_loc is None else self.donor_total - self.actual_loc
 
 
+@dataclass(frozen=True)
+class ParityRow:
+    """One ported file's LOC beside its donor's — the drift detector for
+    PORT-as-is items, which G2's consolidation arithmetic does not cover."""
+
+    new_path: str
+    old_path: str
+    new_loc: int | None
+    old_loc: int | None
+
+    @property
+    def delta(self) -> int | None:
+        if self.new_loc is None or self.old_loc is None:
+            return None
+        return self.new_loc - self.old_loc
+
+
 @dataclass
 class LocReport:
     """The result of a G2 pass, serialisable as the receipt."""
@@ -82,6 +99,7 @@ class LocReport:
     total_python_loc: int = 0
     total_python_loc_before: int | None = None
     total_loc_method: str = ""
+    parity: list[ParityRow] = field(default_factory=list)
 
     @property
     def tests_pass(self) -> bool:
@@ -122,6 +140,16 @@ class LocReport:
             "total_python_loc": self.total_python_loc,
             "total_python_loc_before": self.total_python_loc_before,
             "total_loc_method": self.total_loc_method,
+            "parity": [
+                {
+                    "new_path": row.new_path,
+                    "old_path": row.old_path,
+                    "new_loc": row.new_loc,
+                    "old_loc": row.old_loc,
+                    "delta": row.delta,
+                }
+                for row in self.parity
+            ],
             "passed": self.passed,
         }
 
@@ -203,6 +231,49 @@ def load_baseline(path: Path) -> dict[str, object]:
     if not isinstance(tests["floor_loc"], int) or tests["floor_loc"] < 0:
         raise BaselineError(f"{path}: tests.floor_loc must be a non-negative integer")
     return payload
+
+
+def load_parity(path: Path) -> tuple[Path, dict[str, str]]:
+    """Read a parity map: `{"old_root": <path>, "pairs": {new: old}}`.
+
+    The pairs mirror PORT-MAP.md rows — a ported file beside its donor's path
+    relative to `old_root` (a checkout of the frozen record)."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise BaselineError(f"parity map unreadable: {path} ({exc})") from exc
+    except json.JSONDecodeError as exc:
+        raise BaselineError(f"{path}: invalid JSON at line {exc.lineno} ({exc.msg})") from exc
+    if not isinstance(payload, dict) or "old_root" not in payload or "pairs" not in payload:
+        raise BaselineError(f"{path}: parity map needs 'old_root' and 'pairs'")
+    pairs = payload["pairs"]
+    if not isinstance(pairs, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in pairs.items()
+    ):
+        raise BaselineError(f"{path}: 'pairs' must map new path -> old path (strings)")
+    old_root = Path(str(payload["old_root"]))
+    if not old_root.is_dir():
+        raise BaselineError(f"{path}: old_root is not a directory: {old_root}")
+    return old_root, {str(k): str(v) for k, v in pairs.items()}
+
+
+def build_parity(repo: Path, old_root: Path, pairs: dict[str, str]) -> list[ParityRow]:
+    """LOC on both sides of every parity pair; a missing file reads as None
+    rather than failing the receipt, so pending ports stay visible."""
+    rows: list[ParityRow] = []
+    for new_rel in sorted(pairs):
+        old_rel = pairs[new_rel]
+        new_path = repo / new_rel
+        old_path = old_root / old_rel
+        rows.append(
+            ParityRow(
+                new_path=new_rel,
+                old_path=old_rel,
+                new_loc=count_lines(new_path) if new_path.is_file() else None,
+                old_loc=count_lines(old_path) if old_path.is_file() else None,
+            )
+        )
+    return rows
 
 
 def build_report(repo: Path, baseline_path: Path = DEFAULT_BASELINE) -> LocReport:
@@ -290,6 +361,14 @@ def print_report(report: LocReport, stream: TextIO | None = None) -> None:
     line(f"    status: {'pass' if report.tests_pass else 'fail'}")
     before = "unrecorded" if report.total_python_loc_before is None else str(report.total_python_loc_before)
     line(f"  total Python LOC: {report.total_python_loc} via {report.total_loc_method} (before: {before})")
+    if report.parity:
+        grew = sum(1 for row in report.parity if row.delta is not None and row.delta > 0)
+        line(f"  port parity (informational): {len(report.parity)} pairs, {grew} grew")
+        for row in report.parity:
+            new_loc = "absent" if row.new_loc is None else str(row.new_loc)
+            old_loc = "absent" if row.old_loc is None else str(row.old_loc)
+            delta = "" if row.delta is None else f"  ({row.delta:+d}{'  GREW' if row.delta > 0 else ''})"
+            line(f"    {row.new_path}: {new_loc} vs {row.old_path}: {old_loc}{delta}")
     line(f"  verdict: {'PASS' if report.passed else 'FAIL'}")
 
 
@@ -301,10 +380,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path, default=Path("."), help="repository root to measure")
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE, help="donor table (JSON)")
     parser.add_argument("--json", type=Path, default=None, help="write the receipt here")
+    parser.add_argument(
+        "--parity",
+        type=Path,
+        default=None,
+        help="parity map JSON ({old_root, pairs}); adds the informational ported-vs-donor LOC table",
+    )
     args = parser.parse_args(argv)
 
     try:
         report = build_report(repo=args.repo, baseline_path=args.baseline)
+        if args.parity is not None:
+            old_root, pairs = load_parity(args.parity)
+            report.parity = build_parity(args.repo.resolve(), old_root, pairs)
     except BaselineError as exc:
         print(f"g2_loc_report: {exc}", file=sys.stderr)
         return 2

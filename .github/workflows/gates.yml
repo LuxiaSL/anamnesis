@@ -33,7 +33,7 @@ jobs:
           mkdir -p receipts
           if [ -d anamnesis ]; then
             roots=""
-            for candidate in anamnesis/scripts tests; do
+            for candidate in anamnesis/scripts scripts tests; do
               if [ -d "$candidate" ]; then roots="$roots $candidate"; fi
             done
             python tools/check_import_closure.py --package anamnesis --roots $roots --json receipts/g4.json
@@ -41,6 +41,17 @@ jobs:
             echo "::notice title=G4::the package directory 'anamnesis' is absent, so the closure runs over 'tools'; the gate tooling lands before the package it gates"
             python tools/check_import_closure.py --package tools --roots tests --json receipts/g4.json
           fi
+
+      - name: Surface report (informational)
+        run: |
+          mkdir -p receipts
+          roots="--root tools --root tests"
+          if [ -d anamnesis ]; then roots="--root anamnesis $roots"; fi
+          if [ -d scripts ]; then roots="$roots --root scripts"; fi
+          if [ -d docs ]; then roots="$roots --root docs"; fi
+          python tools/surface_report.py $roots \
+            --baseline tools/surface_baseline_pl_4acedbf.json \
+            --json receipts/surface.json
 
       # G1 and G2 read banked artifacts and a tree with the consolidations in it.
       # A runner has neither, so they are invoked per PR and their receipts attached.
