@@ -40,14 +40,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from anamnesis.config import MODEL_PRESETS, ModelConfig
+from anamnesis.config import MODEL_PRESETS
 from anamnesis.extraction.equivalence.fidelity import (
     FidelityError,
     ReplayBatch,
@@ -59,9 +58,7 @@ from anamnesis.extraction.equivalence.path_floor import (
     first_incremental_coordinates,
     first_position_coordinates,
 )
-from anamnesis.extraction.replay_config import native_replay_configs
-from anamnesis.extraction.calibration import CALIBRATION_ARTIFACT_NAMES, load_calibration
-from anamnesis.provenance import digest_of_shas, file_sha
+from anamnesis.extraction.fast.runtime import require_lane_arithmetic, resolve_fast_lane
 
 ANCHOR_LANE = "numpy-anchor"
 
@@ -98,87 +95,56 @@ def _digest(*arrays: np.ndarray) -> str:
     return running.hexdigest()
 
 
-def qualify(args: argparse.Namespace) -> dict[str, Any]:
-    """Run the three legs and return the receipt. Requires a model on `--device`.
+def select_rows(args: argparse.Namespace) -> tuple[dict[str, Any], list[int]]:
+    """The manifest, and the generations to qualify over.
 
-    The arithmetic settings are pinned to the ones `run_gpu_replay.py` runs under.
-    They are part of the lane identity, so a verdict reached under different
-    settings would be a verdict about a lane the user is not going to use.
+    Two distinct rows is the floor, because every verdict here is a paired one: a
+    row's agreement is read against the anchor distance to *another* row, and a
+    single row has nothing to be scaled against.
+
+    Raises
+    ------
+    ValueError
+        When fewer than two distinct generations are named, or one of them is not
+        in the manifest.
     """
-    import torch
-
-    from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
-    from anamnesis.extraction.fast.features import GpuFeatureLane
-    from anamnesis.extraction.fast.schema import resolve_gpu_schema
-    from anamnesis.extraction.model_loader import load_model
-    from anamnesis.extraction.replay.extract import replay_extract
-
-    if os.environ.get("CUBLAS_WORKSPACE_CONFIG") != ":16:8":
-        raise ValueError(
-            "set CUBLAS_WORKSPACE_CONFIG=:16:8 before Python startup; it is part of "
-            "the lane identity, so a verdict without it is about a different lane"
-        )
-    torch.use_deterministic_algorithms(True)
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.allow_tf32 = False
-    preset = MODEL_PRESETS[args.model]
-    extraction, families = native_replay_configs(preset)
     entries = json.loads(args.manifest.read_text())["entries"]
     ids = args.gen_ids if args.gen_ids else sorted(int(k) for k in entries)[:2]
     if len(ids) < 2 or len(set(ids)) != len(ids):
         raise ValueError("two or more distinct generations are required to pair rows")
     if any(str(i) not in entries for i in ids):
         raise ValueError("unknown generation selection")
-    positional_means, components, pca_mean = load_calibration(args.calib_dir, True)
-    if any(v is None for v in (positional_means, components, pca_mean)):
-        raise ValueError("complete positional/PCA calibration required")
-    calibration_sha256 = digest_of_shas(
-        {
-            name: file_sha(args.calib_dir / name)
-            for name in CALIBRATION_ARTIFACT_NAMES
-        }
-    )
+    return entries, list(ids)
 
-    spans = []
-    for i in ids:
-        row = entries[str(i)]
-        start, end = int(row["prompt_length"]), len(row["input_ids"])
-        if not 0 < start < end - 1 or end - 2 >= positional_means.shape[1]:
-            raise ValueError(f"generation {i} outside supported span/calibration")
-        spans.append((i, list(row["input_ids"]), start, end))
-    schemas = {
-        i: resolve_gpu_schema(
-            preset.num_layers, end - start - 1, extraction, families, components
-        )
-        for i, _, start, end in spans
-    }
-    names = {s.feature_names for s in schemas.values()}
-    if len(names) != 1:
-        raise ValueError("selected spans have different feature schemas; do not mix")
-    feature_names = names.pop()
 
-    loaded = load_model(
-        ModelConfig.from_preset(
-            preset, model_id=args.model_path, device_map=args.device
-        ),
-        sampled_layers=preset.sampled_layers,
-        register_gate_hooks=True,
-        key_layers=list(range(preset.num_layers)),
-        value_layers=list(range(preset.num_layers)),
-        query_layers=list(range(preset.num_layers)),
-        attn_output_layers=list(range(preset.num_layers)),
-    )
-    lane = GpuFeatureLane(
-        extraction,
-        families,
-        list(feature_names),
-        positional_means,
-        components,
-        pca_mean,
+def qualify(args: argparse.Namespace) -> dict[str, Any]:
+    """Run the three legs and return the receipt. Requires a model on `--device`.
+
+    The lane is built by :func:`anamnesis.extraction.fast.runtime.resolve_fast_lane`,
+    which is the same resolution `run_gpu_replay.py` banks through — including the
+    pinned arithmetic, which is part of the lane identity, so a verdict reached
+    under other settings would be about a lane nobody is going to run. The
+    arithmetic is required here first so that a machine missing it is refused before
+    a manifest is even opened.
+    """
+    from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
+    from anamnesis.extraction.replay.extract import replay_extract
+
+    require_lane_arithmetic()
+    entries, ids = select_rows(args)
+    runtime = resolve_fast_lane(
+        preset=MODEL_PRESETS[args.model],
+        model_path=args.model_path,
+        calib_dir=args.calib_dir,
+        entries=entries,
+        gen_ids=ids,
         device=args.device,
-        calibration_sha256=calibration_sha256,
-        replay_path="full",
     )
+    extraction = runtime.extraction
+    positional_means = runtime.positional_means
+    feature_names = runtime.feature_names
+    calibration_sha256 = runtime.calibration_sha256
+    loaded, lane = runtime.loaded, runtime.lane
 
     keys: list[tuple[str, str, str, int, str]] = []
     anchor: list[np.ndarray] = []
@@ -188,11 +154,12 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
     bounds: dict[tuple[str, str, str, int, str], float] = {}
     proofs: dict[tuple[str, str, str, int, str], str] = {}
     prefixes: dict[tuple[str, str, str, int, str], int] = {}
-    for i, tokens, start, end in spans:
+    for span in runtime.spans:
+        i, tokens, start, end = span.gen_id, span.input_ids, span.prompt_length, span.end
         key = ("qualify", str(i), "full", 0, f"{start}:{end}")
         raw = replay_extract(loaded, tokens, start, positional_means)
         reference = compute_features_v2_from_data(
-            raw, extraction, families, components, pca_mean
+            raw, extraction, runtime.families, runtime.pca_components, runtime.pca_mean
         )
         if tuple(reference.feature_names) != feature_names:
             raise ValueError(f"generation {i}: anchor schema differs from the lane's")
