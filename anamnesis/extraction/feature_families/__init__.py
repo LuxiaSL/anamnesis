@@ -28,6 +28,23 @@ pattern, documented in attn_res.py: the substrate is an optional field on
 RawGenerationData, the orchestrator gates on that field's presence rather than on
 a model's name, and a family with nothing to read is absent from the vector
 rather than zero-filled.
+
+CONTRAST-TIME FAMILIES, registered nowhere:
+    binding_probe    — Span-resolved per-head attention, and the reference
+                       example of a CONTRAST-TIME family
+
+A contrast-time family takes a second argument that no suite version can supply:
+binding_probe needs a table of labelled prompt spans, which is a property of the
+stimulus rather than of the model or the run. Its output is meaningful only
+relative to that table, and only as a difference between two conditions built
+from it, so it is absent from FeaturePipelineConfig by construction — a registry
+entry would promise a vector that a run over unlabelled prompts cannot produce.
+Experiment drivers import it and call it directly with their own spans; nothing
+here changes the dimensionality of any suite version. Both properties the family
+contract does require hold: the emitted names are a declared function of the
+call's arguments, and a generation with nothing to read yields an aligned zero
+vector rather than a short one, so two conditions' vectors subtract coordinate
+for coordinate.
 """
 
 from __future__ import annotations
