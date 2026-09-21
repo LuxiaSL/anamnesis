@@ -129,6 +129,13 @@ def main():
         schema_source_sha256=file_sha(
             Path(__file__).parents[1] / "extraction/fast/schema.py"
         ),
+        # The lane's runtime — its determinism pins, span resolution, calibration load
+        # and model construction — decides what the numbers below were produced by, so
+        # the receipt covers it alongside the schema it resolves against. Without this
+        # digest the stamp attests to a configuration it does not describe.
+        lane_runtime_source_sha256=file_sha(
+            Path(__file__).parents[1] / "extraction/fast/runtime.py"
+        ),
         model_config=loaded.model.config.to_dict(),
         selected_ids=ids,
         source_metadata_sha256=file_sha(source_path)
