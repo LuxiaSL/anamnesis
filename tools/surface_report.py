@@ -15,8 +15,8 @@ consolidation and deletion, doc words by writing tighter documentation. A
 single total would let one hide the other.
 
 The report is informational and always exits 0 on a successful measurement;
-it is a trend instrument, not a gate. ``--baseline`` prints deltas against a
-previously written ``--json`` file so a receipt shows the direction of travel.
+it is a trend instrument, not a gate. ``--baseline`` prints deltas against an
+earlier ``--json`` file so a receipt shows the direction of travel.
 """
 
 from __future__ import annotations
