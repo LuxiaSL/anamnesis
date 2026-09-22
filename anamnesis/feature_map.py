@@ -13,7 +13,7 @@ This module tags every signature feature on four axes:
 
   SOURCE   = which substrate is read (`Source`).
   METHOD   = the base operator: magnitude / distributional / geometry / spectral /
-             iterated_integral / learned (`Method`).
+             iterated_integral (`Method`).
   DYNAMIC  = the temporal wrapper: static (a *_mean / snapshot) vs dynamic (*_std / slope /
              trajectory / window / drift / novelty).
   DEPTH    = layer, and the band it falls in — a band is a fraction of the network, so the
@@ -108,9 +108,6 @@ class Method(str, Enum):
     distributional = "distributional"  # entropy, JSD/agreement, top-k mass, coverage, mass fractions, sparsity
     geometry = "geometry"              # cosine / spread / drift / novelty / participation-ratio / PCA projection
     spectral = "spectral"              # graph-spectral (Fiedler, HFER, spectral entropy, smoothness)
-    learned = "learned"                # contrastive-projection / encoder dimensions. No naming rule
-                                       # returns it: `cp_` names carry no operator mark, so the
-                                       # classifier leaves them for `unclassified()` to report.
     iterated_integral = "iterated_integral"  # log-signature of a time-augmented trajectory: level-1
                                        # displacement, level-2 Levy areas. The other methods each read
                                        # one series alone; this reads two coordinates' joint order.

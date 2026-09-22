@@ -96,7 +96,7 @@ def test_dsv2_full_v2_pipeline_runs_clean() -> None:
     # feature_map places everything (incl every xrt name) — the acceptance check
     fmap = FeatureMap(res.feature_names, 27)
     assert len(fmap.unclassified()) == 0
-    # all four non-learned METHOD rungs are now present on the routing source (v2.1 completeness)
+    # every METHOD rung the router branch can assign shows up on a real MoE run
     xrt_methods = {t.method for t in fmap.tags if t.source == Source.expert_routing}
     for m in (Method.geometry, Method.magnitude, Method.spectral, Method.distributional):
         assert m in xrt_methods, f"xrt missing method {m}: has {xrt_methods}"
