@@ -143,7 +143,6 @@ def _run_semantic(ctx: dict[str, Any]) -> Any:
         "run_semantic",
         ctx["data"],
         signature_dir=ctx["signature_dir"],
-        addon_dirs=ctx["addon_dirs"],
     )
 
 
@@ -324,7 +323,6 @@ def run_full_analysis(
     core_only: bool = True,
     skip_sections: set[int] | None = None,
     resume: bool = False,
-    addon_dirs: list[Path | str] | None = None,
     mode_filter: list[str] | None = None,
 ) -> AnalysisResults:
     """Run the complete analysis gauntlet.
@@ -343,8 +341,6 @@ def run_full_analysis(
         Section numbers to skip (1-11).
     resume : bool
         If True, load existing checkpoint and skip completed sections.
-    addon_dirs : list[Path], optional
-        Additional directories with feature arrays to merge.
     mode_filter : list[str], optional
         If provided, only include samples whose mode is in this list.
 
@@ -405,7 +401,6 @@ def run_full_analysis(
         run_name=run_name,
         core_only=core_only,
         load_text=load_text,
-        addon_dirs=addon_dirs,
         mode_filter=mode_filter,
     )
     results["n_samples"] = data.n_samples
@@ -421,7 +416,6 @@ def run_full_analysis(
         "data": data,
         "results": results,
         "signature_dir": signature_dir,
-        "addon_dirs": addon_dirs,
     }
 
     for spec in SECTIONS:

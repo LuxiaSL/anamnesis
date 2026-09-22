@@ -21,12 +21,12 @@ from anamnesis.config.runs import (
     run_names,
 )
 
-EXPECTED_RUNS: dict[str, tuple[str, str, int]] = {
-    "8b_baseline": ("outputs", "runs/run_8b_baseline/signatures", 0),
-    "3b_run4": ("legacy", "outputs/runs/run4_format_controlled/signatures", 0),
-    "8b_v2": ("outputs", "runs/8b_fat_01/signatures_v2", 2),
-    "3b_v2": ("outputs", "runs/3b_fat_01/signatures_v2", 1),
-    "synthetic_demo": ("outputs", "runs/synthetic_demo/signatures", 0),
+EXPECTED_RUNS: dict[str, tuple[str, str]] = {
+    "8b_baseline": ("outputs", "runs/run_8b_baseline/signatures"),
+    "3b_run4": ("legacy", "outputs/runs/run4_format_controlled/signatures"),
+    "8b_v2": ("outputs", "runs/8b_fat_01/signatures_v2"),
+    "3b_v2": ("outputs", "runs/3b_fat_01/signatures_v2"),
+    "synthetic_demo": ("outputs", "runs/synthetic_demo/signatures"),
 }
 
 
@@ -46,11 +46,10 @@ def test_registry_holds_the_named_runs() -> None:
     runs = load_runs()
     assert set(runs) == set(EXPECTED_RUNS)
     assert run_names() == tuple(runs)
-    for name, (root, signature_dir, addons) in EXPECTED_RUNS.items():
+    for name, (root, signature_dir) in EXPECTED_RUNS.items():
         spec = runs[name]
         assert spec.root == root
         assert spec.signature_dir == signature_dir
-        assert len(spec.addon_dirs) == addons
         assert spec.description
 
 
@@ -58,10 +57,6 @@ def test_a_run_resolves_under_the_outputs_root(data_roots: Path) -> None:
     resolved = resolve_run("8b_v2")
     outputs = data_roots / "outputs"
     assert resolved.signature_dir == outputs / "runs" / "8b_fat_01" / "signatures_v2"
-    assert resolved.addon_dirs == (
-        outputs / "runs" / "8b_fat_01" / "signatures_v2_addon",
-        outputs / "runs" / "8b_fat_01" / "signatures_v2_contrastive",
-    )
 
 
 def test_the_legacy_run_resolves_through_the_hatch(data_roots: Path) -> None:
@@ -80,9 +75,9 @@ def test_resolution_follows_a_moved_root(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert first.relative_to(tmp_path / "first") == second.relative_to(tmp_path / "second")
 
 
-def test_missing_dirs_reports_signatures_first(data_roots: Path) -> None:
+def test_missing_dirs_names_the_directory_it_could_not_find(data_roots: Path) -> None:
     resolved = resolve_run("8b_v2")
-    assert resolved.missing_dirs() == (resolved.signature_dir, *resolved.addon_dirs)
+    assert resolved.missing_dirs() == (resolved.signature_dir,)
     for directory in resolved.missing_dirs():
         directory.mkdir(parents=True)
     assert resolve_run("8b_v2").missing_dirs() == ()
@@ -158,7 +153,6 @@ def test_a_custom_registry_loads_from_an_explicit_path(
                         "name": "probe",
                         "root": "outputs",
                         "signature_dir": "runs/probe/signatures",
-                        "addon_dirs": ["runs/probe/signatures_addon"],
                         "description": "A run declared outside the shipped registry.",
                     }
                 }
@@ -169,7 +163,6 @@ def test_a_custom_registry_loads_from_an_explicit_path(
     assert run_names(path) == ("probe",)
     resolved = get_run("probe", path).resolve()
     assert resolved.signature_dir == data_roots / "outputs" / "runs" / "probe" / "signatures"
-    assert len(resolved.addon_dirs) == 1
 
 
 def test_a_row_cannot_address_outside_its_root() -> None:

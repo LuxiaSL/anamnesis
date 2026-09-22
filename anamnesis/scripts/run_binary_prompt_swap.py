@@ -63,7 +63,6 @@ def main(argv: list[str] | None = None) -> int:
             results[name] = run_binary_prompt_swap(
                 run_name=name,
                 signature_dir=resolved.signature_dir,
-                addon_dirs=list(resolved.addon_dirs) or None,
             )
         except (ValueError, FileNotFoundError) as exc:
             logger.error(f"{name}: not tested ({exc})")

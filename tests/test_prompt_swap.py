@@ -91,7 +91,7 @@ def write_generation(
     )
 
 
-def write_bank(root: Path, *, swap_carries: str, addon_root: Path | None = None) -> Path:
+def write_bank(root: Path, *, swap_carries: str) -> Path:
     """Two pure modes plus a swap set whose feature value is chosen by the caller.
 
     ``swap_carries`` is ``"execution"`` or ``"system"``: the swap generations are given the
@@ -117,8 +117,6 @@ def write_bank(root: Path, *, swap_carries: str, addon_root: Path | None = None)
             sig_dir, gid, mode="swap_socratic→linear", topic=topic, vector=vector
         )
         gid += 1
-    if addon_root is not None:
-        addon_root.mkdir(parents=True)
     return sig_dir
 
 

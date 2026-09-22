@@ -67,7 +67,6 @@ def main(argv: list[str] | None = None) -> int:
         data = load_run4(
             signature_dir=resolved.signature_dir,
             core_only=True,
-            addon_dirs=list(resolved.addon_dirs) or None,
             mode_filter=mode_filter,
         )
         logger.info(f"  {data.n_samples} samples over {len(data.unique_modes)} modes")

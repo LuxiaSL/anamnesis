@@ -103,14 +103,6 @@ def test_loader_preserves_and_enforces_lane_identity(tmp_path):
         load_run4(tmp_path, core_only=False)
 
 
-def test_loader_refuses_untagged_addon_on_gpu_lane(tmp_path):
-    base, addon = tmp_path / "base", tmp_path / "addon"
-    write_row(base, 0, "gpu")
-    write_row(addon, 0, feature_key="features_tier2")
-    with pytest.raises(MixedLaneError):
-        load_run4(base, core_only=False, addon_dirs=[addon])
-
-
 def test_loader_legacy_behavior_remains_available(tmp_path):
     write_row(tmp_path, 0)
     assert load_run4(tmp_path, core_only=False).lane_id is None

@@ -1,14 +1,13 @@
 """The registry of named extraction runs, and how a name becomes a directory.
 
 Analysis is addressed by run name: a caller asks for ``8b_v2`` and gets the
-signature directory plus any addon directories holding families that were split
-out of the main vector. The registry itself is data — :data:`RUNS_FILE`, a JSON
-file beside this module — because adding a run is adding a row, and a row is not
-a code change.
+signature directory it reads. The registry itself is data — :data:`RUNS_FILE`, a
+JSON file beside this module — because adding a run is adding a row, and a row is
+not a code change.
 
 Resolution has two halves, kept apart on purpose. A :class:`RunSpec` is what the
-file holds: a root token and paths relative to it. A :class:`ResolvedRun` is that
-spec against this machine, with absolute directories. So one registry serves a
+file holds: a root token and a path relative to it. A :class:`ResolvedRun` is that
+spec against this machine, with an absolute directory. So one registry serves a
 tree read from the live outputs root and a tree read from the Phase-0 root
 through ``ANAMNESIS_LEGACY_DATA``, and neither entry records anybody's absolute
 layout.
@@ -43,45 +42,33 @@ class RunSpec(BaseModel):
     name: str = Field(description="Registry key for this run")
     root: DataRoot = Field(description="Which data root the paths below hang from")
     signature_dir: str = Field(description="Signature directory, relative to the root")
-    addon_dirs: tuple[str, ...] = Field(
-        default=(),
-        description="Directories holding feature families split out of the main vector",
-    )
     description: str = Field(default="", description="What this run is")
 
     def resolve(self) -> ResolvedRun:
-        """This row as directories on this machine."""
+        """This row as a directory on this machine."""
         return ResolvedRun(
             name=self.name,
             signature_dir=resolve_data_path(self.root, self.signature_dir),
-            addon_dirs=tuple(resolve_data_path(self.root, path) for path in self.addon_dirs),
             description=self.description,
         )
 
 
 class ResolvedRun(BaseModel):
-    """A registry row against this machine: absolute directories, ready to read."""
+    """A registry row against this machine: an absolute directory, ready to read."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str = Field(description="Registry key for this run")
     signature_dir: Path = Field(description="Directory holding one signature file per generation")
-    addon_dirs: tuple[Path, ...] = Field(
-        default=(), description="Directories holding split-out feature families"
-    )
     description: str = Field(default="", description="What this run is")
 
     def missing_dirs(self) -> tuple[Path, ...]:
-        """Every directory of this run that is absent, signatures first.
+        """Every directory of this run that is absent.
 
-        A caller reporting an unreadable run wants the whole list at once, and an
-        addon directory that has not been fetched is the common case.
+        A caller reporting an unreadable run names directories rather than a
+        boolean, so the message says which one it could not find.
         """
-        return tuple(
-            directory
-            for directory in (self.signature_dir, *self.addon_dirs)
-            if not directory.is_dir()
-        )
+        return tuple(d for d in (self.signature_dir,) if not d.is_dir())
 
 
 class _RunsFile(BaseModel):
