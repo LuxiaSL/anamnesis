@@ -95,7 +95,7 @@ class RawGenerationData:
     # source 0 = anchor (earliest committed/block-0), source -1 = `partial` (recency). n_src grows with depth.
     attn_res_committed: list | None = None
     # list of block-boundary committed snapshots, each [n_pos, hidden_dim].
-    # ── MoE expert routing (vmb arm A7, M6 DeepSeek-V2-Lite class) — optional, MoE-layers only ──
+    # ── MoE expert routing (DeepSeek-V2-Lite class) — optional, MoE-layers only ──
     # Dense models (Llama/Qwen/OLMo/Gemma) leave these None; the xrt family returns empty when absent
     # (the gate_features None-guard pattern). Populated by the MoE capture hooks in
     # `anamnesis/extraction/model_loader.py`, which document which module each hook attaches to.
@@ -110,9 +110,9 @@ class RawGenerationData:
     router_branch_norms: dict[int, list[F32]] | None = None
     # layer_idx → T × [2 or 3] = (‖shared-expert branch output‖, ‖routed-expert sum output‖[, cos]) per
     # token, from forward hooks on mlp.shared_experts and mlp.experts outputs. Feeds xrt_shared_mass; the
-    # optional 3rd column (v2.1) = per-token cos(shared_vec, routed_vec) → xrt_shared_routed_cos. MoE only.
+    # optional 3rd column = per-token cos(shared_vec, routed_vec) → xrt_shared_routed_cos. MoE only.
     router_logit_norms: dict[int, list[F32]] | None = None
-    # layer_idx → T × scalar ‖router_logits‖ (pre-softmax). Feeds xrt_logit_norm (v2.1 magnitude). MoE only.
+    # layer_idx → T × scalar ‖router_logits‖ (pre-softmax). Feeds xrt_logit_norm. MoE only.
     _hs_array_cache: F32 | None = field(default=None, repr=False, compare=False)
     # lazily-built np.stack(hidden_states); do not set directly — use hidden_states_array()
     _mean_attn_cache: dict[int, list[NDArray[np.float64]]] = field(
@@ -122,7 +122,7 @@ class RawGenerationData:
     def mean_attention(self, l_idx: int) -> list[NDArray[np.float64]]:
         """Per-step head-mean attention rows for one layer: T entries of
         float64 [seq_len_t] — exactly attentions[t][l_idx].mean(axis=0)
-        .astype(np.float64), built once per (gen, layer) and shared (C2: the
+        .astype(np.float64), built once per (gen, layer) and shared (the
         cache-read profiles, attention decay, spectral similarity, and
         attention_flow all re-derived this same reduction). Callers must not
         mutate the returned arrays."""
@@ -229,7 +229,7 @@ def _compute_logit_features(
     chosen_ids = chosen_token_ids.astype(np.intp)
 
     # Surface (don't silently mask) chosen ids outside the vocab — these indicate
-    # an alignment bug; we still fall back to token 0 per-row below (v3/C8).
+    # an alignment bug; we still fall back to token 0 per-row below.
     if T > 0:
         n_oob = int(((chosen_ids[:T] < 0) | (chosen_ids[:T] >= vocab_size)).sum())
         if n_oob:
@@ -641,7 +641,7 @@ def _extract_spectral_features(
     # Approach: build an n×n pairwise attention similarity matrix
     # For each pair of sampled steps (i, j), compute similarity of their
     # head-averaged attention distributions
-    mean_rows = data.mean_attention(layer_idx)  # shared per-(gen,layer) cache (C2)
+    mean_rows = data.mean_attention(layer_idx)  # shared per-(gen,layer) cache
     attn_vectors = [mean_rows[t] for t in sampled_steps]  # [seq_len] f64 each
 
     # Pad to same length (max seq_len across sampled steps)
@@ -663,8 +663,8 @@ def _extract_spectral_features(
 
     # Unnormalized graph Laplacian L = D - A. (The symmetric normalized Laplacian
     # collapses this near-complete attention-similarity graph to a near-constant
-    # spectrum — verified WORSE for fiedler/spectral_entropy, v3/B2 — so keep L's
-    # discriminative spectrum and make the SUMMARIES scale-free instead.)
+    # spectrum, which costs fiedler/spectral_entropy their discrimination — so keep L's
+    # spectrum and make the SUMMARIES scale-free instead.)
     D = np.diag(A.sum(axis=1))
     L = D - A
     L += np.eye(n) * 1e-10  # numerical stability
@@ -675,7 +675,7 @@ def _extract_spectral_features(
     lam_max = float(eigenvalues[-1]) if n > 0 else 0.0
 
     # Fiedler normalized by the spectral radius → scale-free (the raw 2nd
-    # eigenvalue scales with graph size n ∝ T) (v3/B2).
+    # eigenvalue scales with graph size n ∝ T).
     fiedler = float(eigenvalues[1] / lam_max) if (n > 1 and lam_max > 1e-12) else 0.0
 
     # HFER: high-frequency energy ratio (a fraction, already scale-free).
@@ -687,7 +687,7 @@ def _extract_spectral_features(
 
     # Spectral entropy of the (sum-normalized, scale-free) eigenvalue
     # distribution, divided by log(n) so it doesn't grow with the node count
-    # (= sampled steps ∝ T) (v3/B2).
+    # (= sampled steps ∝ T).
     if total_energy > 1e-12 and n > 1:
         normalized_ev = eigenvalues / total_energy
         spec_entropy = float(scipy_entropy(normalized_ev + 1e-12) / np.log(n))
@@ -696,7 +696,7 @@ def _extract_spectral_features(
 
     # Smoothness: Rayleigh quotient on the symmetric NORMALIZED Laplacian (bounded
     # [0,2], so it doesn't scale with n) of a meaningful graph signal — the
-    # positionally-corrected hidden-state NORM per step (v3/C2). Old signal was
+    # positionally-corrected hidden-state NORM per step. Old signal was
     # hidden_state.mean() = scalar mean of a ~4096-dim RMSNorm residual ≈ noise.
     deg = A.sum(axis=1)
     d_inv_sqrt = 1.0 / np.sqrt(np.maximum(deg, 1e-12))
@@ -792,10 +792,10 @@ def extract_cache_and_keys(
         recency_biases = []
         sink_masses = []
         cache_coverages = []
-        prompt_masses = []   # v3/B1: accumulate raw masses for ratio-of-means lookback
+        prompt_masses = []   # accumulate raw masses for ratio-of-means lookback
         gen_masses = []
 
-        mean_rows = data.mean_attention(l_idx)  # shared per-(gen,layer) cache (C2)
+        mean_rows = data.mean_attention(l_idx)  # shared per-(gen,layer) cache
         for t in range(T):
             mean_attn = mean_rows[t]  # [seq_len] float64
             seq_len = mean_attn.shape[0]
@@ -810,7 +810,7 @@ def extract_cache_and_keys(
 
             # Sink mass: attention to position 0 (BOS / attention sink). On this
             # corpus the sink dominates (argmax==0 ~100%), so this equals the old
-            # "anchor_strength" = max(attention); named honestly now (v3/C1).
+            # "anchor_strength" = max(attention); named honestly now.
             sink_masses.append(float(mean_attn[0]))
 
             # Cache coverage: fraction of positions with > 1/N attention
@@ -818,8 +818,8 @@ def extract_cache_and_keys(
             cache_coverages.append(float((mean_attn > threshold).sum() / seq_len))
 
             # Lookback: prompt vs generated attention mass. Accumulate raw masses
-            # and aggregate as a ratio-of-means below (v3/B1) — the old
-            # mean-of-ratios blew up at early steps where gen_mass≈0.
+            # and aggregate as a ratio-of-means below: a mean-of-ratios blows up at early
+            # steps, where gen_mass is ~0.
             prompt_masses.append(float(mean_attn[:data.prompt_length].sum()))
             gen_masses.append(float(mean_attn[data.prompt_length:].sum()))
 
@@ -832,7 +832,7 @@ def extract_cache_and_keys(
             features.append(float(np.mean(arr)) if arr else 0.0)
             names.append(f"cache_{name}_L{l_idx}")
 
-        # Lookback ratio: ratio-of-means Σ(prompt_mass) / Σ(gen_mass) (v3/B1).
+        # Lookback ratio: ratio-of-means Σ(prompt_mass) / Σ(gen_mass).
         total_gen = float(np.sum(gen_masses)) if gen_masses else 0.0
         total_prompt = float(np.sum(prompt_masses)) if prompt_masses else 0.0
         features.append(total_prompt / max(total_gen, 1e-12))
@@ -901,9 +901,8 @@ def extract_cache_and_keys(
             s2_sum = s2.sum()
             eff_dim = float((s2_sum ** 2) / (s2 ** 2).sum()) if s2_sum > 1e-12 else 0.0
             # Bound as a fraction of the max possible rank so it doesn't grow
-            # toward head_dim with generation length (v3/B4). Residual length
-            # coupling (PR still rises with T) is left to analysis-side
-            # residualization; subsampling to fixed #keys is a later option.
+            # toward head_dim with generation length. The residual coupling that remains
+            # (PR still rises with T) is left to analysis-side residualization.
             eff_dim = eff_dim / max(min(km_f64.shape[0], km_f64.shape[1]), 1)
         except Exception:
             warnings.warn(
@@ -951,10 +950,9 @@ def extract_cache_and_keys(
             names.append(f"kv_key_novelty_traj{i}_L{l_idx}")
 
     # ── 2.5.3 KV Cache Epoch Detection ──
-    # (v3/C3: cross-layer key agreement removed — it compared k_proj outputs from
-    #  different layers, which live in unrelated learned bases, so the cosine is not
-    #  interpretable as "agreement". _extract_cross_layer_key_agreement is retained
-    #  below, unused, for a possible within-layer-CKA replacement later.)
+    # (No cross-layer key agreement here: it would compare k_proj outputs from different
+    #  layers, which live in unrelated learned bases, so the cosine is not interpretable as
+    #  "agreement". _extract_cross_layer_key_agreement below computes it and nothing calls it.)
     epoch_feats = _extract_epoch_features(data, config)
     for name, val in epoch_feats:
         features.append(val)
@@ -972,7 +970,7 @@ def _fit_attention_decay(
 
     mean_rows: the shared per-(gen,layer) head-mean rows (RawGenerationData
     .mean_attention) — same values the old (attentions, layer_idx) signature
-    re-derived per call (C2)."""
+    re-derived per call."""
     if T < 10:
         return 0.0
 
@@ -988,7 +986,7 @@ def _fit_attention_decay(
             continue
         current_pos = prompt_length + t
         # Exclude position 0 (BOS / attention sink): it carries large mass at the
-        # MAX distance, which flattens/biases the exponential-decay fit (v3/C1).
+        # MAX distance, which flattens/biases the exponential-decay fit.
         distances = np.array([current_pos - i for i in range(1, seq_len)], dtype=np.float64)
         distances = np.maximum(distances, 1)
         all_distances.extend(distances.tolist())
@@ -1118,7 +1116,7 @@ def _extract_epoch_features(
 
         # Count transitions above threshold, as a RATE (fraction of window
         # boundaries that are transitions) so it doesn't grow with generation
-        # length (v3/B4).
+        # length.
         threshold = bs_mean + 1.5 * max(bs_std, 1e-6)
         n_trans = float((bs_arr > threshold).sum()) / len(bs_arr)
         all_n_transitions.append(n_trans)
@@ -1155,10 +1153,10 @@ def extract_residual_pca(
 
     Args:
         pca_components: PCA basis. Either a single [n_components, hidden_dim] array (pooled,
-            applied to every pca_layer — legacy) OR a dict {layer_idx: [n_components, hidden_dim]}
-            for the C5 per-layer corrected-PCA fix (each layer gets its own basis fit on
-            positionally-corrected calibration states).
-        pca_mean: matching mean — [hidden_dim] array (legacy) or {layer_idx: [hidden_dim]} (per-layer).
+            applied to every pca_layer) OR a dict {layer_idx: [n_components, hidden_dim]}
+            for per-layer corrected PCA, where each layer gets its own basis fit on
+            positionally-corrected calibration states.
+        pca_mean: matching mean — [hidden_dim] array (pooled) or {layer_idx: [hidden_dim]} (per-layer).
 
     Returns (feature_vector, feature_names), both of length
     ``len(config.pca_layers) * config.pca_temporal_samples * config.pca_components``

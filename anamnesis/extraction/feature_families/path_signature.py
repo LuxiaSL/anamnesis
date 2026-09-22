@@ -394,7 +394,7 @@ class ProjectionBasisBank(BaseModel):
 
     The banked 8B calibration PCA is a single global model
     (``outputs/calibration/llama31_8b/pca_model.pkl``: components [50, 4096], mean [4096]);
-    the C5 calibrations are per-layer dicts. Both load through here.
+    per-layer calibrations are dicts keyed by layer index. Both load through here.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
@@ -422,7 +422,7 @@ class ProjectionBasisBank(BaseModel):
 
     @classmethod
     def from_pca_pickle(cls, path: Path | str, label: str = "pcaA") -> "ProjectionBasisBank":
-        """Load a banked calibration PCA (global or C5 per-layer format).
+        """Load a banked calibration PCA (global or per-layer format).
 
         Mirrors ``feature_pipeline._load_pca_model``'s format sniffing so the same artefacts
         that already feed the residual-PCA block feed this family, with no new calibration step.
@@ -1423,7 +1423,7 @@ def _attention_region_per_token(
         raise KeyError(f"attention layer {layer_idx} out of range for {num_layers} layers")
 
     prompt_len = data.prompt_length
-    mean_rows = data.mean_attention(layer_idx)  # shared per-(gen,layer) cache (C2)
+    mean_rows = data.mean_attention(layer_idx)  # shared per-(gen,layer) cache
     n_cols = 5 if include_sink else 4
     out = np.zeros((T, n_cols), dtype=np.float64)
 

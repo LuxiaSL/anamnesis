@@ -96,7 +96,7 @@ def extract_attention_flow(
         # Region masses: [sys_prompt, early_gen, mid_gen, recent]
         region_masses: list[list[float]] = [[] for _ in range(4)]
 
-        mean_rows = data.mean_attention(l_idx)  # shared per-(gen,layer) cache (C2)
+        mean_rows = data.mean_attention(l_idx)  # shared per-(gen,layer) cache
         for t in range(T):
             attn = data.attentions[t][l_idx]  # [n_heads, seq_len]
             seq_len = attn.shape[1]
@@ -236,7 +236,7 @@ def _attention_flow_names(
     n_windows: int,
     include_stft: bool,
 ) -> tuple[str, ...]:
-    """All feature names for one layer's attention flow features (cached; C5).
+    """All feature names for one layer's attention flow features (cached).
     Returns a tuple — callers only len() and extend() from it."""
     prefix = f"attn_flow_L{layer_idx}"
     names = [

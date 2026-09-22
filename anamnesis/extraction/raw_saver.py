@@ -237,9 +237,9 @@ def save_raw_tensors_v3(
       - hidden_states + attentions banked for **all layers** (not sampled∪pca / sampled)
       - pre_rope_keys + **v_proj_values** banked for all layers
       - **queries** (pre-RoPE) banked for whatever layers raw_data.queries holds
-        (sampled pre-vmb; all layers from the vmb battery capture surface on)
+        (all layers under the full capture surface; a sampled subset under others)
       - **attn_outputs** (o_proj) banked for whatever layers raw_data.attn_outputs holds
-        (vmb battery surface; absent in pre-vmb saves — loaders tolerate absence)
+        (absent in saves made without the o_proj hooks — loaders tolerate absence)
       - gate_activations banked for whatever layers raw_data.gate_activations holds (sampled)
       - positional_means is **NOT** banked per-gen (deduped — it is identical across all
         gens; lives once in the run's calibration dir, injected at feature-compute time)
@@ -297,7 +297,7 @@ def save_raw_tensors_v3(
     queries_stacked, query_layer_indices = _stack_layer_dict(raw_data.queries)
     gates_stacked, gate_layer_indices = _stack_layer_dict(raw_data.gate_activations)
     attn_out_stacked, attn_out_layer_indices = _stack_layer_dict(raw_data.attn_outputs)
-    # MoE expert routing (vmb arm A7, M6) — dense softmax [T, n_moe_layers, n_experts] + branch norms [T, n_moe_layers, 2]
+    # MoE expert routing — dense softmax [T, n_moe_layers, n_experts] + branch norms [T, n_moe_layers, 2]
     router_dist_stacked, router_layer_indices = _stack_layer_dict(raw_data.router_dist)
     router_norms_stacked, router_norms_layer_indices = _stack_layer_dict(raw_data.router_branch_norms)
     router_logit_stacked, router_logit_layer_indices = _stack_layer_dict(raw_data.router_logit_norms)
@@ -355,8 +355,8 @@ def save_raw_tensors_v3(
         "all_layers_count": np.array(n_total_layers_plus_one, dtype=np.int32),
         "extraction_version": np.array(3, dtype=np.int32),
     }
-    # Bank the full realized token sequence [prompt + generated] so any future
-    # re-processing needs no re-tokenization (cheap: ~L int32 ≈ a few KB).
+    # Bank the full realized token sequence [prompt + generated] so re-processing needs no
+    # re-tokenization (cheap: ~L int32 ≈ a few KB).
     if input_ids is not None:
         save_dict["input_ids"] = np.asarray(input_ids, dtype=np.int32)
     np.savez_compressed(npz_path, **save_dict)
@@ -547,7 +547,7 @@ def load_raw_tensors(
         for i, layer_idx in enumerate(query_layer_indices):
             queries[int(layer_idx)] = [queries_stacked[t, i] for t in range(T)]
 
-    # ── Reconstruct attention outputs (o_proj; vmb surface, absent in pre-vmb npz) ──
+    # ── Reconstruct attention outputs (o_proj; absent in npz without that capture) ──
     attn_outputs: dict[int, list[F32]] | None = None
     if "attn_out" in want and "attn_outputs" in data and data["attn_outputs"].size > 0:
         attn_out_stacked = data["attn_outputs"].astype(np.float32)
@@ -576,7 +576,7 @@ def load_raw_tensors(
             for i, layer_idx in enumerate(gate_layer_indices_arr):
                 gate_activations[int(layer_idx)] = [gates_stacked_f32[t, i] for t in range(T)]
 
-    # ── Reconstruct MoE expert routing (vmb arm A7, M6; absent in non-MoE npz) ──
+    # ── Reconstruct MoE expert routing (absent in non-MoE npz) ──
     router_dist: dict[int, list[F32]] | None = None
     router_branch_norms: dict[int, list[F32]] | None = None
     router_logit_norms: dict[int, list[F32]] | None = None

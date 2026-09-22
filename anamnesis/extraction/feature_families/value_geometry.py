@@ -7,10 +7,10 @@ The KV-cache "address" side (keys) is featurized by `kv_key_*`; the **content** 
 Mirrors the key-geometry math (spread / eff_dim / drift / novelty) on the head-mean value vector,
 plus temporal operators (consistent with the v2 families) and a few value-specific stats.
 
-METHODOLOGY — basis-free only. v3 deleted cross-layer key cosine (C4) because vectors from different
-learned projections live in unrelated bases, so their cosine is uninterpretable. The SAME caveat
-applies across surfaces (v_proj basis ≠ k_proj basis) and across layers. So we NEVER take a raw
-cosine between value and key vectors, or between value vectors at different layers. Cross-surface /
+METHODOLOGY — basis-free only. Vectors from different learned projections live in unrelated bases,
+so a cosine between them is uninterpretable. That holds across surfaces (v_proj basis ≠ k_proj
+basis) and across layers alike, so no raw cosine is ever taken between value and key vectors, or
+between value vectors at different layers. Cross-surface /
 cross-layer relations are expressed **basis-free**:
   - value↔key coupling  -> Pearson corr of their per-step *drift* time-series (scalar series, basis-free)
   - cross-head structure -> dispersion of per-head value *norms* (magnitudes, basis-free)
@@ -61,7 +61,8 @@ def _spread(M: NDArray[np.float64]) -> float:
 
 
 def _eff_dim(M: NDArray[np.float64]) -> float:
-    """Participation ratio of singular values, bounded to a fraction of max rank (mirrors kv_key_eff_dim/B4)."""
+    """Participation ratio of singular values, bounded to a fraction of max rank (mirrors
+    kv_key_eff_dim, so the two are comparable across surfaces)."""
     try:
         s = np.linalg.svd(M, compute_uv=False)
         s2 = s ** 2
@@ -211,7 +212,7 @@ def extract_value_geometry(
             features.extend(op_f.tolist())
             names.extend(op_n)
 
-    # ── basis-free cross-layer dispersion (NO cross-layer cosine — that's the C4 trap) ──
+    # ── basis-free cross-layer dispersion (NO cross-layer cosine — unrelated bases) ──
     if len(layer_spread) >= 2:
         features.append(float(np.std(list(layer_spread.values()))))
     else:
