@@ -948,9 +948,9 @@ def extract_cache_and_keys(
             names.append(f"kv_key_novelty_traj{i}_L{l_idx}")
 
     # ── 2.5.3 KV Cache Epoch Detection ──
-    # (No cross-layer key agreement here: it would compare k_proj outputs from different
-    #  layers, which live in unrelated learned bases, so the cosine is not interpretable as
-    #  "agreement". _extract_cross_layer_key_agreement below computes it and nothing calls it.)
+    # No cross-layer key agreement is emitted, and none should be added: a cosine between
+    # k_proj outputs at different layers compares vectors in unrelated learned bases, so it
+    # is not interpretable as agreement. The basis-invariant read is the kv_cka family.
     epoch_feats = _extract_epoch_features(data, config)
     for name, val in epoch_feats:
         features.append(val)
@@ -1013,65 +1013,6 @@ def _fit_attention_decay(
             RuntimeWarning,
         )
         return 0.0
-
-
-def _extract_cross_layer_key_agreement(
-    data: RawGenerationData,
-    config: ExtractionConfig,
-) -> list[tuple[str, float]]:
-    """Cross-layer key agreement: compare key vectors at same position across layers."""
-    results: list[tuple[str, float]] = []
-    sampled_layers = config.sampled_layers
-    T = len(data.hidden_states)
-
-    if T < 2 or len(sampled_layers) < 2:
-        results.append(("cross_layer_early_late_agreement", 0.0))
-        results.append(("cross_layer_adjacent_agreement", 0.0))
-        results.append(("cross_layer_overall_coherence", 0.0))
-        return results
-
-    # Sample every 10th generation step
-    sample_steps = list(range(0, T, 10))[:30]
-
-    # Collect agreements — use config thresholds instead of hardcoded values
-    early_cutoff = getattr(config, 'early_layer_cutoff', sampled_layers[len(sampled_layers) // 4])
-    late_cutoff = getattr(config, 'late_layer_cutoff', sampled_layers[-(len(sampled_layers) // 4)])
-    early_layers = [l for l in sampled_layers if l <= early_cutoff]
-    late_layers = [l for l in sampled_layers if l >= late_cutoff]
-    all_agreements = []
-    early_late_agreements = []
-    adjacent_agreements = []
-
-    for t in sample_steps:
-        for i, l1 in enumerate(sampled_layers):
-            keys1 = data.pre_rope_keys.get(l1, [])
-            if t >= len(keys1):
-                continue
-            k1 = keys1[t].mean(axis=0)  # average across KV heads → [head_dim]
-
-            for l2 in sampled_layers[i + 1:]:
-                keys2 = data.pre_rope_keys.get(l2, [])
-                if t >= len(keys2):
-                    continue
-                k2 = keys2[t].mean(axis=0)
-                sim = _cosine_sim(k1, k2)
-                all_agreements.append(sim)
-
-                if l1 in early_layers and l2 in late_layers:
-                    early_late_agreements.append(sim)
-
-                # Check if layers are adjacent in sampled set
-                if sampled_layers.index(l2) == sampled_layers.index(l1) + 1:
-                    adjacent_agreements.append(sim)
-
-    results.append(("cross_layer_early_late_agreement",
-                     float(np.mean(early_late_agreements)) if early_late_agreements else 0.0))
-    results.append(("cross_layer_adjacent_agreement",
-                     float(np.mean(adjacent_agreements)) if adjacent_agreements else 0.0))
-    results.append(("cross_layer_overall_coherence",
-                     float(np.mean(all_agreements)) if all_agreements else 0.0))
-
-    return results
 
 
 def _extract_epoch_features(
