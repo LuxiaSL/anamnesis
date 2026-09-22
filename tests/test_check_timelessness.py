@@ -16,6 +16,7 @@ from tools.check_timelessness import (
     DEFAULT_ALLOWLIST,
     TimelessnessError,
     build_report,
+    documentation_text,
     load_allowlist,
     main,
     used_to_violation,
@@ -34,7 +35,7 @@ def rules_hit(report: object) -> set[str]:
 
 def test_shipped_allowlist_compiles() -> None:
     patterns = load_allowlist(DEFAULT_ALLOWLIST)
-    assert len(patterns) > 10
+    assert patterns
 
 
 def test_marker_comments_are_flagged(tmp_path: Path) -> None:
@@ -95,6 +96,102 @@ def test_string_data_is_not_documentation(tmp_path: Path) -> None:
     assert report.passed is True
 
 
+def test_a_raised_message_is_prose(tmp_path: Path) -> None:
+    """A stranger meets this text when something breaks, with nothing else to go on."""
+    write(
+        tmp_path / "pkg" / "mod.py",
+        '''
+        def check(value: int) -> None:
+            if value < 0:
+                raise ValueError("negative since 2026-07-18; we now refuse it")
+        ''',
+    )
+    report = build_report([tmp_path / "pkg"])
+    assert rules_hit(report) == {"dated-prose", "changelog-we-now"}
+
+
+def test_a_logged_message_is_prose(tmp_path: Path) -> None:
+    write(
+        tmp_path / "pkg" / "mod.py",
+        '''
+        import logging
+
+        LOGGER = logging.getLogger(__name__)
+
+
+        def run() -> None:
+            LOGGER.warning("the split is no longer identical to the banked one")
+            LOGGER.info("calibration banked 2026-07-12")
+        ''',
+    )
+    report = build_report([tmp_path / "pkg"])
+    assert rules_hit(report) == {"changelog-no-longer", "dated-prose"}
+
+
+def test_an_fstring_substitution_is_code_not_prose(tmp_path: Path) -> None:
+    """Inside the braces is an expression: a filename there is data, not a claim."""
+    write(
+        tmp_path / "pkg" / "mod.py",
+        '''
+        from pathlib import Path
+
+
+        def load(root: Path) -> None:
+            raise FileNotFoundError(f"unreadable: {root / '2026-07-18.json'}")
+        ''',
+    )
+    report = build_report([tmp_path / "pkg"])
+    assert report.violations == []
+    assert report.passed is True
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'raise ValueError("─ α " + "banked 2026-07-12")',
+        'raise ValueError("banked 2026-07-12: %s" % value)',
+        'raise ValueError("banked 2026-07-12: {}".format(value))',
+        'raise ValueError("banked 2026-07-12" if value else "fresh")',
+    ],
+    ids=["joined", "percent", "format", "conditional"],
+)
+def test_an_assembled_message_is_read_piece_by_piece(tmp_path: Path, body: str) -> None:
+    """A message written in parts is still one sentence a reader is handed.
+
+    The first case also pins the column arithmetic: the parse tree counts UTF-8
+    bytes, so a non-ASCII piece in front of the dated one would slice the line in
+    the wrong place if the offsets were used as they come.
+    """
+    write(tmp_path / "pkg" / "mod.py", f"def f(value: int) -> None:\n    {body}\n")
+    report = build_report([tmp_path / "pkg"])
+    assert rules_hit(report) == {"dated-prose"}
+
+
+def test_a_dict_lookup_and_a_report_line_stay_data(tmp_path: Path) -> None:
+    """Only the literal a call is handed is prose; a key or a written row is not."""
+    write(
+        tmp_path / "pkg" / "mod.py",
+        '''
+        MESSAGES = {"stale 2026-07-18": "we now refuse it"}
+
+
+        def explain(rows: list[str]) -> None:
+            rows.append("floor observed bitwise zero 2026-07-12")
+            raise ValueError(MESSAGES["stale 2026-07-18"])
+        ''',
+    )
+    report = build_report([tmp_path / "pkg"])
+    assert report.violations == []
+    assert report.passed is True
+
+
+def test_masking_keeps_columns_and_blanks_the_rest(tmp_path: Path) -> None:
+    """The mask preserves offsets, so a reported line still lines up with the file."""
+    source = 'VALUE = "2026-07-18"  # banked 2026-07-12\n'
+    masked = documentation_text(tmp_path / "mod.py", source)
+    assert masked == {1: " " * 22 + "# banked 2026-07-12"}
+
+
 def test_the_same_text_in_a_comment_or_docstring_is_flagged(tmp_path: Path) -> None:
     """The counterpart of the string-data test: prose gets no exemption."""
     write(
@@ -117,7 +214,7 @@ def test_the_same_text_in_a_comment_or_docstring_is_flagged(tmp_path: Path) -> N
         "changelog-we-now",
         "changelog-no-longer",
         "marker-comment",
-        "dated-comment",
+        "dated-prose",
     }
 
 
@@ -200,13 +297,14 @@ def test_used_to_guard_directly() -> None:
     assert used_to_violation("nothing followed by a verb here: used to") is None
 
 
-def test_dated_comment_without_a_citation_marker_is_flagged(tmp_path: Path) -> None:
+def test_dated_comment_is_flagged(tmp_path: Path) -> None:
     write(tmp_path / "pkg" / "mod.py", "# rewrote the loader 2026-07-18\nVALUE = 1\n")
     report = build_report([tmp_path / "pkg"])
-    assert rules_hit(report) == {"dated-comment"}
+    assert rules_hit(report) == {"dated-prose"}
 
 
-def test_dated_comment_with_a_citation_marker_is_exempt(tmp_path: Path) -> None:
+def test_a_date_that_cites_evidence_is_flagged_too(tmp_path: Path) -> None:
+    """Dates come out of code whatever they date: the record holds the evidence."""
     write(
         tmp_path / "pkg" / "mod.py",
         """
@@ -215,15 +313,28 @@ def test_dated_comment_with_a_citation_marker_is_exempt(tmp_path: Path) -> None:
         """,
     )
     report = build_report([tmp_path / "pkg"])
+    assert rules_hit(report) == {"dated-prose"}
+    assert report.exempted == []
+    assert report.passed is False
+
+
+def test_a_date_inside_a_public_url_is_exempt(tmp_path: Path) -> None:
+    """The one surviving exemption: strip the date and the link stops resolving."""
+    write(
+        tmp_path / "pkg" / "mod.py",
+        "# The frozen record is https://example.com/2026-07-12/anamnesis.\nVALUE = 1\n",
+    )
+    report = build_report([tmp_path / "pkg"])
     assert report.violations == []
     assert len(report.exempted) == 1
     assert report.passed is True
 
 
-def test_dated_docstring_without_a_comment_marker_is_not_a_dated_comment(tmp_path: Path) -> None:
+def test_dated_docstring_is_flagged(tmp_path: Path) -> None:
+    """A docstring is prose, so the date rule reads it: no `#` is needed."""
     write(tmp_path / "pkg" / "mod.py", '"""Banked 2026-07-12."""\nVALUE = 1\n')
     report = build_report([tmp_path / "pkg"])
-    assert report.violations == []
+    assert rules_hit(report) == {"dated-prose"}
 
 
 def test_custom_allowlist_is_honoured(tmp_path: Path) -> None:
