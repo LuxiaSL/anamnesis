@@ -150,8 +150,6 @@ STORED_FAMILY_NORMS_AND_OUTPUT_STATS = "T1"
 FAMILY_ATTENTION_FLOW = "attention_flow"
 FAMILY_GATE = "gate"
 FAMILY_RESIDUAL_TRAJECTORY = "residual_traj"
-FAMILY_TEMPORAL_DYNAMICS = "temporal_dynamics"
-FAMILY_CONTRASTIVE_PROJECTION = "contrastive_projection"
 
 
 class FamilyRule(BaseModel):
@@ -195,8 +193,10 @@ FAMILY_RULES: tuple[FamilyRule, ...] = (
     ),
     FamilyRule(family="attn_res", prefixes=("attnres_",)),
     FamilyRule(family="expert_routing", prefixes=("xrt_", "expert_routing_")),  # MoE router
-    FamilyRule(family=FAMILY_TEMPORAL_DYNAMICS, prefixes=("td_",)),
-    FamilyRule(family=FAMILY_CONTRASTIVE_PROJECTION, prefixes=("cp_",)),
+    # Two marks no extractor emits and banked corpora carry, so the rules stay: a
+    # column in a banked result is placed rather than reported as unrecognised.
+    FamilyRule(family="temporal_dynamics", prefixes=("td_",)),
+    FamilyRule(family="contrastive_projection", prefixes=("cp_",)),
     FamilyRule(family=STORED_FAMILY_RESIDUAL_PCA, prefixes=("pca_",)),
     # Last, because this family's block is also where the stored layout puts a name
     # nothing else claims: the rule states the marks it really holds, so that a name

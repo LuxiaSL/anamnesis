@@ -271,7 +271,7 @@ def test_used_to_narrating_an_edit_is_flagged(tmp_path: Path) -> None:
     write(
         tmp_path / "pkg" / "mod.py",
         '''
-        """Summaries the temporal_dynamics family used to host."""
+        """Summaries the windowed family used to host."""
         VALUE = 1
         ''',
     )

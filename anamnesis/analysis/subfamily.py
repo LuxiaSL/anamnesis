@@ -3,23 +3,17 @@
 `feature_map` classifies a feature by what it reads and how — its source, its
 method, its depth. That is the taxonomy, and it is deliberately coarse: it answers
 "is this attention or residual" across the whole vector. This module asks the
-other question, inside one family: within ``temporal_dynamics``, is the signal in
-the attention-entropy series or in key drift? Within ``attention_flow``, is it
-system-prompt mass or recency bias? The two are not competing classifications —
-one cuts across families by substrate, this one cuts a single family into the
-signals its own feature names spell out.
+other question, inside one family: within ``attention_flow``, is the signal
+system-prompt mass or recency bias? Within ``gate_features``, is it sparsity or
+drift? The two are not competing classifications — one cuts across families by
+substrate, this one cuts a single family into the signals its own feature names
+spell out.
 
 The method is one classifier per family, reading the family's naming convention,
 plus a random forest per resulting sub-family under stratified cross-validation.
 A sub-family's accuracy beside the full family's is the readout: a part that
 matches the whole says the rest is redundant, and a part far below it says the
 signal is distributed rather than located.
-
-``temporal_dynamics`` gets two further cuts that the others do not, because it is
-the only family whose features carry a *temporal operator* as well as a signal:
-the coarse cut groups its signals by which surface they came from, and the
-operator cut groups by window and spectral treatment, which is what says whether
-windowing bought anything over the plain series.
 
 Feature names come from the loader rather than from a second read of the bank. A
 block's names are the slice of the vector's name list its own metadata assigns to
@@ -45,9 +39,7 @@ from sklearn.preprocessing import StandardScaler
 
 from anamnesis.analysis.gauntlet.signature_io import (
     ATTENTION_FLOW,
-    CONTRASTIVE_PROJECTION,
     GATE_FEATURES,
-    TEMPORAL_DYNAMICS,
     Run4Data,
 )
 
@@ -60,47 +52,6 @@ N_SPLITS = 5
 SEED = 42
 
 UNKNOWN = "unknown"
-
-
-def classify_temporal_dynamics(name: str) -> str:
-    """A ``temporal_dynamics`` feature by the signal it is a series of.
-
-    Names run ``td_L<layer>_<signal>_<operator>``, so the signal is the third
-    field and the two key-derived signals are told apart by the fourth.
-    """
-    parts = name.split("_")
-    if len(parts) < 3:
-        return UNKNOWN
-    signal = parts[2]
-    if signal == "attn":
-        return "td_T2_attn_entropy"
-    if signal == "head":
-        return "td_T2_head_agreement"
-    if signal == "key":
-        if len(parts) >= 4 and parts[3] == "drift":
-            return "td_T2.5_key_drift"
-        if len(parts) >= 4 and parts[3] == "novelty":
-            return "td_T2.5_key_novelty"
-        return "td_T2.5_key"
-    if signal == "lookback":
-        return "td_T2.5_lookback_ratio"
-    return UNKNOWN
-
-
-def classify_temporal_operator(name: str) -> str:
-    """A ``temporal_dynamics`` feature by the operator applied to its series.
-
-    The four windows are named in the feature; everything computed on the spectrum
-    reads as one operator, because the question the cut answers is whether the
-    spectral treatment bought anything, not which spectral statistic did.
-    """
-    for window in ("w0", "w1", "w2", "w3"):
-        if f"_{window}_" in name:
-            return window
-    for spectral in ("_dominant_freq", "_spectral_centroid", "_bandwidth", "_band_energy"):
-        if spectral in name:
-            return "stft"
-    return "other"
 
 
 _AF_SIGNALS: tuple[tuple[str, str], ...] = (
@@ -162,44 +113,13 @@ def classify_gate_features(name: str) -> str:
     return "gf_unknown"
 
 
-_CP_NAME_RE = re.compile(r"cp_L\d+_(t\d+)_d\d+")
-
-
-def classify_contrastive_projection(name: str) -> str:
-    """A ``contrastive_projection`` feature by the temporal position it projects.
-
-    The learned dimensions are not interpretable individually, so the only cut that
-    means anything is *when* in the generation the state was taken.
-    """
-    match = _CP_NAME_RE.match(name)
-    return f"cp_{match.group(1)}" if match else "cp_unknown"
-
-
 SUBFAMILY_CLASSIFIERS: dict[str, Callable[[str], str]] = {
-    TEMPORAL_DYNAMICS: classify_temporal_dynamics,
     ATTENTION_FLOW: classify_attention_flow,
     GATE_FEATURES: classify_gate_features,
-    CONTRASTIVE_PROJECTION: classify_contrastive_projection,
 }
 """Which classifier reads which family's names. A family absent from this table has
 no sub-family convention to read, which is a fact about its naming rather than a
 gap here."""
-
-TD_COARSE_GROUPS: dict[str, list[str]] = {
-    "td_T2": ["td_T2_attn_entropy", "td_T2_head_agreement"],
-    "td_T2.5": ["td_T2.5_key_drift", "td_T2.5_key_novelty", "td_T2.5_lookback_ratio"],
-}
-"""The coarse cut: the signals grouped by the substrate they are series of. The
-group names are the record's, and the taxonomy sweep is what will rename them."""
-
-TD_OPERATOR_GROUPS: dict[str, list[str]] = {
-    "td_w0_only": ["w0"],
-    "td_w0_w1": ["w0", "w1"],
-    "td_windowed": ["w0", "w1", "w2", "w3"],
-    "td_stft_only": ["stft"],
-}
-"""The operator cut, nested on purpose: each group is the previous one plus a
-window, so the readout is what the next window added."""
 
 FULL_FAMILY = "_full_family"
 """The row every decomposition carries: the whole family, as the comparison every
@@ -312,28 +232,6 @@ def decompose_family(
     return results
 
 
-def decompose_by_groups(
-    data: Run4Data,
-    block: str,
-    feature_names: Sequence[str],
-    classifier: Callable[[str], str],
-    groups: Mapping[str, Sequence[str]],
-) -> dict[str, SubsetAccuracy]:
-    """Score named unions of sub-families — the coarse and operator cuts."""
-    X = data.get_block(block)
-    y = data.modes
-    labels = [classifier(name) for name in feature_names]
-    results: dict[str, SubsetAccuracy] = {}
-    for group, members in groups.items():
-        indices = [i for i, label in enumerate(labels) if label in members]
-        results[group] = accuracy_on_subset(X, y, _mask_for(X.shape[1], indices))
-        logger.info(
-            f"    {group:<30} {results[group].accuracy:.1%} "
-            f"({results[group].n_features} features)"
-        )
-    return results
-
-
 def decompose_run(data: Run4Data) -> dict[str, dict[str, SubsetAccuracy]]:
     """Every family this run carries a naming convention for, cut and scored.
 
@@ -352,15 +250,6 @@ def decompose_run(data: Run4Data) -> dict[str, dict[str, SubsetAccuracy]]:
             continue
         logger.info(f"  --- {block} ({len(names)} features) ---")
         out[f"{block}_by_signal"] = decompose_family(data, block, names, classifier)
-        if block == TEMPORAL_DYNAMICS:
-            logger.info("  coarse cut, by the substrate each signal is a series of:")
-            out["td_coarse"] = decompose_by_groups(
-                data, block, names, classify_temporal_dynamics, TD_COARSE_GROUPS
-            )
-            logger.info("  operator cut, by window and spectral treatment:")
-            out["td_by_operator"] = decompose_by_groups(
-                data, block, names, classify_temporal_operator, TD_OPERATOR_GROUPS
-            )
     return out
 
 
@@ -388,15 +277,9 @@ __all__ = [
     "FULL_FAMILY",
     "SUBFAMILY_CLASSIFIERS",
     "SubsetAccuracy",
-    "TD_COARSE_GROUPS",
-    "TD_OPERATOR_GROUPS",
     "accuracy_on_subset",
     "classify_attention_flow",
-    "classify_contrastive_projection",
     "classify_gate_features",
-    "classify_temporal_dynamics",
-    "classify_temporal_operator",
-    "decompose_by_groups",
     "decompose_family",
     "decompose_run",
     "decomposition_document",

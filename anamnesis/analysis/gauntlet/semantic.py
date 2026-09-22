@@ -429,7 +429,6 @@ def _parse_swap_mode(mode_str: str) -> tuple[str, str] | None:
 def _run_prompt_swap_confound(
     data: AnalysisData,
     signature_dir: Path,
-    addon_dirs: list[Path] | None = None,
 ) -> PromptSwapConfoundResult:
     """Prompt-swap confound test: train on core set, predict on prompt-swap samples."""
     from .signature_io import BLOCK_NPZ_KEYS, CORE_BLOCKS, FAMILY_BLOCKS
@@ -472,7 +471,7 @@ def _run_prompt_swap_confound(
     individual_test_blocks = [t for t in test_blocks if t in BLOCK_NPZ_KEYS]
     swap_block_features: dict[str, list[NDArray | None]] = {}
 
-    # Pass 1: load individual block features from primary npz files
+    # Load each swap generation's block features
     for i, npz_path in enumerate(swap_npz_paths):
         npz_data = np.load(npz_path, allow_pickle=True)
         for block_name in individual_test_blocks:
@@ -480,24 +479,6 @@ def _run_prompt_swap_confound(
             if npz_key and npz_key in npz_data.files:
                 swap_block_features.setdefault(block_name, [None] * len(swap_npz_paths))
                 swap_block_features[block_name][i] = npz_data[npz_key]
-
-    # Pass 2: merge addon features
-    if addon_dirs:
-        for addon_dir in addon_dirs:
-            addon_path = Path(addon_dir)
-            if not addon_path.exists():
-                continue
-            for i in range(len(swap_npz_paths)):
-                stem = swap_info[i]["file_stem"]
-                addon_npz = addon_path / f"{stem}.npz"
-                if addon_npz.exists():
-                    addon_data = np.load(addon_npz, allow_pickle=True)
-                    for block_name in individual_test_blocks:
-                        npz_key = BLOCK_NPZ_KEYS.get(block_name, "")
-                        if npz_key and npz_key in addon_data.files:
-                            swap_block_features.setdefault(block_name, [None] * len(swap_npz_paths))
-                            if swap_block_features[block_name][i] is None:
-                                swap_block_features[block_name][i] = addon_data[npz_key]
 
     complete_blocks = {
         t for t, arrays in swap_block_features.items()
@@ -621,7 +602,6 @@ def _get_semantic_test_blocks(data: AnalysisData) -> list[str]:
 def run_semantic(
     data: AnalysisData,
     signature_dir: Path | str | None = None,
-    addon_dirs: list[Path | str] | None = None,
 ) -> SemanticResult:
     """Run semantic independence analyses."""
     if data.generated_texts is None or all(t == "" for t in data.generated_texts):
@@ -756,10 +736,7 @@ def run_semantic(
     if signature_dir is not None:
         print("    Prompt-swap confound test...")
         try:
-            addon_paths = [Path(d) for d in addon_dirs] if addon_dirs else None
-            prompt_swap = _run_prompt_swap_confound(
-                data, Path(signature_dir), addon_dirs=addon_paths,
-            )
+            prompt_swap = _run_prompt_swap_confound(data, Path(signature_dir))
             if prompt_swap.per_block is not None:
                 n_swap = prompt_swap.n_swap_samples or 0
                 print(f"      {n_swap} swap samples, {len(prompt_swap.per_block)} blocks tested")

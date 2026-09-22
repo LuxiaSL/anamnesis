@@ -55,14 +55,13 @@ from anamnesis.analysis.gauntlet.signature_io import (
     ATTENTION_AND_CACHE_WITH_FAMILIES,
     ATTENTION_AND_DELTAS,
     ATTENTION_FLOW,
+    ALL_LABELS,
     CACHE_AND_KEYS,
-    CONTRASTIVE_PROJECTION,
     EVERYTHING,
     GATE_FEATURES,
     NORMS_AND_OUTPUT_STATS,
     RESIDUAL_PCA,
     RESIDUAL_TRAJECTORY,
-    TEMPORAL_DYNAMICS,
 )
 
 # Renames at the top level of a results document: the section keys themselves.
@@ -144,8 +143,6 @@ RETIRED_LABEL_SPELLINGS: dict[str, str | None] = {
     RESIDUAL_TRAJECTORY: None,
     ATTENTION_FLOW: None,
     GATE_FEATURES: None,
-    TEMPORAL_DYNAMICS: None,
-    CONTRASTIVE_PROJECTION: None,
 }
 
 BLOCK_LABEL_RENAMES: dict[str, str] = {
@@ -153,6 +150,16 @@ BLOCK_LABEL_RENAMES: dict[str, str] = {
     for current, retired in RETIRED_LABEL_SPELLINGS.items()
     if retired is not None
 }
+
+# Block labels a banked file carries that no corpus is written with, so the loader
+# addresses no block under them and they are absent from the table above. They are
+# here because a reader that checks a banked document's labels against the live
+# vocabulary alone would reject six results files over blocks they legitimately hold.
+READ_ONLY_LABELS: frozenset[str] = frozenset({"temporal_dynamics", "contrastive_projection"})
+
+KNOWN_LABELS: frozenset[str] = ALL_LABELS | READ_ONLY_LABELS
+"""Every block label a results document may carry: the live vocabulary and the
+read-only spellings beside it. What a reader of a banked file checks against."""
 
 # Fields whose keys are several labels joined with ``+``, and which reading applies:
 # ``members`` translates each component on its own, ``union_first`` takes the longest

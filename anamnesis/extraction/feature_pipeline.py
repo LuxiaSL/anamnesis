@@ -193,25 +193,6 @@ def compute_features_v2_from_data(
             all_names.extend(result.feature_names)
             offset += len(result)
 
-    if family_config.enable_contrastive_projection and family_config.contrastive_model_path:
-        from anamnesis.extraction.feature_families.contrastive_projection import (
-            extract_contrastive_projection,
-        )
-        try:
-            result = extract_contrastive_projection(
-                raw_data,
-                projection_model_path=family_config.contrastive_model_path,
-                layer_indices=family_config.contrastive_layers,
-                temporal_samples=family_config.contrastive_temporal_samples,
-            )
-            if len(result) > 0:
-                all_slices[result.family_name] = (offset, offset + len(result))
-                all_features.append(result.features)
-                all_names.extend(result.feature_names)
-                offset += len(result)
-        except Exception as e:
-            logger.warning(f"Contrastive projection failed: {e}")
-
     if family_config.enable_attention_flow:
         from anamnesis.extraction.feature_families.attention_flow import (
             extract_attention_flow,
@@ -236,22 +217,6 @@ def compute_features_v2_from_data(
             raw_data,
             sampled_layers=config.sampled_layers,
             sparsity_threshold=family_config.gate_sparsity_threshold,
-            n_windows=family_config.temporal_n_windows,
-            include_stft=family_config.enable_stft,
-        )
-        if len(result) > 0:
-            all_slices[result.family_name] = (offset, offset + len(result))
-            all_features.append(result.features)
-            all_names.extend(result.feature_names)
-            offset += len(result)
-
-    if family_config.enable_temporal_dynamics:
-        from anamnesis.extraction.feature_families.temporal_dynamics import (
-            extract_temporal_dynamics,
-        )
-        result = extract_temporal_dynamics(
-            raw_data,
-            sampled_layers=config.sampled_layers,
             n_windows=family_config.temporal_n_windows,
             include_stft=family_config.enable_stft,
         )
@@ -645,10 +610,6 @@ def recompute_all_features(
             enabled.append("attention_flow")
         if family_config.enable_gate_features:
             enabled.append("gate")
-        if family_config.enable_temporal_dynamics:
-            enabled.append("temporal_dynamics")
-        if family_config.enable_contrastive_projection:
-            enabled.append("contrastive")
         logger.info(f"  Families: {', '.join(enabled)}")
 
     # Build argument tuples for each sample
@@ -820,10 +781,6 @@ def main() -> None:
         help="Disable SwiGLU gate features (v2 only)",
     )
     parser.add_argument(
-        "--no-temporal-dynamics", action="store_true",
-        help="Disable temporal decomposition of the attention and cache metrics (v2 only)",
-    )
-    parser.add_argument(
         "--no-stft", action="store_true",
         help="Disable STFT spectral features in temporal operators (v2 only)",
     )
@@ -831,11 +788,6 @@ def main() -> None:
         "--no-core-blocks", action="store_true",
         help="Compute only the families, without the four blocks the numeric anchor "
              "builds (v2 only, for ablation)",
-    )
-    parser.add_argument(
-        "--contrastive-model", type=Path, default=None,
-        help="Path to trained contrastive projection model (.npz). "
-             "Enables contrastive projection features when provided (v2 only).",
     )
     parser.add_argument(
         "--workers", type=int, default=None,
@@ -871,10 +823,7 @@ def main() -> None:
             "enable_residual_trajectory": not args.no_trajectory,
             "enable_attention_flow": not args.no_attention_flow,
             "enable_gate_features": not args.no_gate,
-            "enable_temporal_dynamics": not args.no_temporal_dynamics,
             "enable_stft": not args.no_stft,
-            "enable_contrastive_projection": args.contrastive_model is not None,
-            "contrastive_model_path": args.contrastive_model,
         }
         family_config = FeaturePipelineConfig.from_preset(args.model, **family_kwargs)
 

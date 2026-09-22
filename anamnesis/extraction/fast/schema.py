@@ -32,11 +32,7 @@ def resolve_gpu_schema(
 ) -> GpuFeatureSchema:
     if num_layers < 1 or n_steps < 1:
         raise ValueError("positive layer/step counts required")
-    if (
-        families.enable_path_signature
-        or families.enable_contrastive_projection
-        or families.enable_temporal_dynamics
-    ):
+    if families.enable_path_signature:
         raise ValueError(
             "schema resolver supports only the declared GPU feature families"
         )

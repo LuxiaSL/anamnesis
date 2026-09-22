@@ -50,12 +50,10 @@ from anamnesis.analysis.gauntlet.signature_io import (
     ATTENTION_FLOW,
     BLOCK_NPZ_KEYS,
     CACHE_AND_KEYS,
-    CONTRASTIVE_PROJECTION,
     GATE_FEATURES,
     NORMS_AND_OUTPUT_STATS,
     RESIDUAL_PCA,
     RESIDUAL_TRAJECTORY,
-    TEMPORAL_DYNAMICS,
 )
 from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
 from anamnesis.modes import RUN4_MODE_INDEX
@@ -71,13 +69,11 @@ DEFAULT_BLOCK_WIDTHS: dict[str, int] = {
     RESIDUAL_TRAJECTORY: 18,
     ATTENTION_FLOW: 24,
     GATE_FEATURES: 20,
-    TEMPORAL_DYNAMICS: 24,
-    CONTRASTIVE_PROJECTION: 20,
 }
 """Every block the loader knows, narrow.
 
-All nine, rather than a readable subset, because a union is built only when every one
-of its members is present — so a bank missing one block is a bank on which several
+All of them, rather than a readable subset, because a union is built only when every
+one of its members is present — so a bank missing one block is a bank on which several
 sections state an absence instead of reading. A fixture whose purpose is to exercise
 the reading side should not be the reason a section cannot run. The widths are small
 because the shape is the point, not the size.

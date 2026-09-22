@@ -9,8 +9,6 @@ rather than about the arithmetic:
     reports a narrower feature set than it claims;
   * the core-only filter, which is what makes "one repetition per topic-mode
     pair" a property of the loaded matrix rather than of the caller's care;
-  * addon merging, including the two ways it must refuse — an addon that covers
-    only some rows, and an untagged addon reaching a tagged lane;
   * the text half, which is the only difference between the two loaded types.
 
 The last test reads the banked ``8b_fat_01`` signatures if this machine has them
@@ -240,34 +238,6 @@ def test_missing_directory_and_empty_directory_are_distinguished(tmp_path: Path)
     (tmp_path / "empty").mkdir()
     with pytest.raises(FileNotFoundError, match="No .npz files"):
         load_run4(tmp_path / "empty", core_only=False)
-
-
-def test_addon_merges_new_blocks_and_skips_an_incomplete_one(tmp_path: Path) -> None:
-    base = tmp_path / "base"
-    write_gen(base, 0, topic="topic_a", topic_idx=0)
-    write_gen(base, 1, topic="topic_b", topic_idx=1)
-
-    complete = tmp_path / "complete"
-    write_gen(complete, 0, blocks={RESIDUAL_PCA: 5})
-    write_gen(complete, 1, blocks={RESIDUAL_PCA: 5})
-    merged = load_run4(base, core_only=False, addon_dirs=[complete])
-    assert RESIDUAL_PCA in merged.block_features
-    assert merged.block_features[RESIDUAL_PCA].shape == (2, 5)
-
-    partial = tmp_path / "partial"
-    write_gen(partial, 0, blocks={CACHE_AND_KEYS: 7})
-    dropped = load_run4(base, core_only=False, addon_dirs=[partial])
-    assert CACHE_AND_KEYS not in dropped.block_features, "an addon covering some rows is dropped whole"
-
-
-def test_addon_directory_that_is_absent_or_empty_is_a_warning_not_a_failure(
-    tmp_path: Path,
-) -> None:
-    base = tmp_path / "base"
-    write_gen(base, 0)
-    (tmp_path / "hollow").mkdir()
-    data = load_run4(base, core_only=False, addon_dirs=[tmp_path / "gone", tmp_path / "hollow"])
-    assert data.n_samples == 1
 
 
 def test_analysis_data_carries_text_and_delegates_the_rest(two_mode_run: Path) -> None:

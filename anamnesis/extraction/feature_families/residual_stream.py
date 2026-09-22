@@ -1,17 +1,9 @@
-"""Residual stream feature families.
-
-Two sub-components:
-    extract_residual_trajectory  — Geometric trajectory features (no learned params)
-    extract_contrastive_projection — Supervised projection (requires trained model)
-    train_contrastive_projection   — One-time training for contrastive model
+"""Residual stream feature family: geometric trajectory features, no learned parameters.
 
 Trajectory features capture HOW the representation moves through state space
 during generation — velocity, curvature, directness. These are the "dynamical
 motifs" that neuroscience literature identifies as diagnostic of computational
 mode (Russo et al., Driscoll et al.).
-
-Contrastive projection stands in for the residual-PCA block with a mode-supervised
-projection that finds directions maximizing mode separation in the residual stream.
 """
 
 from __future__ import annotations

@@ -58,10 +58,6 @@ def parser() -> argparse.ArgumentParser:
         help="Use every repetition rather than one per topic-mode pair",
     )
     p.add_argument("--skip", type=int, nargs="+", default=[], help="Section numbers to skip (1-11)")
-    p.add_argument(
-        "--addon-dirs", type=Path, nargs="+", default=None,
-        help="Extra signature directories to merge, for split feature sets",
-    )
     p.add_argument("--resume", action="store_true", help="Skip sections that already have results")
     p.add_argument("--modes", default=None, help="Comma-separated modes to include")
     p.add_argument(
@@ -78,7 +74,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
 
     signature_dir = args.sig_dir
-    addon_dirs = list(args.addon_dirs) if args.addon_dirs else None
     if signature_dir is None:
         try:
             resolved = resolve_run(args.run)
@@ -87,8 +82,6 @@ def main(argv: list[str] | None = None) -> int:
                 f"{exc}. Name a registry run, or give --sig-dir for a corpus outside it."
             ) from exc
         signature_dir = resolved.signature_dir
-        if addon_dirs is None and resolved.addon_dirs:
-            addon_dirs = list(resolved.addon_dirs)
     if not signature_dir.is_dir():
         raise SystemExit(f"signature directory not found: {signature_dir}")
 
@@ -118,7 +111,6 @@ def main(argv: list[str] | None = None) -> int:
         core_only=not args.all_reps,
         skip_sections=skip,
         resume=args.resume,
-        addon_dirs=addon_dirs,
         mode_filter=mode_filter,
     )
     refuse_unless_complete(

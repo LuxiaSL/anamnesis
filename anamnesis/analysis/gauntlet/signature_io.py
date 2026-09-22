@@ -19,11 +19,9 @@ Both live here, in one module, because they are one operation read at two
 widths: a directory in, a matrix out, with the join rules enforced once. Two
 modules whose names both say "load" would leave a reader guessing which to call.
 
-Those join rules are the reason this is not a bare ``np.load`` loop. Addon
-directories merge extra feature families into an existing row order, matched by
-file stem, and a concatenation is as much a scientific join as a comparison is —
-so the lane guard runs over the primary metadata and again over every addon,
-and an incomplete addon is dropped whole rather than stacked with holes.
+Those join rules are the reason this is not a bare ``np.load`` loop. Stacking one
+directory's vectors into a matrix is a scientific join, so the lane guard runs
+over the metadata first and a mixed lane is refused rather than concatenated.
 """
 
 from __future__ import annotations
@@ -70,8 +68,6 @@ RESIDUAL_PCA = "residual_pca"
 RESIDUAL_TRAJECTORY = "residual_trajectory"
 ATTENTION_FLOW = "attention_flow"
 GATE_FEATURES = "gate_features"
-TEMPORAL_DYNAMICS = "temporal_dynamics"
-CONTRASTIVE_PROJECTION = "contrastive_projection"
 
 # Union labels: a block built by concatenating others, addressed as one.
 ATTENTION_AND_CACHE = "attention_and_cache"
@@ -94,8 +90,6 @@ BLOCK_STORED_NAMES: dict[str, str] = {
     RESIDUAL_TRAJECTORY: RESIDUAL_TRAJECTORY,
     ATTENTION_FLOW: ATTENTION_FLOW,
     GATE_FEATURES: GATE_FEATURES,
-    TEMPORAL_DYNAMICS: TEMPORAL_DYNAMICS,
-    CONTRASTIVE_PROJECTION: CONTRASTIVE_PROJECTION,
 }
 
 # An npz holds a block's columns under `features_<stored name>`, and the JSON
@@ -109,25 +103,22 @@ BLOCK_NPZ_KEYS: dict[str, str] = {
 
 # The blocks the numeric anchor builds, in vector order, and the families beside them.
 CORE_BLOCKS = [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA]
-FAMILY_BLOCKS = [
-    RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES,
-    TEMPORAL_DYNAMICS, CONTRASTIVE_PROJECTION,
-]
+FAMILY_BLOCKS = [RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES]
 
 # A union is built only when every member it names is present; a union missing a
 # member is omitted rather than built short, because a short union would be a
 # different feature set reported under the same label — a label naming blocks the
 # numbers do not contain.
+#
+# ``ALL_FAMILIES`` spans every family block, so it is written as that list rather
+# than as a second enumeration of the same members.
 BLOCK_UNIONS: dict[str, list[str]] = {
     ATTENTION_AND_CACHE: [ATTENTION_AND_DELTAS, CACHE_AND_KEYS],
     ALL_CORE: list(CORE_BLOCKS),
-    ALL_FAMILIES: [
-        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, TEMPORAL_DYNAMICS,
-    ],
+    ALL_FAMILIES: list(FAMILY_BLOCKS),
     EVERYTHING: [*CORE_BLOCKS, *FAMILY_BLOCKS],
     ATTENTION_AND_CACHE_WITH_FAMILIES: [
-        ATTENTION_AND_DELTAS, CACHE_AND_KEYS,
-        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, TEMPORAL_DYNAMICS,
+        ATTENTION_AND_DELTAS, CACHE_AND_KEYS, *FAMILY_BLOCKS,
     ],
 }
 
@@ -230,25 +221,20 @@ class Run4Data:
 def load_run4(
     signature_dir: Path | str | None = None,
     core_only: bool = True,
-    addon_dirs: list[Path | str] | None = None,
     mode_filter: list[str] | None = None,
 ) -> Run4Data:
     """
-    Load signature data with optional addon directories for split feature sets.
+    Load signature data from one directory of banked vectors.
 
     Parameters
     ----------
     signature_dir : Path, optional
-        Primary directory containing gen_NNN.npz and gen_NNN.json files.
+        Directory containing gen_NNN.npz and gen_NNN.json files.
         Defaults to :func:`default_signature_dir`.
     core_only : bool
         If True (default), load only the balanced core set:
         20 shared topics × 5 modes = 100 samples.
         Excludes multi-repetition extras and supplementary linear samples.
-    addon_dirs : list[Path], optional
-        Additional directories with features_* arrays to merge in.
-        Files must match gen_NNN.npz naming. Extra blocks are added
-        alongside those from the primary directory.
     mode_filter : list[str], optional
         If provided, only include samples whose mode is in this list.
         Applied after core_only filtering.
@@ -379,94 +365,6 @@ def load_run4(
         for name, arrays in block_arrays.items()
         if arrays  # skip empty
     }
-
-    # ── Merge addon directories ──
-    if addon_dirs:
-        # Build a mapping from file stem to sample index for matching
-        stem_to_idx = {s.file_stem: i for i, s in enumerate(samples)}
-
-        for addon_dir in addon_dirs:
-            addon_path = Path(addon_dir)
-            if not addon_path.exists():
-                logger.warning(f"Addon dir not found: {addon_path}")
-                continue
-
-            # Discover blocks in addon
-            addon_files = sorted(addon_path.glob("gen_*.npz"))
-            if not addon_files:
-                logger.warning(f"No npz files in addon dir: {addon_path}")
-                continue
-
-            first_addon = np.load(addon_files[0], allow_pickle=True)
-            addon_blocks: dict[str, str] = {}
-            for block_name, npz_key in BLOCK_NPZ_KEYS.items():
-                if npz_key in first_addon.files and block_name not in block_features:
-                    addon_blocks[block_name] = npz_key
-
-            if not addon_blocks:
-                logger.info(f"  Addon {addon_path.name}: no new blocks (all duplicates)")
-                continue
-
-            logger.info(
-                f"  Addon {addon_path.name}: merging {list(addon_blocks.keys())}"
-            )
-
-            # Load addon features in sample order
-            addon_arrays: dict[str, list[NDArray | None]] = {
-                k: [None] * len(samples) for k in addon_blocks
-            }
-            matched = 0
-            for npz_file in addon_files:
-                stem = npz_file.stem
-                if stem not in stem_to_idx:
-                    continue
-                idx = stem_to_idx[stem]
-                addon_metadata_path=npz_file.with_suffix(".json")
-                try:
-                    addon_metadata=json.loads(addon_metadata_path.read_text()) if addon_metadata_path.exists() else {}
-                except (json.JSONDecodeError,OSError) as error:
-                    if lane_id is not None:
-                        raise MixedLaneError("tagged signature addon has unreadable metadata") from error
-                    addon_metadata={}
-                # Feature concatenation is also a scientific join; an untagged
-                # addon must not silently enter a tagged lane's vector.
-                require_single_lane([all_meta[idx][1],addon_metadata])
-                data = np.load(npz_file, allow_pickle=True)
-                for block_name, npz_key in addon_blocks.items():
-                    addon_arrays[block_name][idx] = data[npz_key]
-                matched += 1
-
-                # Grab feature names
-                if all_feature_names is not None:
-                    addon_names = data.get("feature_names")
-                    addon_meta_path = npz_file.with_suffix(".json")
-                    if addon_names is not None and addon_meta_path.exists():
-                        try:
-                            with open(addon_meta_path) as f:
-                                addon_meta = json.load(f)
-                            addon_slices = addon_meta.get(STORED_BLOCK_SLICES_KEY, {})
-                            for tn in addon_blocks:
-                                if tn not in all_feature_names:
-                                    sk = BLOCK_STORED_NAMES[tn]
-                                    if sk in addon_slices:
-                                        s, e = addon_slices[sk]
-                                        all_feature_names[tn] = addon_names[s:e]
-                        except (json.JSONDecodeError, OSError):
-                            pass
-
-            if matched < len(samples):
-                logger.warning(
-                    f"  Addon {addon_path.name}: only {matched}/{len(samples)} "
-                    f"samples matched — skipping incomplete addon"
-                )
-                continue
-
-            # Stack and add to block_features
-            for block_name, arrays in addon_arrays.items():
-                if any(a is None for a in arrays):
-                    logger.warning(f"  Addon block {block_name}: has None entries, skipping")
-                    continue
-                block_features[block_name] = np.stack(arrays, axis=0)
 
     # Build the unions — a union whose every member is present, and no other.
     group_features: dict[str, NDArray[np.float32]] = {}
@@ -601,7 +499,6 @@ def load_analysis_data(
     run_name: str,
     core_only: bool = True,
     load_text: bool = True,
-    addon_dirs: list[Path | str] | None = None,
     mode_filter: list[str] | None = None,
 ) -> AnalysisData:
     """Load signature data with optional text fields for semantic analysis.
@@ -616,8 +513,6 @@ def load_analysis_data(
         If True, load only one rep per topic-mode pair.
     load_text : bool
         If True, also load generated text from JSON metadata.
-    addon_dirs : list[Path], optional
-        Additional directories with features_* arrays to merge.
     mode_filter : list[str], optional
         If provided, only include samples whose mode is in this list.
     """
@@ -625,7 +520,6 @@ def load_analysis_data(
     run4 = load_run4(
         signature_dir=sig_dir,
         core_only=core_only,
-        addon_dirs=addon_dirs,
         mode_filter=mode_filter,
     )
 

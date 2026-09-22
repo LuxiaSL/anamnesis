@@ -85,8 +85,6 @@ reviewer reads for.
 * `build_checkpoint_series.py` — a training directory's adapter checkpoints as a
   replay series.
 * `run_replay_multickpt.py` — that series replayed on one model load per worker.
-* `train_contrastive_projection.py` — fit the learned projection a model's
-  signatures are computed through.
 """
 
 from __future__ import annotations

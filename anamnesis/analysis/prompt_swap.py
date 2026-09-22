@@ -88,9 +88,8 @@ class SwapSample(BaseModel):
 
 def load_swap_samples(
     signature_dir: Path,
-    addon_dirs: Sequence[Path] | None = None,
 ) -> tuple[list[SwapSample], dict[str, list[F32]]]:
-    """Swap generations and their features, per block, from the primary bank and addons.
+    """Swap generations and their features, per block, from the bank.
 
     A block is kept only where **every** swap sample has it: a block present for some
     samples and absent for others would train and predict over different feature
@@ -133,26 +132,16 @@ def load_swap_samples(
 
     per_block: dict[str, list[F32 | None]] = {}
 
-    def absorb(index: int, npz_path: Path, *, only_missing: bool) -> None:
+    def absorb(index: int, npz_path: Path) -> None:
         data = np.load(npz_path, allow_pickle=True)
         for block, key in BLOCK_NPZ_KEYS.items():
             if key not in data.files:
                 continue
             column = per_block.setdefault(block, [None] * len(swap_paths))
-            if only_missing and column[index] is not None:
-                continue
             column[index] = np.asarray(data[key], dtype=np.float32)
 
     for index, npz_path in enumerate(swap_paths):
-        absorb(index, npz_path, only_missing=False)
-    for addon_dir in [Path(d) for d in (addon_dirs or [])]:
-        if not addon_dir.exists():
-            logger.warning(f"addon dir not found: {addon_dir}")
-            continue
-        for index, sample in enumerate(samples):
-            addon_npz = addon_dir / f"{sample.file_stem}.npz"
-            if addon_npz.exists():
-                absorb(index, addon_npz, only_missing=True)
+        absorb(index, npz_path)
 
     complete: dict[str, list[F32]] = {
         block: [array for array in column if array is not None]
@@ -349,13 +338,10 @@ def aggregate_swaps(
 def run_binary_prompt_swap(
     run_name: str,
     signature_dir: Path,
-    addon_dirs: Sequence[Path] | None = None,
 ) -> PromptSwapResult:
     """The whole test for one run: every swap pair, every block, then the pool."""
-    core = load_run4(
-        signature_dir=signature_dir, core_only=True, addon_dirs=list(addon_dirs or []) or None
-    )
-    samples, swap_features = load_swap_samples(signature_dir, addon_dirs)
+    core = load_run4(signature_dir=signature_dir, core_only=True)
+    samples, swap_features = load_swap_samples(signature_dir)
 
     by_swap: dict[str, list[int]] = {}
     for index, sample in enumerate(samples):

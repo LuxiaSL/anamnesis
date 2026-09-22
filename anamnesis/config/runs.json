@@ -4,40 +4,30 @@
       "name": "8b_baseline",
       "root": "outputs",
       "signature_dir": "runs/run_8b_baseline/signatures",
-      "addon_dirs": [],
       "description": "Baseline 8B extraction over the five format-controlled modes."
     },
     "3b_run4": {
       "name": "3b_run4",
       "root": "legacy",
       "signature_dir": "outputs/runs/run4_format_controlled/signatures",
-      "addon_dirs": [],
       "description": "Phase-0 3B run4, format-controlled, read from the legacy tree."
     },
     "8b_v2": {
       "name": "8b_v2",
       "root": "outputs",
       "signature_dir": "runs/8b_fat_01/signatures_v2",
-      "addon_dirs": [
-        "runs/8b_fat_01/signatures_v2_addon",
-        "runs/8b_fat_01/signatures_v2_contrastive"
-      ],
-      "description": "8B feature pipeline with the engineered families and the contrastive addon."
+      "description": "8B feature pipeline with the engineered families."
     },
     "3b_v2": {
       "name": "3b_v2",
       "root": "outputs",
       "signature_dir": "runs/3b_fat_01/signatures_v2",
-      "addon_dirs": [
-        "runs/3b_fat_01/signatures_v2_contrastive"
-      ],
-      "description": "3B feature pipeline with the contrastive addon."
+      "description": "3B feature pipeline with the engineered families."
     },
     "synthetic_demo": {
       "name": "synthetic_demo",
       "root": "outputs",
       "signature_dir": "runs/synthetic_demo/signatures",
-      "addon_dirs": [],
       "description": "Drawn, not measured: the bank anamnesis.scripts.make_synthetic_bank writes. The only run here a fresh checkout can produce, and no reading of it is a finding about a model."
     }
   }
