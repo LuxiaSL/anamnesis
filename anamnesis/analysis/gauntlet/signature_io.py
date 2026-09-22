@@ -70,8 +70,6 @@ RESIDUAL_PCA = "residual_pca"
 RESIDUAL_TRAJECTORY = "residual_trajectory"
 ATTENTION_FLOW = "attention_flow"
 GATE_FEATURES = "gate_features"
-TEMPORAL_DYNAMICS = "temporal_dynamics"
-CONTRASTIVE_PROJECTION = "contrastive_projection"
 
 # Union labels: a block built by concatenating others, addressed as one.
 ATTENTION_AND_CACHE = "attention_and_cache"
@@ -94,8 +92,6 @@ BLOCK_STORED_NAMES: dict[str, str] = {
     RESIDUAL_TRAJECTORY: RESIDUAL_TRAJECTORY,
     ATTENTION_FLOW: ATTENTION_FLOW,
     GATE_FEATURES: GATE_FEATURES,
-    TEMPORAL_DYNAMICS: TEMPORAL_DYNAMICS,
-    CONTRASTIVE_PROJECTION: CONTRASTIVE_PROJECTION,
 }
 
 # An npz holds a block's columns under `features_<stored name>`, and the JSON
@@ -109,25 +105,22 @@ BLOCK_NPZ_KEYS: dict[str, str] = {
 
 # The blocks the numeric anchor builds, in vector order, and the families beside them.
 CORE_BLOCKS = [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA]
-FAMILY_BLOCKS = [
-    RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES,
-    TEMPORAL_DYNAMICS, CONTRASTIVE_PROJECTION,
-]
+FAMILY_BLOCKS = [RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES]
 
 # A union is built only when every member it names is present; a union missing a
 # member is omitted rather than built short, because a short union would be a
 # different feature set reported under the same label — a label naming blocks the
 # numbers do not contain.
+#
+# ``ALL_FAMILIES`` spans every family block, so it is written as that list rather
+# than as a second enumeration of the same members.
 BLOCK_UNIONS: dict[str, list[str]] = {
     ATTENTION_AND_CACHE: [ATTENTION_AND_DELTAS, CACHE_AND_KEYS],
     ALL_CORE: list(CORE_BLOCKS),
-    ALL_FAMILIES: [
-        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, TEMPORAL_DYNAMICS,
-    ],
+    ALL_FAMILIES: list(FAMILY_BLOCKS),
     EVERYTHING: [*CORE_BLOCKS, *FAMILY_BLOCKS],
     ATTENTION_AND_CACHE_WITH_FAMILIES: [
-        ATTENTION_AND_DELTAS, CACHE_AND_KEYS,
-        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, TEMPORAL_DYNAMICS,
+        ATTENTION_AND_DELTAS, CACHE_AND_KEYS, *FAMILY_BLOCKS,
     ],
 }
 

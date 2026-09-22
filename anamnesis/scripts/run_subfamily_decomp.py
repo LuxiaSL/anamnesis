@@ -3,8 +3,7 @@
 Within a family, which signal carries the classification? The cut is made from the
 family's own feature names, a random forest is run on each part under stratified
 cross-validation, and the whole family's accuracy sits beside the parts as the
-comparison. ``temporal_dynamics`` additionally gets the coarse cut by substrate and
-the operator cut by window and spectral treatment.
+comparison.
 
 ``--modes`` narrows the corpus and changes where the result is written, because a
 decomposition over five modes and one over eight are not the same table.

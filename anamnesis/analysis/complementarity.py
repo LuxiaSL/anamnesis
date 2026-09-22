@@ -56,21 +56,17 @@ from anamnesis.analysis.gauntlet.signature_io import (
     ATTENTION_AND_DELTAS,
     ATTENTION_FLOW,
     CACHE_AND_KEYS,
-    CONTRASTIVE_PROJECTION,
     EVERYTHING,
     GATE_FEATURES,
     NORMS_AND_OUTPUT_STATS,
     RESIDUAL_PCA,
     RESIDUAL_TRAJECTORY,
-    TEMPORAL_DYNAMICS,
 )
 from anamnesis.analysis.gauntlet.utils import error_stub_reason, is_error_stub
 from anamnesis.feature_map import (
     FAMILY_ATTENTION_FLOW,
-    FAMILY_CONTRASTIVE_PROJECTION,
     FAMILY_GATE,
     FAMILY_RESIDUAL_TRAJECTORY,
-    FAMILY_TEMPORAL_DYNAMICS,
     STORED_FAMILY_ATTENTION_OTHER,
     STORED_FAMILY_ATTENTION_SPECTRAL,
     STORED_FAMILY_CACHE_AND_KEYS,
@@ -129,8 +125,6 @@ NEW_FAMILIES: tuple[str, ...] = (
     RESIDUAL_TRAJECTORY,
     ATTENTION_FLOW,
     GATE_FEATURES,
-    TEMPORAL_DYNAMICS,
-    CONTRASTIVE_PROJECTION,
 )
 V2_COMPOSITES: tuple[str, ...] = (
     ALL_FAMILIES, ATTENTION_AND_CACHE_WITH_FAMILIES, EVERYTHING,
@@ -145,8 +139,6 @@ BLOCK_BY_FAMILY: dict[str, str] = {
     FAMILY_RESIDUAL_TRAJECTORY: RESIDUAL_TRAJECTORY,
     FAMILY_ATTENTION_FLOW: ATTENTION_FLOW,
     FAMILY_GATE: GATE_FEATURES,
-    FAMILY_TEMPORAL_DYNAMICS: TEMPORAL_DYNAMICS,
-    FAMILY_CONTRASTIVE_PROJECTION: CONTRASTIVE_PROJECTION,
 }
 """The block a family's features are addressed in, for the families that have one.
 
@@ -154,8 +146,10 @@ BLOCK_BY_FAMILY: dict[str, str] = {
 it answers in families. A family is the finer cut — attention-and-deltas is two of them,
 one reading attention distributions and one reading their graph spectrum — so a family
 maps onto a block and not the other way round. A family in
-:data:`anamnesis.feature_map.FAMILY_LABELS` and absent here has no block of its own in
-any corpus these readings run over, and is reported under its family label."""
+:data:`anamnesis.feature_map.FAMILY_LABELS` and absent here is reported under its family
+label. For the two whose columns only a banked corpus carries, that label and the block
+label a banked result addresses them under are one string, so the fallback is the
+translation."""
 
 
 def pair_name(mode_a: str, mode_b: str) -> str:

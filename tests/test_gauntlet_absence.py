@@ -41,7 +41,6 @@ from anamnesis.analysis.gauntlet.signature_io import (
     BLOCK_STORED_NAMES,
     GATE_FEATURES,
     RESIDUAL_TRAJECTORY,
-    TEMPORAL_DYNAMICS,
     AnalysisData,
     load_analysis_data,
 )
@@ -56,7 +55,6 @@ FAMILY_WIDTHS = {
     RESIDUAL_TRAJECTORY: 4,
     ATTENTION_FLOW: 5,
     GATE_FEATURES: 3,
-    TEMPORAL_DYNAMICS: 6,
 }
 MODES = ["linear", "socratic", "contrastive"]
 N_TOPICS = 6
@@ -107,7 +105,7 @@ def test_the_corpus_holds_the_families_and_no_union_over_the_core_blocks(
 ) -> None:
     """The premise every test below rests on, stated once."""
     assert set(families_only.run4.block_features) == set(FAMILY_WIDTHS)
-    assert families_only.has_block(ALL_FAMILIES), "its four members are all present"
+    assert families_only.has_block(ALL_FAMILIES), "its three members are all present"
     assert not families_only.has_block(ATTENTION_AND_CACHE)
     all_blocks, _ = get_available_blocks(families_only)
     assert set(all_blocks) == set(FAMILY_WIDTHS) | {ALL_FAMILIES}

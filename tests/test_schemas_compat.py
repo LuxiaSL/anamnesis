@@ -34,6 +34,8 @@ from anamnesis.analysis.gauntlet.schemas.compat import (
     BLOCK_LABEL_RENAMES,
     COMPOUND_LABEL_FIELDS,
     FIELD_RENAMES,
+    KNOWN_LABELS,
+    READ_ONLY_LABELS,
     RETIRED_LABEL_SPELLINGS,
     SECTION_RENAMES,
     migrate_banked_results,
@@ -94,6 +96,10 @@ def test_every_label_says_whether_it_was_renamed() -> None:
     this, which is the point.
     """
     assert set(RETIRED_LABEL_SPELLINGS) == set(ALL_LABELS)
+    # A read-only label is not in that table, because it was never respelled — it is a
+    # label the loader addresses no block under and a banked document still carries.
+    assert READ_ONLY_LABELS & set(ALL_LABELS) == set()
+    assert KNOWN_LABELS == set(ALL_LABELS) | READ_ONLY_LABELS
     # No retired spelling collides with a label in use, which would make the
     # translation ambiguous.
     assert set(BLOCK_LABEL_RENAMES) & set(ALL_LABELS) == set()
@@ -316,7 +322,7 @@ def test_a_real_banked_run_validates_through_the_table(run: str) -> None:
             BLOCK_LABEL_RENAMES.get(label, label): value
             for label, value in original.items()
         }
-        assert set(readout.per_block_accuracy) <= set(ALL_LABELS)
+        assert set(readout.per_block_accuracy) <= KNOWN_LABELS
     if results.classification is not None:
-        assert set(results.classification.by_block) <= set(ALL_LABELS)
+        assert set(results.classification.by_block) <= KNOWN_LABELS
         assert ATTENTION_AND_CACHE in results.classification.by_block

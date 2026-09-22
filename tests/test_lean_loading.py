@@ -165,7 +165,7 @@ def _check_one_schema(raw_dir: Path, label: str) -> None:
     # NOTE: attn_entropy_* and head_agreement_* deliberately read ALL attention layers
     # present, so attn_layers=sampled is NOT feature-identical for the whole set of core
     # blocks on all-layer banks. Everything that reads attention at sampled layers only
-    # (cache-and-keys, attention_flow, per_head, temporal_dynamics) must be bit-identical:
+    # (cache-and-keys, attention_flow, per_head, gate_features) must be bit-identical:
     config = _config()
     ck_full, ck_names_full = extract_cache_and_keys(full, config)
     ck_lean, ck_names_lean = extract_cache_and_keys(lean_sub, config)
@@ -177,10 +177,9 @@ def _check_one_schema(raw_dir: Path, label: str) -> None:
     fam_cfg = FeaturePipelineConfig(
         include_core_blocks=False,
         enable_attention_flow=True,
-        enable_temporal_dynamics=True,
         enable_per_head=True,
         enable_gate_features=True,
-        # Required per-model fields. The four families under test read `sampled_layers`
+        # Required per-model fields. The three families under test read `sampled_layers`
         # from the ExtractionConfig, so these two only have to be a valid layer plan
         # for this synthetic geometry; no enabled family reads them.
         trajectory_layers=SAMPLED_LAYERS,

@@ -47,26 +47,23 @@ from anamnesis.analysis.complementarity import (
     pair_difficulty,
     pair_name,
 )
+from anamnesis.analysis.gauntlet.schemas.compat import READ_ONLY_LABELS
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
     ATTENTION_AND_CACHE,
     ATTENTION_AND_DELTAS,
     ATTENTION_FLOW,
     CACHE_AND_KEYS,
-    CONTRASTIVE_PROJECTION,
     GATE_FEATURES,
     NORMS_AND_OUTPUT_STATS,
     RESIDUAL_PCA,
     RESIDUAL_TRAJECTORY,
-    TEMPORAL_DYNAMICS,
 )
 from anamnesis.feature_map import (
     FAMILY_ATTENTION_FLOW,
-    FAMILY_CONTRASTIVE_PROJECTION,
     FAMILY_GATE,
     FAMILY_LABELS,
     FAMILY_RESIDUAL_TRAJECTORY,
-    FAMILY_TEMPORAL_DYNAMICS,
     named_family,
 )
 
@@ -263,7 +260,7 @@ def test_feature_names_are_grouped_by_family_and_sub_family() -> None:
     ``activation_norm_mean_L0``; a rule keyed on ``key_drift`` or ``act_norm`` matches
     no column in any bank and credits nothing.
     """
-    assert feature_family("cp_L16_t3_d07") == CONTRASTIVE_PROJECTION
+    assert feature_family("cp_L16_t3_d07") == "contrastive_projection"
     assert feature_family("af_L8_recency_bias") == ATTENTION_FLOW
     assert feature_family("attn_flow_recency_bias_L16") == ATTENTION_FLOW, (
         "one family, two spellings — the corpora that named it either way"
@@ -296,7 +293,9 @@ BLOCKLESS_FAMILIES = frozenset({
     "path_signature", "path_signature_output", "path_signature_attention",
 })
 """Families extracted after these corpora were banked, so no block of a banked result
-holds them. A new family lands in one set or the other by decision, not by default."""
+holds them. A new family lands in one of the three sets by decision, not by default: this
+one, the translation table, or the read-only labels — whose family label and banked block
+label are one string, which is why the fallback translates them."""
 
 CLASSIFIED_SPELLINGS = (
     "cp_L16_t3_d07", "af_L8_recency_bias", "attn_flow_recency_bias_L16", "gf_L16_sparsity_mean",
@@ -323,15 +322,13 @@ def test_one_classifier_answers_the_family_question() -> None:
     assert set(BLOCK_BY_FAMILY) <= FAMILY_LABELS, (
         "a label is translated that the classifier never returns"
     )
-    assert FAMILY_LABELS - set(BLOCK_BY_FAMILY) == BLOCKLESS_FAMILIES, (
+    assert FAMILY_LABELS - set(BLOCK_BY_FAMILY) == BLOCKLESS_FAMILIES | READ_ONLY_LABELS, (
         "a family was added to the taxonomy without saying which block, if any, holds it"
     )
     for label, block in (
         (FAMILY_ATTENTION_FLOW, ATTENTION_FLOW),
         (FAMILY_GATE, GATE_FEATURES),
         (FAMILY_RESIDUAL_TRAJECTORY, RESIDUAL_TRAJECTORY),
-        (FAMILY_TEMPORAL_DYNAMICS, TEMPORAL_DYNAMICS),
-        (FAMILY_CONTRASTIVE_PROJECTION, CONTRASTIVE_PROJECTION),
     ):
         assert BLOCK_BY_FAMILY[label] == block
 
