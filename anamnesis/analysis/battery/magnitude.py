@@ -1,20 +1,18 @@
-"""Decomposed magnitude ruler for FREE-GEN cells — addendum 2026-07-12e item 2.
+"""Decomposed magnitude ruler for FREE-GEN cells.
 
-Twice-observed geometry (A1 kill contrast; A3 all-60 rows): the median
-cross-condition pairwise delta for two clouds separated by δ with internal
-spread σ scales like sqrt(δ² + 2σ²) against a floor of sqrt(2)·σ — location
-shifts are square-root-compressed, so the k× pairwise bar implicitly demands
-an enormous δ. From 12e, magnitude verdicts for free-gen cells are stated on
-the 12c decomposition instead:
+A pairwise delta is the wrong ruler for a location shift. For two clouds
+separated by δ with internal spread σ, the median cross-condition pairwise delta
+scales like sqrt(δ² + 2σ²) against a floor of sqrt(2)·σ: the shift is
+square-root-compressed, so a k× bar on the pairwise statistic implicitly demands
+an enormous δ. A free-gen cell's magnitude is therefore stated on a decomposition
+instead:
 
   - centroid_shift  — mean |Δμ| over the cell's features, floor-z units
   - dispersion_ratio — median within-b pair delta / median within-a pair delta
 
-each against a PERMUTATION NULL (condition labels shuffled within prompt
-class, group sizes preserved). The raw pairwise ratio stays in emitted JSON
-as a conservative lower bound, never as the verdict column. Replay /
-matched-token cells are unaffected (12b seed-floor ruler: per-gen deltas are
-direct displacements — no pairwise compression).
+each against a PERMUTATION NULL (condition labels shuffled within prompt class,
+group sizes preserved). Replay / matched-token cells need none of this: their
+per-gen deltas are direct displacements, with no pairwise compression to undo.
 
 Permutation efficiency: a pair's |Δz| does not change under relabeling — only
 its subset membership (within-a / within-b / cross) does. All pooled
@@ -44,7 +42,7 @@ def decomposed_magnitude(
     n_perm: int = 1000,
     seed: int = 0,
 ) -> dict[str, dict[str, float]]:
-    """12e magnitude readout per cell. Convention: a = reference, b = condition.
+    """The magnitude readout per cell. Convention: a = reference, b = condition.
 
     Returns per cell:
       centroid_shift, p_shift (perm, one-sided greater),
@@ -112,12 +110,11 @@ def decomposed_magnitude(
         obs_ratio[cname] = (mb / ma) if (ma and ma > 1e-12) else float("inf")
 
     # Permutation null: shuffle labels WITHIN class, preserving group sizes.
-    # Three statistics share one pass over the permutations, so the hits are counted
-    # as they arrive rather than held as three null arrays and handed to
-    # anamnesis.analysis.battery.stats.permutation_pvalue. The arithmetic is that
-    # function's: counters start at 1 and the denominator below is n_perm + 1, which
-    # is the add-one correction written out — the observation counts as one of its
-    # own permutations, and no p here can be zero.
+    # Three statistics share one pass, so hits are counted as they arrive rather than
+    # held as three null arrays for anamnesis.analysis.battery.stats.permutation_pvalue.
+    # That function's arithmetic is written out here: counters start at 1 and the
+    # denominator is n_perm + 1, so the observation counts as one of its own
+    # permutations and no p here can be zero.
     ge_shift = {c: 1 for c in cell_names}
     ge_wider = {c: 1 for c in cell_names}
     ge_narrower = {c: 1 for c in cell_names}

@@ -1,11 +1,11 @@
-"""Family decomposition with floor-ruler + mass correction (§6b) — Wave-1 implementation.
+"""Family decomposition with a floor-ruler and a mass correction.
 
-Generalizes kv-rotation/experiments/exp11_family_decomp.py over feature_map cells:
-for each (source × method × dynamic × depth) cell, an arm effect COUNTS only if
-≥ k× the matching floor in that cell (floor-ruler), with per-cell feature-mass
-correction so big cells can't win by size. Localization speaks feature_map only: a
-cell, never a coarse feature block. The visibility map records BLINDNESS rows (N4) alongside
-carrier rows: "moves symmetrically / fails the ruler" is a result, not a miss.
+For each (source × method × dynamic × depth) cell, an arm effect COUNTS only if it
+is ≥ k× the matching floor in that cell (the floor-ruler), with a per-cell
+feature-mass correction so a big cell cannot win by size alone. Localization speaks
+feature_map only: a cell, never a coarse feature block. The visibility map records
+BLINDNESS rows (``N4_family_level``) beside carrier rows, because "moves
+symmetrically" and "fails the ruler" are results rather than misses.
 """
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """Map-wide statistics: BH-FDR over the visibility-map grid, permutation helpers,
-and the (n, M, law, floor-type) stamp every emitted number must carry (§6b).
+and the (n, M, law, floor-type) stamp every emitted number must carry.
 
 This module is the one home for the two family-level statistics the instrument
 reports, so that two analyses running the same test on the same input cannot
@@ -26,7 +26,7 @@ from anamnesis.analysis.battery.manifest import FloorType
 
 
 class ResultStamp(BaseModel):
-    """Provenance stamp — no number ships without one (prereg §1 statistics block)."""
+    """Provenance stamp — no number ships without one."""
 
     model_config = ConfigDict(frozen=True)
 

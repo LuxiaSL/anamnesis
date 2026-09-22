@@ -1,18 +1,20 @@
-"""Paired-delta construction (§6b) — Wave-1 implementation (first used by arm A1).
+"""Paired-delta construction.
 
-The unit of analysis is the PAIRED DELTA, never raw signature position (§1).
-Two pairing rules implemented here:
+The unit of analysis is the PAIRED DELTA, never a raw signature position. Two
+pairing rules:
 
   - WITHIN-condition (matched history): same prompt class + same condition,
-    different seed → the floor analog. floors.pair_deltas_by_class does this for
-    the Stage-0 corpus; arm runs reuse it for the addendum-12a item-2 variance check.
+    different seed → the floor analog, which is what an arm run compares its own
+    within-condition spread against. :func:`within_condition_deltas` here and
+    :func:`anamnesis.analysis.battery.floors.pair_deltas_by_class` apply the same
+    rule, the latter over the Stage-0 corpus.
   - CROSS-condition (the arm effect): same prompt class, one gen from each of two
     conditions (e.g. T=0.3 vs T=0.9) → the effect distribution compared against the
     Stage-0 floor per cell.
 
 Standardization: ALWAYS the Stage-0 stochastic-floor scale (median/MAD-floored) of
 the same model, so arm deltas, arm-conditional floors, and Stage-0 floors share one
-z space. Deltas are mean |Δz| over a cell's features (the exp11 aggregation).
+z space. A delta is the mean |Δz| over a cell's features.
 """
 from __future__ import annotations
 
@@ -113,7 +115,7 @@ def location_dispersion(
     b: ConditionCorpus,
     cells: dict[str, NDArray],
 ) -> dict[str, dict[str, float]]:
-    """First-class effect decomposition (addendum 2026-07-12c item 2): per cell,
+    """Effect decomposition, per cell:
     - centroid_shift: mean |Δ| of per-feature centroid difference between conditions
       (a location statistic, in floor-z units — same scale as the pair deltas)
     - dispersion_ratio: median within-b pair delta / median within-a pair delta

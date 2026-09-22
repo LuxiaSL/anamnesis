@@ -1,9 +1,9 @@
-"""Typed per-cell results + map-level rollup (§6b) — Wave-1 implementation.
+"""Typed per-cell results, and the map-level rollup over them.
 
-Raw-artifacts-next-to-claims: every reported cell carries the path of the raw
+Raw artifacts sit next to claims: every reported cell carries the path of the raw
 artifact backing it. The rollup is the visibility map itself: per arm × model,
-which cells carry, which are blind (N4 rows), the channel column, and the
-dissociation column — each number stamped (n, M, law, floor-type).
+which cells carry, which are blind, the channel column, and the dissociation
+column — each number stamped (n, M, law, floor-type).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class CellResult(BaseModel):
 
 
 class VisibilityMap(BaseModel):
-    """The map-level rollup — the paper's Part-I object."""
+    """The map-level rollup: every cell's result, as one saveable document."""
 
     cells: list[CellResult] = Field(default_factory=list)
 

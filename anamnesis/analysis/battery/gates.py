@@ -1,8 +1,8 @@
-"""Code gates — prompt-level discipline moved into assertions (swap-prep 2026-07-12).
+"""Code gates: emission discipline an analyzer cannot talk its way past.
 
-The three-strike soft-rule pattern (kill-vs-ruler; raw-vs-z; point-direction
-outcomes) happened with a vigilant enactor. These gates make the discipline
-survive a model swap: analyzers CANNOT emit what the prereg forbids.
+A rule held only in prose gets broken even with a vigilant reviewer, so the rules
+below are assertions instead. An analyzer CANNOT emit what they forbid, so the
+discipline survives a model swap.
 
 Every gate raises GateError (never warns) — a blocked emission is a bug in the
 caller, to be fixed at authoring time, not silenced.
@@ -13,14 +13,14 @@ from typing import Any, Mapping, Sequence
 
 
 class GateError(AssertionError):
-    """A prereg discipline gate refused an emission."""
+    """An emission-discipline gate refused a row."""
 
 
 REQUIRED_STAMP_KEYS = ("n", "M", "law", "floor_type")
 
 
 def require_stamp(row: Mapping[str, Any], context: str = "") -> None:
-    """Every emitted number carries (n, M, law, floor_type) — prereg §1/§6b.
+    """Every emitted number carries (n, M, law, floor_type).
 
     Call before writing any per-row result to a record file.
     """
@@ -35,8 +35,8 @@ def require_stamp(row: Mapping[str, Any], context: str = "") -> None:
 
 def require_gated_outcome(row: Mapping[str, Any], outcome_key: str,
                           gate_keys: Sequence[str], context: str = "") -> None:
-    """12d: a categorical verdict may exist ONLY alongside its own-tail BH gate
-    fields. Point direction never ships as a verdict.
+    """A categorical verdict exists ONLY alongside its own-tail BH gate fields.
+    Point direction never ships as a verdict.
     """
     if outcome_key in row:
         missing = [k for k in gate_keys if k not in row]
@@ -47,15 +47,15 @@ def require_gated_outcome(row: Mapping[str, Any], outcome_key: str,
 
 
 def reject_blind_judge_defense(rows: Sequence[Mapping[str, Any]]) -> None:
-    """12g codicil (a): a blind-k-way judge FAILURE may never be the evidence
-    that makes a row a class member. Judge failures defend membership only at
-    the hardened (2AFC) reading; judge successes may defeat (raise the rung).
+    """A blind-k-way judge FAILURE may never be the evidence that makes a row a
+    class member. Judge failures defend membership only at the hardened (2AFC)
+    reading; judge successes may defeat (raise the rung).
 
     Census rows must satisfy: any MEMBER/BORDERLINE row whose judge value is
     LOW (below internals by the member bar) either (a) binds its membership on
     a non-judge detector (content >= tfidf, i.e. the max was not lowered by the
     judge — structurally guaranteed by max()), AND (b) carries a hardening
-    annotation that is not 'pending' if its judge_gap is quoted-eligible.
+    annotation not spelled ``PENDING`` if its judge_gap is quoted-eligible.
     """
     for r in rows:
         if r.get("status") not in ("MEMBER", "BORDERLINE"):
@@ -65,8 +65,8 @@ def reject_blind_judge_defense(rows: Sequence[Mapping[str, Any]]) -> None:
             continue
         hardening = str(r.get("hardening", ""))
         if hardening.startswith("PENDING"):
-            # membership itself is fine (binds on trained detector via max);
-            # but emitting the row without the pending flag visible = violation
+            # Membership itself is fine — it binds on the trained detector via max().
+            # What the row still owes is the flag, where a reader of it sees it.
             if "PENDING" not in hardening:
                 raise GateError(
                     f"row {r.get('row')}/{r.get('model')}: quotable judge-gap "

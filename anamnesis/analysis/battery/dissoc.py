@@ -1,10 +1,10 @@
-"""Dissociation column (§0 item 4) — Wave-1 implementation.
+"""The dissociation column: what token-space sees against what the signature sees.
 
-For each arm: what token-space sees (token-KL, TF-IDF, judge hooks) vs what the
-signature sees. exp11's P3 (signature separates matched-token conditions that
-token-KL is structurally blind to) is the template. Detector-class blindness
-(cheap per-turn text detectors) feeds THIS column and must never be cited as an
-instrument null (§3 contrast-arm note).
+Per arm, the token-space readers (token-KL, TF-IDF, judge hooks) beside the
+signature effect. The case it exists to name: a signature separating two
+matched-token conditions that token-KL is blind to by construction, the tokens
+being identical. A detector failing feeds THIS column and is never an instrument
+null — it says the detector saw nothing, not that there was nothing to see.
 """
 from __future__ import annotations
 
