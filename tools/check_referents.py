@@ -8,10 +8,11 @@ defines, or a public URL all pass. A path into a private tree, a planning
 document, or a phrase that defers the meaning to a conversation does not.
 
 Scope is the same boundary G3's timelessness rule uses, and for the same reason:
-`documentation_lines` from `check_timelessness.py` is imported rather than
+`documentation_text` from `check_timelessness.py` is imported rather than
 reimplemented, so both halves of the documentation rule agree on what counts as
-prose. Every other string literal is data — a fixture, a log line, a JSON
-payload, an on-disk key — and data names whatever it names.
+prose — a comment, a docstring, and the message a `raise` or a logging call says
+out loud. Every other string literal is data — a fixture, a dict key, a filename,
+a JSON payload — and data names whatever it names.
 
 How a line is read
 ------------------
@@ -24,8 +25,9 @@ How a line is read
 2. **Private-tree referents** are flagged: a path into the research tree, a
    home-relative path, an absolute path that does not resolve inside this
    repository, or a bare planning-document name (a run of capitalised
-   hyphen-joined words, or a `-memo` suffix). A planning-style name that *is* a
-   file here passes, which is how `PORT-MAP.md` survives the same pattern.
+   hyphen-joined words, a title whose head is shouted and whose tail is not, or a
+   `-memo` suffix). A planning-style name that *is* a file here passes, which is
+   how `PORT-MAP.md` survives the same pattern.
 3. **Path-like tokens** are resolved against an index of the tree. A token counts
    as path-like when it carries a known file extension, or starts at a top-level
    entry of the repository; a placeholder or a glob is a schema and never a
@@ -40,7 +42,14 @@ How a line is read
    the substance — come from the `[defer]` section of the same data file. They
    are judgement, not syntax: which idioms bury meaning accumulates as the
    codebase is read, so they are versioned beside the checker rather than frozen
-   in it, exactly as the timelessness allowlist is.
+   in it, exactly as the date allowlist is.
+6. **Provenance citations** — a section mark, a named arm, a pre-registration, a
+   milestone code, a bare item code, a commit hash — come from the `[cite]`
+   section of the same file. They are the other half of the deferral rule: a
+   deferral points at a conversation, a provenance citation points at a document,
+   and outside the tree that held them both leave the reader with nothing to
+   open. The code is the receipt for what the code does, and the history of how
+   it got here is git's to keep.
 
 Matching is line-scoped, like the timelessness rules: a referent split across a
 line break is not seen. Writing a path on one line is the cheaper half of that
@@ -69,7 +78,7 @@ from typing import Iterable, Sequence, TextIO
 from tools.check_timelessness import (
     SKIP_DIRS,
     TimelessnessError,
-    documentation_lines,
+    documentation_text,
     iter_python_files,
 )
 
@@ -80,6 +89,7 @@ PRIVATE_RULE = "private-tree"
 PATH_RULE = "unresolved-path"
 MODULE_RULE = "unresolved-module"
 DEFERRAL_RULE = "buried-deferral"
+CITATION_RULE = "provenance-citation"
 
 #: Extensions that make a token a path rather than prose, with or without a slash.
 PATH_EXTENSIONS = frozenset(
@@ -99,6 +109,13 @@ ABSOLUTE_PATH_RE = re.compile(r"(?<![\w.])/(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+"
 #: Three rather than two, so an ordinary compound adjective (`BH-FDR-corrected`,
 #: whose tail is prose) does not read as a document name.
 DOC_NAME_RE = re.compile(r"\b(?:[A-Z][A-Z0-9]+-){2,}[A-Z][A-Z0-9]+[A-Za-z0-9._-]*")
+#: The other way a document title is written: a shouted head, then a hyphenated
+#: sentence. `SPE[C]-path-receptacles-and-span-coverage` is the shape, and the tail is
+#: what separates it from prose — a contrast name (`ANCHOR-versus-RECENCY`) or a
+#: category label (`PORT-as-is`) joins two or three words, while a title spells out
+#: what the document is about and runs to four or more. Three tail segments is the
+#: line, measured against the compounds this codebase actually writes.
+DOC_TITLE_RE = re.compile(r"\b[A-Z]{3,}(?:-[A-Za-z0-9]+){3,}")
 #: Explicit planning-document prefixes, bracketed so this file does not match itself.
 DOC_KEYWORD_RE = re.compile(
     r"\b(?:PORT-MANIFES[T]|ORIENTATIO[N]|HANDOF[F]|HANDOVE[R]|RULIN[G]|PREREG|SESSION)"
@@ -119,7 +136,8 @@ SPACED_DOC_NAME_RE = re.compile(
 
 ALLOW_SECTION = "allow"
 DEFER_SECTION = "defer"
-SECTIONS = (ALLOW_SECTION, DEFER_SECTION)
+CITE_SECTION = "cite"
+SECTIONS = (ALLOW_SECTION, DEFER_SECTION, CITE_SECTION)
 
 
 class ReferentError(RuntimeError):
@@ -139,15 +157,18 @@ class Violation:
 
 @dataclass(frozen=True)
 class Allowlist:
-    """The two pattern sets the data file carries.
+    """The three pattern sets the data file carries.
 
     `allow` patterns mask legitimate identifiers out of a line before referents
-    are looked for; `defer` patterns are the prose idioms that bury meaning.
+    are looked for; `defer` patterns are the prose idioms that bury meaning; `cite`
+    patterns are the provenance idioms that point at a document instead of stating
+    the fact.
     """
 
     path: Path
     allow: tuple[re.Pattern[str], ...]
     defer: tuple[re.Pattern[str], ...]
+    cite: tuple[re.Pattern[str], ...]
 
     def mask(self, text: str) -> str:
         """Blank every allowed span, preserving line length so columns still line up."""
@@ -168,6 +189,7 @@ class ReferentReport:
     allowlist: str
     allow_size: int
     defer_size: int
+    cite_size: int
     files_scanned: int = 0
     violations: list[Violation] = field(default_factory=list)
     read_errors: list[str] = field(default_factory=list)
@@ -190,6 +212,7 @@ class ReferentReport:
             "allowlist": self.allowlist,
             "allow_patterns": self.allow_size,
             "defer_patterns": self.defer_size,
+            "cite_patterns": self.cite_size,
             "counts": {
                 "files_scanned": self.files_scanned,
                 "violations": len(self.violations),
@@ -210,16 +233,22 @@ def load_allowlist(path: Path) -> Allowlist:
     uncompilable regex is an error rather than a silently dropped line: a
     swallowed pattern would make the gate quietly weaker or quietly noisier.
 
-    `[allow]` patterns are case-sensitive and `[defer]` patterns are not, because
-    the two sections match different kinds of thing: capitalisation is often what
-    separates an identifier from the prose around it, while a deferral phrase is
-    prose and stands at the head of a sentence as readily as inside one.
+    `[allow]` and `[cite]` patterns are case-sensitive and `[defer]` patterns are
+    not, because the sections match different kinds of thing: capitalisation is
+    often what separates an identifier or a code from the prose around it, while a
+    deferral phrase is prose and stands at the head of a sentence as readily as
+    inside one. A `[cite]` pattern that wants both spellings says so itself, with
+    a character class or an inline `(?i:...)`.
     """
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ReferentError(f"allowlist unreadable: {path} ({exc})") from exc
-    buckets: dict[str, list[re.Pattern[str]]] = {ALLOW_SECTION: [], DEFER_SECTION: []}
+    buckets: dict[str, list[re.Pattern[str]]] = {
+        ALLOW_SECTION: [],
+        DEFER_SECTION: [],
+        CITE_SECTION: [],
+    }
     section = ALLOW_SECTION
     for number, line in enumerate(raw.splitlines(), start=1):
         stripped = line.strip()
@@ -242,6 +271,7 @@ def load_allowlist(path: Path) -> Allowlist:
         path=path,
         allow=tuple(buckets[ALLOW_SECTION]),
         defer=tuple(buckets[DEFER_SECTION]),
+        cite=tuple(buckets[CITE_SECTION]),
     )
 
 
@@ -402,6 +432,7 @@ def scan_private(text: str, index: TreeIndex) -> list[tuple[str, str]]:
     for pattern in (
         ABSOLUTE_PATH_RE,
         DOC_NAME_RE,
+        DOC_TITLE_RE,
         DOC_KEYWORD_RE,
         MEMO_NAME_RE,
         SPACED_DOC_NAME_RE,
@@ -453,14 +484,14 @@ def scan_source(
     allowlist: Allowlist,
     display: str | None = None,
 ) -> list[Violation]:
-    """Flag one file's documentation lines."""
-    doc_lines = documentation_lines(path, source)
+    """Flag one file's prose lines."""
+    prose = documentation_text(path, source)
     file_str = display if display is not None else str(path)
     violations: list[Violation] = []
     for number, raw in enumerate(source.splitlines(), start=1):
-        if number not in doc_lines:
+        if number not in prose:
             continue
-        text = allowlist.mask(raw.rstrip("\n"))
+        text = allowlist.mask(prose[number])
         hits: list[tuple[str, str]] = scan_private(text, index)
         hits.extend(scan_paths(text, index, [m for _, m in hits]))
         hits.extend(scan_modules(text, index))
@@ -468,6 +499,10 @@ def scan_source(
             deferral = pattern.search(text)
             if deferral is not None:
                 hits.append((DEFERRAL_RULE, deferral.group(0)))
+        for pattern in allowlist.cite:
+            citation = pattern.search(text)
+            if citation is not None:
+                hits.append((CITATION_RULE, citation.group(0)))
         for rule, matched in hits:
             violations.append(
                 Violation(
@@ -505,6 +540,7 @@ def build_report(
         allowlist=str(allowlist_path.resolve()),
         allow_size=len(allowlist.allow),
         defer_size=len(allowlist.defer),
+        cite_size=len(allowlist.cite),
     )
 
     seen: set[Path] = set()
@@ -545,7 +581,7 @@ def print_report(report: ReferentReport, stream: TextIO | None = None) -> None:
     line(f"  repo: {report.repo}")
     line(
         f"  allowlist: {report.allowlist} "
-        f"({report.allow_size} allow, {report.defer_size} defer)"
+        f"({report.allow_size} allow, {report.defer_size} defer, {report.cite_size} cite)"
     )
     line(f"  files scanned: {report.files_scanned}")
     line(f"  violations: {len(report.violations)}")
@@ -562,7 +598,7 @@ def print_report(report: ReferentReport, stream: TextIO | None = None) -> None:
 
 def rule_names() -> Iterable[str]:
     """Every rule identifier this checker can emit."""
-    return (PRIVATE_RULE, PATH_RULE, MODULE_RULE, DEFERRAL_RULE)
+    return (PRIVATE_RULE, PATH_RULE, MODULE_RULE, DEFERRAL_RULE, CITATION_RULE)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

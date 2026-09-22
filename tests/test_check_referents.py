@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from tools.check_referents import (
+    CITATION_RULE,
     DEFAULT_ALLOWLIST,
     DEFAULT_REPO,
     DEFERRAL_RULE,
@@ -39,6 +40,11 @@ https?://[^\\s`'"<>)\\]]+
 [defer]
 \\bas discussed\\b
 \\bsee the (?:earlier|previous)\\b
+
+[cite]
+§
+(?i:prereg)
+\\bA[1-7]\\b
 """
 
 
@@ -97,6 +103,79 @@ def test_home_relative_and_absolute_paths_flag(tree: Path) -> None:
 def test_planning_document_name_flags(tree: Path) -> None:
     hits = check(tree, "# Ruled in ORIENTATION-brief-2026-01-01.md.\n")
     assert hits and hits[0][0] == PRIVATE_RULE
+
+
+def test_a_shouted_head_with_a_spelled_out_tail_is_a_document_name(tree: Path) -> None:
+    """The second title shape: capitals, then a hyphenated sentence saying the subject."""
+    hits = check(
+        tree,
+        '"""The two sources are ruled in SPEC-path-receptacles-and-span-coverage.md."""\n',
+    )
+    assert any(rule == PRIVATE_RULE for rule, _ in hits), hits
+
+
+def test_a_short_hyphenated_compound_is_prose_not_a_title(tree: Path) -> None:
+    """A contrast name and a category label join two words; a title spells out a subject."""
+    assert check(tree, "# The ANCHOR-versus-RECENCY contrast, over PORT-as-is items.\n") == []
+
+
+def test_provenance_citations_flag(tree: Path) -> None:
+    """A citation of a document outside the tree: the reader has nothing to open."""
+    hits = check(
+        tree,
+        '''
+        # The template is one per arm (prereg, one analysis template per model).
+        """The row is read the way A3 defined it."""
+        ''',
+    )
+    assert sorted(hits) == [
+        (CITATION_RULE, "A3"),
+        (CITATION_RULE, "prereg"),
+    ], hits
+
+
+def test_a_referent_in_a_raised_message_flags(tree: Path) -> None:
+    """The message a program says out loud is read by a stranger, who can follow nothing."""
+    hits = check(
+        tree,
+        '''
+        def run(count: int) -> None:
+            if not count:
+                raise ValueError("no rows under arms — see research/notes/some-memo.md")
+        ''',
+    )
+    assert [rule for rule, _ in hits] == [PRIVATE_RULE]
+
+
+def test_a_referent_in_a_logged_message_flags(tree: Path) -> None:
+    hits = check(
+        tree,
+        '''
+        import logging
+
+        LOGGER = logging.getLogger(__name__)
+
+
+        def run() -> None:
+            LOGGER.warning("falling back to pkg/missing.py")
+        ''',
+    )
+    assert hits == [(PATH_RULE, "pkg/missing.py")]
+
+
+def test_a_substitution_inside_a_message_is_code_not_prose(tree: Path) -> None:
+    """A filename built in an f-string is data the program handles, not a claim."""
+    hits = check(
+        tree,
+        '''
+        from pathlib import Path
+
+
+        def run(root: Path) -> None:
+            raise FileNotFoundError(f"unreadable: {root / 'pkg/missing.py'}")
+        ''',
+    )
+    assert hits == []
 
 
 def test_nonexistent_repo_path_flags(tree: Path) -> None:
@@ -179,10 +258,17 @@ def test_relative_path_from_a_sibling_module_resolves(tree: Path) -> None:
     assert check(tree, "# The contract is in real.py.\n") == []
 
 
-def test_shipped_repository_passes_its_own_gate() -> None:
-    """The rule applies to the checker and to everything beside it."""
+def test_the_checkers_pass_their_own_gate() -> None:
+    """The rule applies to the checker and to everything beside it in `tools/`.
+
+    The gate's own verdict over the package and the suite is the command in
+    `CONTRIBUTING.md`, run per pull request; a unit test asserting the whole tree is
+    clean would make one contributor's unrelated prose fail everybody's suite. What
+    this pins is the property the checker cannot be excused from: it holds itself to
+    the rule it enforces, which is why its patterns bracket a character.
+    """
     report = build_report(
-        roots=[DEFAULT_REPO / "anamnesis", DEFAULT_REPO / "tools", DEFAULT_REPO / "tests"],
+        roots=[DEFAULT_REPO / "tools"],
         repo=DEFAULT_REPO,
         allowlist_path=DEFAULT_ALLOWLIST,
     )
@@ -229,6 +315,7 @@ def test_allowlist_sections_are_read_into_their_own_buckets(tree: Path) -> None:
     loaded = load_allowlist(tree / "allow.txt")
     assert len(loaded.allow) == 4
     assert len(loaded.defer) == 2
+    assert len(loaded.cite) == 3
     url = "https://example.com/x"
     assert loaded.mask(f"see {url} now") == "see " + " " * len(url) + " now"
 
@@ -273,7 +360,7 @@ def test_cli_exits_two_when_the_check_cannot_run(
 
 def test_rule_names_are_distinct() -> None:
     names = list(rule_names())
-    assert len(names) == len(set(names)) == 4
+    assert len(names) == len(set(names)) == 5
 
 
 def test_a_version_tagged_document_title_written_with_spaces_flags(tree: Path) -> None:
