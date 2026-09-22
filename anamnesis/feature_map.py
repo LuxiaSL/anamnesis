@@ -247,7 +247,7 @@ def _source(n: str) -> Source:
     if n.startswith("attnres_committed"): return Source.residual   # committed residual-block snapshots (geometry)
     if n.startswith("attnres_"): return Source.routing             # block-routing softmax = cross-block allocation
     # MoE expert routing before the output rules: router names contain entropy/top-k.
-    if n.startswith(("xrt_", "expert_routing_")): return Source.expert_routing  # `xrt_`, or its long spelling
+    if n.startswith(("xrt_", "expert_routing_")): return Source.expert_routing
     # The path-signature siblings. Their prefixes are disjoint from every other family's names,
     # which is what keeps these two branches from reclassifying anything already banked.
     if n.startswith("out_sig"): return Source.output       # output-statistics path (entropy/margin/eos/varentropy)
@@ -260,7 +260,7 @@ def _source(n: str) -> Source:
     if n.startswith("kv_") or n.startswith("epoch_"): return Source.keys      # key-vector geometry / key-centroid epochs
     if n.startswith(("cache_", "attn_flow_", "attn_entropy_", "head_agreement_", "ph_", "spectral_")):
         return Source.attention   # attention-weight reads, spectral_* among them: the similarity
-        # graph `_extract_spectral_features` builds is built from attention distributions, not from
+        # graph `_extract_spectral_features` builds comes from attention distributions, not from
         # hidden states. smoothness is hybrid (attention graph × residual-norm signal) and is read
         # here, with its graph.
     if n.startswith(("activation_norm", "res_traj", "res_sig", "delta_", "pca_")):
