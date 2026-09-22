@@ -1043,8 +1043,9 @@ class RawGenerationDataOutputStatsSource(PathSource):
             )
         if not eos_token_ids:
             raise PathSignatureError(
-                "eos_token_ids must be non-empty — EOS ids are model-specific (CLAUDE.md "
-                "gotcha) and absence must raise, never silently default."
+                "eos_token_ids must be non-empty: end-of-sequence ids are "
+                "model-specific and carried by the model preset, so an empty set "
+                "would run every generation to the token budget."
             )
         self._data = data
         self._gen_id = gen_id

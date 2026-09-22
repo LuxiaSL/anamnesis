@@ -215,7 +215,7 @@ def test_the_document_states_its_bars_and_runs_the_gate(tmp_path: Path) -> None:
 
 
 def test_the_command_refuses_a_root_with_no_records(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="no A1 or A3 records"):
+    with pytest.raises(FileNotFoundError, match="no record directory from"):
         run_census(tmp_path / "empty", tmp_path / "out")
     with pytest.raises(FileNotFoundError):
         main(["--arms-root", str(tmp_path / "empty"), "--out-dir", str(tmp_path / "out")])

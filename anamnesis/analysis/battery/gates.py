@@ -12,6 +12,14 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 
+PENDING_HARDENING = "PENDING"
+"""The hardening spelling that means the work has not been done.
+
+A census row carries it while its hardening is outstanding, so a judge gap large
+enough to quote may not rest on it.
+"""
+
+
 class GateError(AssertionError):
     """An emission-discipline gate refused a row."""
 
@@ -43,7 +51,7 @@ def require_gated_outcome(row: Mapping[str, Any], outcome_key: str,
         if missing:
             raise GateError(
                 f"outcome {row[outcome_key]!r} emitted without gate fields "
-                f"{missing}{' in ' + context if context else ''} — 12d violation")
+                f"{missing}{' in ' + context if context else ''}")
 
 
 def reject_blind_judge_defense(rows: Sequence[Mapping[str, Any]]) -> None:
@@ -64,18 +72,16 @@ def reject_blind_judge_defense(rows: Sequence[Mapping[str, Any]]) -> None:
         if jg is None or jg < 0.10:
             continue
         hardening = str(r.get("hardening", ""))
-        if hardening.startswith("PENDING"):
-            # Membership itself is fine — it binds on the trained detector via max().
-            # What the row still owes is the flag, where a reader of it sees it.
-            if "PENDING" not in hardening:
-                raise GateError(
-                    f"row {r.get('row')}/{r.get('model')}: quotable judge-gap "
-                    "without hardening status — 12g violation")
-        if "blind" in hardening.lower() and "artifact" not in hardening.lower() \
-                and "PENDING" not in hardening:
+        if hardening.startswith(PENDING_HARDENING):
             raise GateError(
-                f"row {r.get('row')}/{r.get('model')}: blind-k-way reading "
-                "used as class defense — 12g codicil (a) violation")
+                f"row {r.get('row')}/{r.get('model')}: judge gap {jg} is quotable, "
+                f"but its hardening is {hardening!r} — a gap this size may not rest on "
+                "hardening that has not been done")
+        if "blind" in hardening.lower() and "artifact" not in hardening.lower():
+            raise GateError(
+                f"row {r.get('row')}/{r.get('model')}: a blind k-way judge reading "
+                "is being used as the class defense; a judge failure may not be the "
+                "evidence that makes a row a member")
 
 
 __all__ = ["GateError", "require_stamp", "require_gated_outcome",

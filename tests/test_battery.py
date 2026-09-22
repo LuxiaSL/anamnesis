@@ -108,7 +108,7 @@ def test_an_unstamped_row_is_refused_not_warned_about() -> None:
 
 
 def test_a_verdict_cannot_ship_without_the_gate_that_licenses_it() -> None:
-    with pytest.raises(GateError, match="12d violation"):
+    with pytest.raises(GateError, match="emitted without gate fields"):
         require_gated_outcome({"outcome": "CARRIES"}, "outcome", ["q_own_tail", "bh_family"])
     require_gated_outcome(
         {"outcome": "CARRIES", "q_own_tail": 0.01, "bh_family": "A1"},
@@ -124,7 +124,7 @@ def test_a_blind_judge_failure_cannot_be_read_as_class_membership() -> None:
     # A small gap is not quotable, so it needs no hardening annotation.
     reject_blind_judge_defense([{"status": "MEMBER", "judge_gap": 0.02}])
     reject_blind_judge_defense([{"status": "NON-MEMBER", "judge_gap": 0.5}])
-    with pytest.raises(GateError, match="12g codicil"):
+    with pytest.raises(GateError, match="used as the class defense"):
         reject_blind_judge_defense([
             {"status": "MEMBER", "row": "x", "model": "3b", "judge_gap": 0.2,
              "hardening": "blind-k-way judge could not tell them apart"},

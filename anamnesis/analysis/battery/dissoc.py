@@ -25,4 +25,7 @@ class DissociationRow(BaseModel):
 
 
 def dissociation_row(cell_id: str, token_outputs: object, signature_deltas: object) -> DissociationRow:
-    raise NotImplementedError("Wave-1: dissociation column (prereg §6b dissoc.py)")
+    raise NotImplementedError(
+        "the dissociation column is not implemented; it would name, per cell, "
+        "whether a change is visible to the tokens, to the signature, to both or to neither"
+    )

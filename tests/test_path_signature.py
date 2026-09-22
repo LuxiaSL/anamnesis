@@ -236,7 +236,7 @@ def test_no_regression_on_existing_name_shapes() -> None:
         assert tag.method != Method.unknown, name
 
 
-# ── §1a/§1b — the two sibling path sources (SPEC-path-receptacles-and-span-coverage-2026-09-11) ──
+# ── the two sibling path sources ──
 
 
 def test_seam_alias_is_identical() -> None:

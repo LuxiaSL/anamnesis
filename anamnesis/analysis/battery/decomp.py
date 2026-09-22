@@ -30,4 +30,7 @@ def decompose(
     floor: FloorReport,
     ruler_k: float = 2.0,
 ) -> list[CellVerdict]:
-    raise NotImplementedError("Wave-1: family decomposition w/ floor-ruler (prereg §6b decomp.py)")
+    raise NotImplementedError(
+        "per-family decomposition against a floor ruler is not implemented; "
+        "the floor report and the ruler multiple are the inputs it would take"
+    )

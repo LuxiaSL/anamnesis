@@ -1,11 +1,13 @@
-"""14e regression test — inv_freq_from_config must read theta from the tf-5.x rope_scaling
-dict when the top-level attribute is absent, and must NEVER silently default to 10000.
+"""`inv_freq_from_config` must find theta wherever the config keeps it, or refuse.
 
-The bug (2026-07-15): transformers 5.3 moved `rope_theta` INSIDE `config.rope_scaling`; the
-old `getattr(config, "rope_theta", 10000.0)` fired its default → every battery ROTATE row
-rotated keys with theta-10000 frequencies instead of the Llama-3 500000. These tests exercise
-the DEPLOYED config-reading path (not the math function with explicit args — the same-day check
-that missed the bug tested the wrong thing).
+Some configurations carry `rope_theta` as a top-level attribute and some carry it inside
+`config.rope_scaling`. A `getattr(config, "rope_theta", 10000.0)` reads the second shape as
+the first and silently returns 10000, which re-rotates keys at the wrong frequency — a
+plausible number for a wrong table, which is the worst failure available here. So absence
+raises and never defaults.
+
+These tests drive the config-reading path the loader actually calls, rather than the maths
+with theta passed explicitly: a check on the arithmetic alone cannot see this bug.
 """
 from __future__ import annotations
 

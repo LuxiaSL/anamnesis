@@ -140,7 +140,7 @@ def _row_dicts(rows: Sequence[CensusRow]) -> list[dict[str, Any]]:
 
 
 def a1_rows(arms_root: Path, *, record_dirs: Iterable[str] = A1_RECORD_DIRS) -> list[CensusRow]:
-    """The temperature row, per model, from every A1 record present.
+    """The temperature row, per model, from every record directory in ``A1_RECORD_DIRS``.
 
     The binding rung is named: where the likelihood probe is the higher of the two
     non-internals rungs, the row binds on likelihood and no judge was involved, so
@@ -230,7 +230,7 @@ def a3_rows(
     record_dirs: Iterable[str] = A3_RECORD_DIRS,
     modes: Sequence[str] = MODES,
 ) -> list[CensusRow]:
-    """One row per mode per model, from every A3 record present.
+    """One row per mode per model, from every record directory in ``A3_RECORD_DIRS``.
 
     The content rung here is ``max(trained TF-IDF, zero-shot judge)``: extending
     the detector set can only raise the bar a row has to clear, which is what
@@ -316,7 +316,8 @@ def census_document(rows: Sequence[CensusRow]) -> dict[str, Any]:
 def _escape_cell(text: str) -> str:
     """A row label with the table's own delimiter escaped.
 
-    Row names spell a contrast the way the arm did — ``A1:temperature(t03|t09)`` — and
+    A row name spells its contrast the way the record directory does, as in
+    ``<record>:temperature(t03|t09)``, and
     an unescaped pipe splits that cell into two, which shifts every column after it.
     """
     return text.replace("|", "\\|")
@@ -353,7 +354,8 @@ def run_census(arms_root: Path, out_dir: Path) -> list[CensusRow]:
     rows = a1_rows(Path(arms_root)) + a3_rows(Path(arms_root))
     if not rows:
         raise FileNotFoundError(
-            f"no A1 or A3 records under {arms_root} — a census over no rows is not a census"
+            f"no record directory from A1_RECORD_DIRS or A3_RECORD_DIRS found under "
+            f"{arms_root} — a census over no rows is not a census"
         )
     document = census_document(rows)
     out_dir = Path(out_dir)

@@ -179,3 +179,4 @@ https?://[^\s`'"<>)\]]+
 # a reader to go somewhere else to find out what the code in front of them does.
 # At least one digit and one letter, so an English word spelled in hex is not one.
 (?<![\w.-])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}(?![\w.-])
+

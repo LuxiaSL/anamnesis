@@ -3,7 +3,7 @@
 Catches the class of dim-mismatch / None-surface crashes that the GPU onboard-smoke misses
 (it exercises only the baseline extractor, not the v2 families). The original miss: the dense
 L0 gate (intermediate_size 10944) vs MoE shared_experts gate (moe_intermediate*n_shared 2816)
-broke gate_features' cross-layer cosine — so M6 capture gates the MoE shared branch only.
+broke gate_features' cross-layer cosine, so capture gates the MoE shared branch only.
 
 One documentation property rides along, because it is about these fields and nothing
 else checks it: what a banked router vector holds is stated in the comments on
@@ -83,8 +83,8 @@ def test_dsv2_full_v2_pipeline_runs_clean() -> None:
 
     assert len(res.features) > 0
     assert np.isfinite(res.features).all(), "non-finite features"
-    # v2.1: 19 per-layer × MoE layers + (adjacent-pairs + 1 global-mean = len(moe)) cross-layer CKA.
-    # For M6's 6 MoE layers → 19×6 + 6 = 120. (Older "~129" = pre-desk 15-pair CKA; ruled to 6.)
+    # 19 per-layer features per MoE layer, plus one cross-layer CKA column per adjacent
+    # pair and one global mean — which is len(moe) columns for len(moe) layers.
     xrt_names = [n for n in res.feature_names if n.startswith("xrt_")]
     xrt_n = len(xrt_names)
     expected = N_FEATURES_PER_LAYER * len(moe) + len(moe)
