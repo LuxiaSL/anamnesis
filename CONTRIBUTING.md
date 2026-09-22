@@ -14,8 +14,12 @@ travels the other road.
 ## The documentation rule
 
 Documentation and comments here obey two rules at once. Both are mechanically checked, and both
-apply to comments and docstrings — never to string data, which is content the program handles
-rather than prose a reader is meant to believe.
+apply to three surfaces: comments, docstrings, and the message a `raise` or a logging call says
+out loud. A stranger meets that last one at the moment something breaks, which is the worst
+moment to hand them a pointer they cannot follow. The rules never apply to string data — a
+fixture, a dict key, a filename, a row a run writes into a report — which is content the program
+handles rather than prose a reader is meant to believe. Inside an f-string, the substitutions are
+code and are read as such.
 
 ### 1. State what is true now
 
@@ -23,20 +27,28 @@ A comment describes the code as it stands. It does not narrate how the code got 
 
 No `previously`, `used to <verb>`, `changed in`, `we now`, `no longer`. No bare `TODO`, `FIXME`
 or `HACK` — a known gap is either a refusal the code makes explicitly, a test that pins the
-current behaviour, or an issue, not a word left in a file for somebody to find. A date belongs
-in a comment only when it dates *evidence*: a measurement, a ruling, a pre-registration, a
-finding that a reader may want to weigh. A date on an edit is history and goes.
+current behaviour, or an issue, not a word left in a file for somebody to find.
+
+**No dates.** Not on an edit, and not on evidence either. Git records when a line changed, and a
+dated measurement or decision belongs in the record that holds it, where a reader can weigh the
+whole thing instead of a fragment of it. What the code needs is the standing fact the code
+depends on, stated in the present tense; the date of the run that established it is provenance,
+and provenance is not what a comment is for.
 
 ```python
 # Good — the constraint, and why it is load-bearing.
 # Flash attention and SDPA return no attention weights, so the eager kernel is a
 # correctness requirement rather than a preference.
 
-# Good — a date on evidence.
-# Sub-perceptual at this dose (census 2026-07-12, n=80 per cell).
+# Good — the standing fact, with no date and nothing to chase.
+# The effect is below the threshold a blind judge resolves at this dose, so the
+# readout is reported as a bound rather than as a difference.
 
 # Bad — narrates an edit.
 # We now pin the thread pools; this used to inherit the parent's setting.
+
+# Bad — dates the evidence instead of stating it.
+# Sub-perceptual at this dose (census 2026-07-12, n=80 per cell).
 ```
 
 ### 2. Every referent must be reachable from this repository
@@ -50,6 +62,13 @@ ticket, or a conversation. It does not mean "see the earlier discussion", "as de
 or a pointer whose substance lives somewhere the reader cannot follow. A buried referent is the
 same failure as a stale date: it makes the reader depend on context they do not have, and it ages
 into a dead end.
+
+It also does not mean a **provenance citation** — a `§` section of a document that is not here, a
+named arm or milestone code, a pre-registration, an addendum or codicil, a bare item code like
+`14e`, a commit hash. The code is the receipt for what the code does, and git is the receipt for
+how it came to do it; a citation of the plan it was written under resolves nowhere for the reader
+in front of it. Numbered sections of the analysis are a different thing and stay: section 9 is a
+module in this tree, and a reader can open it.
 
 When the substance is short, state it inline. When it is long and public, link it. When it is
 long and private, restate the part this code depends on — one sentence of standing fact beats a
@@ -69,6 +88,9 @@ citation nobody can open.
 
 # Bad — defers the meaning to a conversation.
 # Kept for the reason discussed when this was ruled on.
+
+# Bad — cites the plan instead of stating the constraint.
+# One analysis template per arm x model (prereg §6b).
 ```
 
 The rule has one consequence worth stating plainly: **a claim in a docstring must match the code
@@ -93,6 +115,16 @@ A pull request merges when these pass. Each is a command you can run.
 | G4 import closure | every module reachable from a command or a test; no orphans | `python -m tools.check_import_closure --package anamnesis --roots anamnesis/scripts tests` |
 | G1 data compatibility | banked artifacts in, identical features out | `python -m tools.g1_hash_manifest` — see its own help; needs banked data |
 | G2 consolidation | a consolidated module smaller than the donors it replaced; test lines not shrinking | `python -m tools.g2_loc_report --repo .` |
+
+Each G3 rule is pinned by a corpus rather than by reading: `tests/test_gate_fixtures.py` holds the
+strings each checker must catch and the legitimate prose it must stay quiet on, one case per
+idiom, on each of the three surfaces. A rule that stops seeing something fails a test there
+instead of quietly reporting PASS. Closing a blind spot starts by adding the string that slipped
+through.
+
+Both G3 pattern files — `tools/timelessness_allowlist.txt` and `tools/referents_allowlist.txt` —
+carry a reason above every entry, and an entry is a claim that its reason is true *now*. When a
+reason expires, the entry goes, whatever it used to protect.
 
 `tools/surface_report.py` reports the size of the codebase in code tokens and documentation
 words. It is a trend instrument, not a gate: it says which direction the repository is moving.
