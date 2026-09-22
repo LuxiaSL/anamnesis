@@ -161,7 +161,7 @@ def replay_extract(
             gate_activations[int(layer_idx)] = [rows[i] for i in range(T)]
         gate_activations = gate_activations or None
 
-    # ── MoE router (vmb arm A7, M6): dense dist [1, L, n_experts] + branch norms [L] captured ONCE
+    # ── MoE router: dense dist [1, L, n_experts] + branch norms [L] captured ONCE
     # in the single forward; slice the gen-position rows P..P+T-1 (same positions as gate). ──
     router_dist: dict[int, list[F32]] | None = None
     if loaded.hook_state.router_dist:
@@ -174,7 +174,7 @@ def replay_extract(
             router_dist[int(layer_idx)] = [rows[i] for i in range(T)]
         router_dist = router_dist or None
 
-    # branch norms [shared, routed] + the v2.1 per-token cos(shared_out, routed_out) 3rd column,
+    # branch norms [shared, routed] + the per-token cos(shared_out, routed_out) 3rd column,
     # derived from the transient branch OUTPUT VECTORS (router_shared_vec / router_routed_vec), each
     # [n_tok_full, hidden] captured once in the single forward → slice P:P+T, cosine per row.
     router_branch_norms: dict[int, list[F32]] | None = None
@@ -202,7 +202,7 @@ def replay_extract(
             ]
         router_branch_norms = router_branch_norms or None
 
-    # v2.1 magnitude: per-token ‖router_logits‖ [1, L] captured once → slice P:P+T.
+    # Magnitude rung: per-token ‖router_logits‖ [1, L] captured once → slice P:P+T.
     router_logit_norms: dict[int, list[F32]] | None = None
     if loaded.hook_state.router_logit_norm:
         router_logit_norms = {}

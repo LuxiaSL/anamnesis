@@ -224,13 +224,13 @@ def run_single_generation(
 def router_fields_from_hooks(
     hook_state: Any, sampled_layers: list[int]
 ) -> tuple[dict[int, list[F32]] | None, dict[int, list[F32]] | None, dict[int, list[F32]] | None]:
-    """Build (router_dist, router_branch_norms, router_logit_norms) for MoE models (arm A7, M6).
+    """Build (router_dist, router_branch_norms, router_logit_norms) for MoE models.
 
     Dense models never populate hook_state.router_dist → returns (None, None, None), so the xrt
     family stays inert everywhere else. Prefill (index 0) is skipped, matching get_generation_keys.
     router_dist[l] = T×[n_experts] dense softmax; router_branch_norms[l] = T×[‖shared‖, ‖routed‖, cos]
-    (the v2.1 cos column derived from the transient branch vectors — 0.0 if vectors absent, e.g.
-    v1-captured data); router_logit_norms[l] = T×scalar ‖router_logits‖ (v2.1 magnitude rung).
+    (the cos column is derived from the transient branch vectors, and is 0.0 when a capture did
+    not bank them); router_logit_norms[l] = T×scalar ‖router_logits‖.
     """
     if not any(hook_state.router_dist.get(l, []) for l in sampled_layers):
         return None, None, None
@@ -243,7 +243,7 @@ def router_fields_from_hooks(
                 for s in gen
             ]
 
-    # v2.1 magnitude: per-token ‖router_logits‖ (last position per step, prefill skipped).
+    # Magnitude rung: per-token ‖router_logits‖ (last position per step, prefill skipped).
     router_logit_norms: dict[int, list[F32]] | None = None
     if any(hook_state.router_logit_norm.get(l, []) for l in sampled_layers):
         router_logit_norms = {}

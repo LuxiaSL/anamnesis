@@ -130,7 +130,7 @@ def extract_qk_geometry(
             features.extend(op_f.tolist())
             names.extend(op_n)
 
-    # basis-free cross-layer dispersion of query spread (no cross-layer cosine — C4 trap)
+    # basis-free cross-layer dispersion of query spread (no cross-layer cosine — unrelated bases)
     if len(layer_q_spread) >= 2:
         features.append(float(np.std(list(layer_q_spread.values()))))
     else:

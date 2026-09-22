@@ -1,14 +1,14 @@
 """Cross-layer KV-cache CKA — basis-invariant key/value structure agreement across depth.
 
-v3 deleted cross-layer key COSINE (C4): k_proj outputs at different layers live in unrelated learned
-bases, so a raw cosine between them is uninterpretable. The correct tool is **linear CKA** (Centered
-Kernel Alignment), which is invariant to orthogonal transforms and isotropic scaling — so it measures
-representational agreement across different bases. This is the principled replacement: how similar is the
-KV-cache geometry across layer depths, basis-cleanly.
+No raw cross-layer key COSINE is emitted anywhere: k_proj outputs at different layers live in
+unrelated learned bases, so a cosine between them is uninterpretable. The right tool is **linear
+CKA** (Centered Kernel Alignment), which is invariant to orthogonal transforms and isotropic
+scaling and therefore measures representational agreement across different bases. That is what
+this family reads: how similar the KV-cache geometry is across layer depths, basis-cleanly.
 
 Linear CKA(X, Y) = ||Yc^T Xc||_F^2 / (||Xc^T Xc||_F · ||Yc^T Yc||_F)  over the SAME rows (time steps),
 columns mean-centered. Computed on per-head-mean key/value matrices [T, head_dim] for sampled-layer pairs.
-Keys and values are both all-layer in v3. Reads `data.pre_rope_keys` and `data.v_proj_values`.
+Keys and values are both all-layer. Reads `data.pre_rope_keys` and `data.v_proj_values`.
 
 Whole-sequence CKA per pair (one scalar) — no temporal operators (windowed CKA is a documented extension).
 """

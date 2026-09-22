@@ -29,7 +29,7 @@ _MIN_T_WINDOWED = 4
 _MIN_T_STFT = 8
 
 
-# ── Cached name builders (C5) ─────────────────────────────────────────────────
+# ── Cached name builders ─────────────────────────────────────────────────
 # Feature names are pure functions of (prefix, n_windows); the ~thousands of
 # f-strings were rebuilt for every generation. Cached as tuples — callers must
 # not mutate (list(...) at the return sites keeps the public contract).

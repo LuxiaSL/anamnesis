@@ -1,19 +1,18 @@
 """MoE expert-routing features (Source.expert_routing; prefix `xrt_`).
 
 The fifth substrate in the source×method×depth map — read only on models with a
-Mixture-of-Experts MLP (vmb arm A7, M6 = DeepSeek-V2-Lite class: 2 shared + 64
-routed experts, top-6 greedy). Reads the per-generated-token router allocation
-distribution (RawGenerationData.router_dist), the shared/routed branch output
-norms + cosine (RawGenerationData.router_branch_norms), and the pre-softmax router
-logit norms (RawGenerationData.router_logit_norms) — all banked by the M6 capture
-hooks. Dense models leave those fields None → this family returns empty (the
-gate_features None-guard pattern), so it is safe to enable everywhere.
+Mixture-of-Experts MLP (DeepSeek-V2-Lite class: 2 shared + 64 routed experts,
+top-6 greedy). Reads the per-generated-token router allocation distribution
+(RawGenerationData.router_dist), the shared/routed branch output norms + cosine
+(RawGenerationData.router_branch_norms), and the pre-softmax router logit norms
+(RawGenerationData.router_logit_norms). Dense models leave those fields None →
+this family returns empty (the gate_features None-guard pattern), so it is safe to
+enable everywhere.
 
-v2.1 ENRICHMENT (desk-approved 2026-07-18, 770d7b41 + 803eac37 + 48870af4): every
-non-learned METHOD rung is now present on the routing source (v1 had only
-distributional + magnitude — the "method asymmetry" the desk owned). Per sampled
-MoE layer L (dense layers, e.g. DeepSeek layer 0, contribute NOTHING — they have no
-router; feature_pipeline passes only banked-router layers, so L0 never reaches here):
+Every non-learned METHOD rung is present on this source, so the routing substrate can
+be compared against the others without a method confound. Per sampled MoE layer L
+(dense layers, e.g. DeepSeek layer 0, contribute NOTHING — they have no router;
+feature_pipeline passes only banked-router layers, so L0 never reaches here):
 
   Static (per-layer means / span summaries):
     xrt_L{L}_alloc_entropy_mean            — mean entropy of per-token expert dist  [distributional]
@@ -21,32 +20,31 @@ router; feature_pipeline passes only banked-router layers, so L0 never reaches h
     xrt_L{L}_shared_mass_mean              — mean ‖shared‖/(‖shared‖+‖routed‖)        [magnitude]
     xrt_L{L}_coverage                      — unique experts selected / n_experts      [distributional]
     xrt_L{L}_load_kl                       — KL(selection hist ‖ uniform)             [distributional]
-    xrt_L{L}_eff_experts                   — 1/Σp² of the load histogram (v2.1)       [geometry]
-    xrt_L{L}_shared_routed_cos_mean        — mean cos(shared_out, routed_out) (v2.1)  [geometry]
-    xrt_L{L}_topk_weight_entropy_mean      — entropy of renorm top-k weights (v2.1)   [distributional]
-    xrt_L{L}_logit_norm_mean               — mean ‖router_logits‖ pre-softmax (v2.1)  [magnitude]
-    xrt_L{L}_alloc_entropy_spectral_flatness — flatness of the entropy series (v2.1)  [spectral]
+    xrt_L{L}_eff_experts                   — 1/Σp² of the load histogram             [geometry]
+    xrt_L{L}_shared_routed_cos_mean        — mean cos(shared_out, routed_out)        [geometry]
+    xrt_L{L}_topk_weight_entropy_mean      — entropy of renorm top-k weights        [distributional]
+    xrt_L{L}_logit_norm_mean               — mean ‖router_logits‖ pre-softmax        [magnitude]
+    xrt_L{L}_alloc_entropy_spectral_flatness — flatness of the entropy series        [spectral]
   Dynamic (dispersion / change over generation time):
     xrt_L{L}_alloc_entropy_std             — std of per-token entropy                 [distributional]
     xrt_L{L}_alloc_entropy_slope           — linear slope of per-token entropy        [distributional]
     xrt_L{L}_switch_rate                   — P(top1 expert_t ≠ top1 expert_{t−1})     [distributional]
     xrt_L{L}_hist_drift                    — JSD(first-half, second-half hist)        [distributional]
     xrt_L{L}_shared_mass_std               — std of shared_mass                       [magnitude]
-    xrt_L{L}_shared_routed_cos_std         — std of the branch cosine series (v2.1)   [geometry]
-    xrt_L{L}_set_churn_rate                — Jaccard churn of the selected set (v2.1) [distributional]
-    xrt_L{L}_logit_norm_std                — std of ‖router_logits‖ (v2.1)            [magnitude]
-    xrt_L{L}_switch_dominant_period        — dominant period of the switch series(v2.1)[spectral]
+    xrt_L{L}_shared_routed_cos_std         — std of the branch cosine series        [geometry]
+    xrt_L{L}_set_churn_rate                — Jaccard churn of the selected set      [distributional]
+    xrt_L{L}_logit_norm_std                — std of ‖router_logits‖                 [magnitude]
+    xrt_L{L}_switch_dominant_period        — dominant period of the switch series   [spectral]
 
   Cross-layer (appended once, after the per-layer block):
-    xrt_cka_L{i}_L{j}                      — linear-CKA of router_dist across adjacent sampled MoE
-                                             layers (v2.1, geometry); ADJACENT-5 pairs (desk ruling 1).
-    xrt_cka_global_mean                    — mean linear-CKA over ALL sampled-MoE pairs (v2.1, geometry).
+    xrt_cka_L{i}_L{j}                      — linear-CKA of router_dist across ADJACENT sampled MoE
+                                             layers, one per consecutive pair       [geometry]
+    xrt_cka_global_mean                    — mean linear-CKA over ALL sampled-MoE pairs [geometry]
 
-Feature COUNT (M6, 6 banked MoE layers): 19 per-layer × 6 + 6 cross-layer = 120. (Older docs said
-"~129": that was pre-desk arithmetic with the 15-pair CKA; the desk ruled adjacent-5+mean = 6, saving 9.)
-After v2.1 the family is FROZEN for the program (deferred-documented: learned rung — encoder-on-raw
-supersedes; per-expert internals + kv_b_proj — banked-optional; routing↔output-entropy coupling — NAMED
-post-program idea). feature_map places every name; `FeatureMap.unclassified()` == 0 is the acceptance check.
+Feature count for N sampled MoE layers: 19 per-layer × N, plus (N−1) adjacent CKA columns and one
+global mean. Only adjacent pairs get their own column; the all-pairs reads are summarised into that
+single mean, which is why the cross-layer block grows linearly rather than quadratically in N.
+feature_map places every name; `FeatureMap.unclassified()` == 0 is the acceptance check.
 
 Selection semantics: under greedy top-k routing (DeepSeek-V2-Lite topk_method "greedy") the selected
 experts are exactly argtop-k of the banked distribution, so coverage/load/drift/churn/topk-weight derive
@@ -71,14 +69,13 @@ F32 = NDArray[np.float32]
 F64 = NDArray[np.float64]
 
 # Per-layer feature suffixes in fixed order (a short-gen / dense layer emits zeros for the same
-# names — the modal-vector guard expects fixed length). v1 suffixes first (unchanged), then v2.1.
+# names — the modal-vector guard expects fixed length).
 _STATIC_SUFFIXES = (
     "alloc_entropy_mean",
     "top1_margin_mean",
     "shared_mass_mean",
     "coverage",
     "load_kl",
-    # ── v2.1 static additions ──
     "eff_experts",
     "shared_routed_cos_mean",
     "topk_weight_entropy_mean",
@@ -91,7 +88,6 @@ _DYNAMIC_SUFFIXES = (
     "switch_rate",
     "hist_drift",
     "shared_mass_std",
-    # ── v2.1 dynamic additions ──
     "shared_routed_cos_std",
     "set_churn_rate",
     "logit_norm_std",
@@ -203,15 +199,16 @@ def extract_expert_routing_features(
     sampled_layers: list[int] | None = None,
     top_k: int = 6,
 ) -> FeatureFamilyResult:
-    """Extract MoE expert-routing statistics (v2.1: distributional + magnitude + geometry + spectral).
+    """Extract MoE expert-routing statistics (distributional + magnitude + geometry + spectral).
 
     Parameters
     ----------
     data : RawGenerationData
         Must have `router_dist` populated for MoE layers. `router_branch_norms` feeds the shared_mass
         + shared_routed_cos features (its absence zeros those; a 2-column form zeros only the cosine).
-        `router_logit_norms` feeds the logit_norm features (absence zeros them). All degrade gracefully
-        so the family runs on both v1-captured and v2.1-captured raw.
+        `router_logit_norms` feeds the logit_norm features (absence zeros them). Every optional
+        field degrades to zeros rather than raising, so the family runs on raw banked by any
+        capture that supplied at least `router_dist`.
     sampled_layers : list[int], optional
         Which MoE layers to emit features for (feature_pipeline passes only banked-router layers).
     top_k : int
@@ -339,7 +336,7 @@ def extract_expert_routing_features(
                     out=np.zeros(m, dtype=np.float64),
                     where=denom > 1e-12,
                 )
-                if B.shape[1] >= 3:                            # v2.1 cosine column
+                if B.shape[1] >= 3:                            # cosine column, when banked
                     cos_ts[:m] = B[:m, 2]
 
         # ── logit_norm time series (pre-softmax router commitment scale) ──
@@ -360,26 +357,26 @@ def extract_expert_routing_features(
             float(shared_mass_ts.mean()),             # shared_mass_mean
             coverage,                                 # coverage
             load_kl,                                  # load_kl
-            eff_experts,                              # eff_experts (v2.1)
-            float(cos_ts.mean()),                     # shared_routed_cos_mean (v2.1)
-            float(tkw.mean()),                        # topk_weight_entropy_mean (v2.1)
-            logit_norm_mean,                          # logit_norm_mean (v2.1)
-            _spectral_flatness(entropy_ts),           # alloc_entropy_spectral_flatness (v2.1)
+            eff_experts,                              # eff_experts
+            float(cos_ts.mean()),                     # shared_routed_cos_mean
+            float(tkw.mean()),                        # topk_weight_entropy_mean
+            logit_norm_mean,                          # logit_norm_mean
+            _spectral_flatness(entropy_ts),           # alloc_entropy_spectral_flatness
             # dynamic
             float(entropy_ts.std()),                  # alloc_entropy_std
             _slope(entropy_ts),                       # alloc_entropy_slope
             switch_rate,                              # switch_rate
             hist_drift,                               # hist_drift
             float(shared_mass_ts.std()),              # shared_mass_std
-            float(cos_ts.std()),                      # shared_routed_cos_std (v2.1)
-            set_churn_rate,                           # set_churn_rate (v2.1)
-            logit_norm_std,                           # logit_norm_std (v2.1)
-            _dominant_period(switch_series),          # switch_dominant_period (v2.1)
+            float(cos_ts.std()),                      # shared_routed_cos_std
+            set_churn_rate,                           # set_churn_rate
+            logit_norm_std,                           # logit_norm_std
+            _dominant_period(switch_series),          # switch_dominant_period
         ]
         features.extend(vals)
         names.extend(layer_names)
 
-    # ── Cross-layer routing CKA (v2.1 geometry): adjacent pairs + global mean over all pairs ──
+    # ── Cross-layer routing CKA (geometry): adjacent pairs + global mean over all pairs ──
     cka_names = _cka_names(sampled_layers)
     adj_vals: list[float] = []
     for i in range(len(sampled_layers) - 1):

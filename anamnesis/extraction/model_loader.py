@@ -62,12 +62,11 @@ class HookState:
 
     # layer_idx → list of o_proj outputs (attention-block output, per-token
     # contribution the attention sublayer ADDS to the residual stream),
-    # shape [1, seq_len, hidden_dim]. The attention-output surface (vmb Stage A):
-    # with block-boundary hidden states banked, mlp_out is derivable as
-    # resid_{l+1} − resid_l − attn_out, so this one capture closes two census cells.
+    # shape [1, seq_len, hidden_dim]. With block-boundary hidden states banked, mlp_out needs
+    # no capture of its own: it is derivable as resid_{l+1} − resid_l − attn_out.
     attn_outputs: dict[int, list[Tensor]] = field(default_factory=lambda: defaultdict(list))
 
-    # ── MoE expert routing (vmb arm A7, M6 DeepSeek-V2-Lite) — router allocation + branch norms.
+    # ── MoE expert routing (DeepSeek-V2-Lite class) — router allocation + branch norms.
     # layer_idx → per-step [batch, seq, n_routed_experts] DENSE pre-topk softmax (recomputed in the
     # MoE-module pre-hook from gate.weight, since DeepseekV2Moe bypasses gate.forward). Prefill = step 0.
     router_dist: dict[int, list[Tensor]] = field(default_factory=lambda: defaultdict(list))
@@ -75,9 +74,9 @@ class HookState:
     router_shared_norm: dict[int, list[Tensor]] = field(default_factory=lambda: defaultdict(list))
     # layer_idx → per-step [n_tok] L2 norm of the routed-expert sum output (shared_mass denominator term).
     router_routed_norm: dict[int, list[Tensor]] = field(default_factory=lambda: defaultdict(list))
-    # ── v2.1 enrichment (xrt geometry + magnitude rungs) ──
+    # ── xrt geometry + magnitude rungs ──
     # layer_idx → per-step [batch, seq] L2 norm of the DENSE router logits (pre-softmax; the routing
-    # commitment magnitude the softmax normalizes away). Feeds xrt_logit_norm (v2.1 magnitude). MoE only.
+    # commitment magnitude the softmax normalizes away). Feeds xrt_logit_norm. MoE only.
     router_logit_norm: dict[int, list[Tensor]] = field(default_factory=lambda: defaultdict(list))
     # layer_idx → per-step [n_tok, hidden] shared / routed branch OUTPUT vectors. TRANSIENT — used only
     # to derive the per-token shared_routed cosine at conversion; NEVER persisted to raw (no disk cost).
@@ -169,10 +168,9 @@ class HookState:
 def decoder_layers(model):
     """Decoder layer list across architectures.
 
-    Llama/Qwen/OLMo-2: `model.model.layers`. Gemma-3 (vmb M5) ships as
+    Llama/Qwen/OLMo-2: `model.model.layers`. Gemma-3 ships as
     Gemma3ForConditionalGeneration — a multimodal wrapper whose text decoder
     nests under `language_model`; hook paths must resolve through it.
-    (M5 onboarding audit 2026-07-12; GPU validation pending — journal W10.)
     """
     inner = getattr(model, "model", model)
     if hasattr(inner, "layers"):
@@ -298,11 +296,10 @@ def _make_o_proj_hook(
     return hook_fn
 
 
-# ── MLA + MoE capture hooks (vmb arm A7, M6 DeepSeek-V2-Lite) ───────────────────
-# Wired against the VERIFIED native transformers deepseek_v2 module tree
-# (audit 2026-07-18, job b0713ba4d5d3). Each hook below names the module it attaches to and
-# what the capture means, because MLA and MoE both put the substrate somewhere a
-# dense-Llama reader would not look for it.
+# ── MLA + MoE capture hooks (DeepSeek-V2-Lite class) ───────────────────────────
+# Wired against the native transformers deepseek_v2 module tree. Each hook below names the
+# module it attaches to and what the capture means, because MLA and MoE both put the
+# substrate somewhere a dense-Llama reader would not look for it.
 
 def _make_ckv_hook(
     layer_idx: int,
@@ -352,7 +349,7 @@ def _make_moe_router_prehook(
             h.to(torch.float32), module.gate.weight.to(torch.float32))
         dist = logits.softmax(dim=-1)                        # [batch, seq, n_routed_experts]
         hook_state.router_dist[layer_idx].append(dist.detach())
-        # v2.1 magnitude rung: ‖router_logits‖ per token (pre-softmax commitment scale).
+        # Magnitude rung: ‖router_logits‖ per token (pre-softmax commitment scale).
         hook_state.router_logit_norm[layer_idx].append(
             logits.norm(dim=-1).detach())                    # [batch, seq]
 
@@ -378,15 +375,15 @@ def _make_branch_norm_hook(
             return
         o = output.detach()
         flat = o.reshape(-1, o.shape[-1])                    # [n_tok, hidden]
-        dst[layer_idx].append(flat.norm(dim=-1))             # [n_tok] (shared_mass — v1, unchanged)
-        # v2.1 geometry rung: keep the branch output VECTOR (transient) to derive the per-token
+        dst[layer_idx].append(flat.norm(dim=-1))             # [n_tok] (shared_mass)
+        # Geometry rung: keep the branch output VECTOR (transient) to derive the per-token
         # shared_routed cosine at conversion. Same reshape/order as the norm → position-aligned.
         vdst[layer_idx].append(flat)                         # [n_tok, hidden]
 
     return hook_fn
 
 
-# ── Activation-WRITE path (vmb battery arm A5 / A5-inv) ─────────────────────────
+# ── Activation-WRITE path ───────────────────────────────────────────────────────
 #
 # Read hooks above OBSERVE the forward pass; the write path PERTURBS it: a
 # forward_pre_hook on a decoder layer adds alpha * unit(vector) to the residual
@@ -458,7 +455,7 @@ def _make_residual_write_pre_hook(
 
     def _inject(hs: Tensor, cache_position: Tensor | None) -> Tensor:
         # id(spec.vector) in the key: callers may swap the vector tensor on a live
-        # spec (pilot gates iterate vectors); a swapped tensor must never reuse a
+        # spec while sweeping vectors; a swapped tensor must never reuse a
         # stale cached delta.
         key = f"{hs.device}_{hs.dtype}_{spec.alpha}_{id(spec.vector)}"
         if key not in cache:
@@ -576,7 +573,7 @@ def attach_residual_write(model: Any, spec: ResidualWriteSpec) -> ResidualWriteH
     return ResidualWriteHandle(spec=spec, _handle=handle, _enabled_flag=enabled_flag, stats=stats)
 
 
-# ── A7: MoE routing perturbation (vmb arm A7, M6 DeepSeek-V2-Lite class) ─────────
+# ── MoE routing perturbation (DeepSeek-V2-Lite class) ───────────────────────────
 #
 # Perturbs the ACTUAL routing computation (the recording pre-hook only OBSERVES it).
 # DeepseekV2Moe.forward: router_logits = F.linear(h, gate.weight) → route_tokens_to_experts
@@ -591,14 +588,14 @@ def attach_residual_write(model: Any, spec: ResidualWriteSpec) -> ResidualWriteH
 
 @dataclass
 class MoEPerturbSpec:
-    """One A7 routing perturbation applied to every MoE layer for a cell.
+    """One routing perturbation applied to every MoE layer for a cell.
 
     mode:
       'topk'          — set the effective num_experts_per_tok to `top_k` (cached-attr path).
       'noise'         — add seeded N(0, eps·sigma_logit[L]) to router_logits BEFORE softmax+topk.
-      'shared_ablate' — zero the shared-experts branch output (§2c PAIR 1).
-      'routed_ablate' — zero the routed-experts branch output (§2c PAIR 1; full-branch complement to
-                        shared_ablate — the pilot says the two branches are mass-comparable).
+      'shared_ablate' — zero the shared-experts branch output.
+      'routed_ablate' — zero the routed-experts branch output (the full-branch complement to
+                        shared_ablate).
       'drop_topm'     — zero the `m` largest-weight routed experts per token (targeting: removes mass).
       'drop_randm'    — zero `m` seeded-random selected experts per token (targeting control, m fixed).
     """
@@ -606,7 +603,7 @@ class MoEPerturbSpec:
     mode: str
     top_k: int | None = None                          # 'topk'
     eps: float | None = None                          # 'noise'
-    sigma_logit: dict[int, float] | None = None       # 'noise' — per-layer router-logit σ (from pilot)
+    sigma_logit: dict[int, float] | None = None       # 'noise' — caller-supplied per-layer router-logit σ
     m: int | None = None                              # drops
     seed: int = 0
 
@@ -635,7 +632,7 @@ def _moe_modules(model: Any) -> list[tuple[int, Any]]:
 
 
 def attach_moe_perturbation(model: Any, spec: MoEPerturbSpec) -> MoEPerturbHandle:
-    """Install an A7 routing perturbation on every MoE layer of a bare HF model. Context-managed:
+    """Install a routing perturbation on every MoE layer of a bare HF model. Context-managed:
     call handle.remove() to restore the original routing exactly (alpha=0/identity reproduces)."""
     mods = _moe_modules(model)
     if not mods:
@@ -705,14 +702,14 @@ def attach_moe_perturbation(model: Any, spec: MoEPerturbSpec) -> MoEPerturbHandl
 
         elif spec.mode == "routed_ablate":
             # zero the routed-experts branch output: MoE.forward does experts(...) + shared_experts;
-            # a forward hook on mlp.experts → ×0 leaves only the shared branch (§2c PAIR 1 complement).
+            # a forward hook on mlp.experts → ×0 leaves only the shared branch.
             h = mlp.experts.register_forward_hook(lambda mod, a, o: o * 0.0)
             restores.append(h.remove)
 
         else:
             raise ValueError(f"unknown MoEPerturbSpec mode {spec.mode!r}")
 
-    logger.info(f"A7 MoE perturbation installed: mode={spec.mode} on {len(mods)} MoE layers")
+    logger.info(f"MoE perturbation installed: mode={spec.mode} on {len(mods)} MoE layers")
     return MoEPerturbHandle(spec=spec, _restores=restores)
 
 
@@ -841,8 +838,8 @@ def load_model(
 
     adapter_path: optional PEFT/LoRA adapter dir — merged (merge_and_unload)
     BEFORE any hook registration, so hooks attach to the merged modules
-    (A6 checkpoint replay; PEFT wraps target modules, so post-hook merging
-    would strand hooks on replaced modules).
+    (PEFT wraps target modules, so post-hook merging would strand hooks on
+    replaced modules).
 
     Args:
         config: Model configuration, normally `ModelConfig.from_preset(<name>)`.
@@ -863,8 +860,8 @@ def load_model(
         query_layers: Layers for q_proj (pre-RoPE query) hooks. Default None =
             no query capture. Pass sampled layers for offline QK-space geometry.
         attn_output_layers: Layers for o_proj (attention-output) hooks. Default
-            None = no capture. Pass all layers for the vmb battery capture
-            surface (attention-output cell; mlp_out derivable with hidden states).
+            None = no capture. Pass all layers to bank the attention-output
+            surface; mlp_out is then derivable from the hidden states.
 
     Returns:
         LoadedModel with everything wired up.
@@ -925,8 +922,8 @@ def load_model(
     router_hook_count = 0
 
     if is_dsv2:
-        # ── MLA + MoE capture (vmb arm A7, M6 DeepSeek-V2-Lite). No k_proj/v_proj (MLA); q_proj is
-        # 192-d/head (not wave-1) → keys via c_KV latent, values/queries skipped. ──
+        # ── MLA + MoE capture (DeepSeek-V2-Lite class). MLA has no k_proj/v_proj at all, so
+        # keys come from the c_KV latent; queries are 192-d/head and are skipped. ──
         first_k_dense = int(getattr(model.config, "first_k_dense_replace", 0))
         kv_lora_rank = int(getattr(model.config, "kv_lora_rank", 512))
         dl = decoder_layers(model)

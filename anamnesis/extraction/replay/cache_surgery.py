@@ -1,18 +1,17 @@
-"""KV-cache surgery for ARM A4 (state-surgery): eviction / re-rotation / recompute.
+"""KV-cache surgery: eviction / re-rotation / recompute.
 
-Vendored from kv-rotation `src/kvrot/{rope,snapshot,eviction}.py` (exp11 machinery,
-bit-exact rotation verified there) with battery-specific additions:
-  - inv_freq built FROM THE MODEL CONFIG with a hard gate on unknown RoPE schemes
-    (addendum 12h: the RoPE-config verification gate on M3/M4 conditional inclusion —
-    fires at load time, never after a confusing result);
-  - middle-region keep geometry (A4 block: sink + recent protected, contiguous
-    middle block evicted).
+Two things here are not generic cache handling:
+  - inv_freq is built FROM THE MODEL CONFIG behind a hard gate on unknown RoPE schemes.
+    The gate fires at load time rather than after a confusing result, because a wrong
+    frequency table corrupts every rotated row without raising anything.
+  - the keep geometry protects the sink and the recent window and evicts one contiguous
+    middle block, so an eviction cell differs from its control in that block alone.
 
-RoPE background (kvrot docstring, condensed): HF caches store keys ALREADY rotated
-at their original positions. Moving a token from position p to p' left-multiplies
-its key by R(p'-p); exact iff inv_freq is position-independent (standard RoPE and
-static llama3 rescaling; NOT dynamic-NTK — the homomorphism assert catches that).
-Values are position-free and never touched.
+RoPE background: HF caches store keys ALREADY rotated at their original positions.
+Moving a token from position p to p' left-multiplies its key by R(p'-p); this is exact
+iff inv_freq is position-independent (standard RoPE and static llama3 rescaling; NOT
+dynamic-NTK — the homomorphism assert catches that). Values are position-free and are
+never touched.
 """
 from __future__ import annotations
 
@@ -92,7 +91,7 @@ def assert_rotation_homomorphism(inv_freq: Tensor, *, atol: float = 1e-5) -> Non
 
 
 def inv_freq_from_config(config) -> Tensor:
-    """Build inv_freq from an HF model config, with the 12h RoPE gate.
+    """Build inv_freq from an HF model config, behind the RoPE scheme gate.
 
     Reads EACH model's rope_theta/rope_scaling (never assumes Llama's values).
     Supported: no scaling (Qwen2.5/OLMo-2 class) and static 'llama3' rescaling.
@@ -106,9 +105,9 @@ def inv_freq_from_config(config) -> Tensor:
     if tc is not None and getattr(tc, "num_attention_heads", None) is not None:
         config = tc
     # Gemma-3 dual RoPE: global layers rotate with rope_theta (1e6), sliding layers with
-    # rope_local_base_freq (1e4). A single inv_freq table cannot be silently right for both
-    # (the 14e anti-silent-default rule) — surface it so the ROTATE surgery kind is scoped
-    # to global-theta only; naive/recompute (which need no reindex) are unaffected.
+    # rope_local_base_freq (1e4). One inv_freq table cannot be right for both, so warn rather
+    # than pick silently: ROTATE is scoped to global-theta layers only, and naive/recompute
+    # (which need no reindex) are unaffected.
     local_base = getattr(config, "rope_local_base_freq", None)
     if local_base is not None:
         logger.warning(
@@ -117,19 +116,18 @@ def inv_freq_from_config(config) -> Tensor:
             "different base — use naive/recompute surgery, or extend reindex to per-layer inv_freq.")
     head_dim = getattr(config, "head_dim", None) or config.hidden_size // config.num_attention_heads
     # transformers 5.x moved the RoPE params INTO the rope_scaling / rope_parameters dict; the
-    # top-level `rope_theta` attribute may be absent (the 14e bug: getattr's 10000.0 default fired
-    # silently under tf 5.3, so llama3 rescaling ran on theta=10000 not 500000). Read theta from
-    # EITHER layout, and RAISE if it is findable nowhere — never default (silent defaults are how
-    # this bug happened).
+    # top-level `rope_theta` attribute may be absent. Read theta from EITHER layout and RAISE if
+    # it is findable nowhere: a defaulted 10000 where the model uses 500000 rescales every
+    # frequency wrongly and nothing downstream notices.
     scaling = getattr(config, "rope_scaling", None) or getattr(config, "rope_parameters", None)
     theta = getattr(config, "rope_theta", None)
     if theta is None and isinstance(scaling, dict):
         theta = scaling.get("rope_theta", scaling.get("theta"))
     if theta is None:
         raise ValueError(
-            "RoPE gate FAILED (14e): rope_theta not found at config top-level NOR inside "
-            f"rope_scaling/rope_parameters ({scaling!r}) — refusing to default to 10000 "
-            "(the silent default that corrupted every battery ROTATE row). Locate theta or extend.")
+            "RoPE gate FAILED: rope_theta not found at config top-level NOR inside "
+            f"rope_scaling/rope_parameters ({scaling!r}) — refusing to default to 10000, which "
+            "would silently corrupt every re-rotated row. Locate theta or extend this function.")
     theta = float(theta)
     if scaling is None:
         logger.info(f"RoPE gate: standard RoPE theta={theta} head_dim={head_dim}")
@@ -150,15 +148,15 @@ def inv_freq_from_config(config) -> Tensor:
         else:
             raise ValueError(
                 f"RoPE gate FAILED: unsupported rope_scaling {scaling!r} — re-rotation "
-                "exactness not established for this scheme (12h gate; extend deliberately)"
+                "exactness is not established for this scheme; extend deliberately"
             )
     assert_rotation_homomorphism(inv)
     return inv
 
 
 def _live_inv_freq(model) -> Tensor | None:
-    """The model's OWN inv_freq buffer — the frequencies the runtime actually rotates with
-    (exp11's `_find_inv_freq` pattern, via named_buffers)."""
+    """The model's OWN inv_freq buffer — the frequencies the runtime actually rotates with,
+    located by scanning `named_buffers()` for an `inv_freq` suffix."""
     for name, buf in model.named_buffers():
         if name.endswith("inv_freq"):
             return buf.detach().float().cpu()
@@ -166,18 +164,18 @@ def _live_inv_freq(model) -> Tensor | None:
 
 
 def operative_inv_freq(model) -> Tensor:
-    """The inv_freq table surgery MUST rotate with, value-gated (14e).
+    """The inv_freq table surgery MUST rotate with, gated on its VALUES.
 
-    The 12h RoPE gate was SCHEME-level (llama3 vs NTK) + a homomorphism check — but ANY
-    static frequency table is a homomorphism, so a wrong-theta table passed silently. This
-    gate is VALUE-level: locate the LIVE buffer, assert it equals the config reconstruction
-    to rtol=1e-6, and return the LIVE buffer as the operative table (the reconstruction is now
-    only the cross-check). Abort on mismatch — never rotate with frequencies the runtime doesn't.
+    A scheme-level check plus a homomorphism assert is not enough: ANY static frequency table
+    is a homomorphism, so a table with the wrong theta passes both. This gate locates the LIVE
+    buffer, asserts it equals the config reconstruction to rtol=1e-6, and returns the LIVE
+    buffer as the operative table, leaving the reconstruction as only a cross-check. Abort on
+    mismatch — never rotate with frequencies the runtime does not use.
     """
     computed = inv_freq_from_config(model.config)
     live = _live_inv_freq(model)
     if live is None:
-        logger.warning("14e value gate: no live inv_freq buffer on the model — falling back to "
+        logger.warning("inv_freq value gate: no live buffer on the model — falling back to the "
                        "config reconstruction (the gate cannot run; ensure rotary buffers materialize)")
         return computed
     live = live.to(computed.dtype)
@@ -185,10 +183,10 @@ def operative_inv_freq(model) -> Tensor:
         max_abs = float((live - computed).abs().max())
         max_rel = float(((live - computed).abs() / live.abs().clamp_min(1e-12)).max())
         raise ValueError(
-            f"RoPE VALUE gate FAILED (14e): live inv_freq buffer != config reconstruction "
+            f"RoPE VALUE gate FAILED: live inv_freq buffer != config reconstruction "
             f"(max|Δ|={max_abs:.3e}, max rel={max_rel:.1f}×). The runtime rotates with different "
-            "frequencies than surgery would apply — this is exactly the ROTATE-corruption bug. Abort.")
-    logger.info(f"14e value gate PASS: live inv_freq == config reconstruction "
+            "frequencies than surgery would apply, which corrupts every re-rotated key. Abort.")
+    logger.info(f"inv_freq value gate PASS: live == config reconstruction "
                 f"(n={live.numel()}, rtol=1e-6); using the LIVE buffer as operative")
     return live
 
@@ -274,12 +272,12 @@ def to_hf_dynamic_cache(snapshot: KVSnapshot):
     return cache
 
 
-# ── A4 battery eviction geometry ────────────────────────────────────────────────
+# ── Eviction geometry ───────────────────────────────────────────────────────────
 
 def middle_region_keep(
     context_len: int, evict_frac: float, *, num_sinks: int = 4, recent_protect: int = 32,
 ) -> Tensor:
-    """Keep-indices for the A4 cells: evict ONE contiguous middle block of
+    """Keep-indices for a middle-block eviction: evict ONE contiguous block of
     round(evict_frac * context_len) tokens, centered in the evictable region
     [num_sinks, context_len - recent_protect); sinks + recent tail always kept.
     """
@@ -299,12 +297,10 @@ def middle_region_keep(
     return torch.tensor(keep, dtype=torch.long)
 
 
-# ── A4b dialogue eviction geometry (turn-aligned oldest-first) ───────────────────
-# Ported from kv-rotation `src/kvrot/chat.py` (turn_token_spans / oldest_turns_to_evict /
-# turn_keep_indices — exp11's dialogue substrate). ARM-A4b §Ops: turn-aligned oldest-first
-# eviction, protect system + last 2 turns + N sinks. Pure tensor/int math (CPU-testable),
-# matching this module's design constraint. kv-rotation owns the model/chat substrate; this
-# is the anamnesis-side instrument port (pointers, not shared state — cross-project rule).
+# ── Dialogue eviction geometry (turn-aligned oldest-first) ──────────────────────
+# Evict whole turns, oldest first, protecting the system turn, the last 2 turns and N sinks:
+# a half-evicted turn is not a smaller context, it is a corrupted one. Pure tensor/int math,
+# so it is testable without a model, which is this module's design constraint.
 
 
 @dataclass(frozen=True)
@@ -375,8 +371,8 @@ def oldest_turns_to_evict(spans: list["TurnSpan"], *, target_tokens: int,
                           protect_last: int = 2) -> list[int]:
     """Whole turns to evict, oldest first, until target_tokens are freed; protect_roles
     turns and the final protect_last turns are never evicted. May return fewer than
-    requested (protections leave nothing else) — the caller reports 'unreachable', per
-    ARM-A4b §Cells (never silently clipped)."""
+    requested when the protections leave nothing else to take; the caller must report that as
+    'unreachable' rather than silently clipping the target."""
     if target_tokens <= 0:
         return []
     cutoff = max(0, len(spans) - max(protect_last, 0))

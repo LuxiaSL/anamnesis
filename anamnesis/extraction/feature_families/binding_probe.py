@@ -376,22 +376,18 @@ def _extract_one_layer(
 
     # ── C3. level-2 signed areas: JOINT order, not marginal order ──
     #
-    # Everything above (windowed stats, correlations) is invariant to a joint
-    # permutation of the time axis: corr(a, b) does not know whether a led b.
-    # That is the same marginal-order limitation the whole engineered suite has,
-    # reproduced inside a family built to fix a different blindness. The Lévy
-    # area is the antisymmetric part that carries lead-lag:
+    # Everything above is invariant to a joint permutation of the time axis:
+    # corr(a, b) does not know whether a led b. The Lévy area is the antisymmetric
+    # part that does carry lead-lag:
     #
     #     A_ij = 1/2 sum_t ( Xc_i[t] dX_j[t] - Xc_j[t] dX_i[t] ),  Xc = X - X[0]
     #
-    # Left-endpoint quadrature, centred — the same convention the registered
-    # path_signature family uses, written out here over the span-density paths
-    # this family builds, so a contrast-time family carries no dependency on the
-    # registered suite's shape.
+    # Left-endpoint quadrature, centred: the same convention as the path_signature
+    # family, so the two are comparable. It is written out rather than imported to
+    # keep this family independent of that one's path shape.
     #
-    # The clock column is NORMALISED t/(T-1): this measures pacing, not duration
-    # (length is already a suite feature and already residualised), so the area
-    # against the clock says WHEN a span's mass arrived, not for how long.
+    # The clock column is NORMALISED t/(T-1), which makes the area against it a read
+    # on WHEN a span's mass arrived rather than on how long the generation ran.
     if include_path_level2:
         span_names = [label for label, _ in span_items]
         dim_names = [*span_names, "clock"]

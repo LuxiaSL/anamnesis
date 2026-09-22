@@ -1,10 +1,9 @@
-"""Cached-bridge replay for ARM A4: teacher-force a continuation against an
-INJECTED (possibly surgically-modified) KV cache and extract per-step states.
+"""Cached-bridge replay: teacher-force a continuation against an INJECTED
+(possibly surgically-modified) KV cache and extract per-step states.
 
-Ported from kv-rotation `kvrot.sigbridge.replay_extract_cached` (exp11, validated
-there against the anamnesis extractor) and EXTENDED to the full vmb battery
-capture surface: pre-RoPE keys + gates (exp11's surface) plus values, queries,
-attention outputs (the 3,358-dim battery vector's extra families).
+The capture surface is the full one — pre-RoPE keys and gates plus values, queries
+and attention outputs — so a cached replay and a generate-path run feed the same
+feature families.
 
 Alignment contract: prompt_length = cache length, so the extractor's
 prompt/generated split lands exactly on the cache/continuation boundary — the

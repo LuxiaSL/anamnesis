@@ -1,7 +1,5 @@
 """Path-signature feature family — level-2 log-signature (iterated integrals) of the residual path.
 
-**Status: exploratory build.** Nothing computed here is quotable pre-first-read.
-
 WHAT THIS COMPUTES, AND WHY IT IS NOT ANOTHER MARGINAL STATISTIC
 ---------------------------------------------------------------
 The hand suite's order-sensitive members (slopes, stds, windows, STFT) are *marginal* order
@@ -34,11 +32,11 @@ DIMENSIONALITY — PROJECTION IS MANDATORY
 A level-2 signature of a d-dim path has ~d² terms; d = 3072/4096 is out of the question. The path
 is therefore projected onto a **supplied** basis before anything is integrated. This module
 **never fits a basis.** It accepts one (the banked per-layer calibration PCA, top k ∈ {4, 8}) and
-raises if none is given. Supervised bases (the how-axis LDA directions, spec P-B) must be refit
+raises if none is given. Supervised bases (the how-axis LDA directions) must be refit
 inside every fold by the *caller*; this module is basis-agnostic and only records the label.
 
-THE NULL (spec §2) IS IN THIS MODULE, NOT A SIDE SCRIPT
--------------------------------------------------------
+THE NULL IS IN THIS MODULE, NOT A SIDE SCRIPT
+---------------------------------------------
 ``PathSignatureConfig.permute_increments`` shuffles the increments of the projected path and
 re-cumulates. It is exactly matched by construction: level-1 terms are *literally* invariant
 (a permuted sum is the same sum, up to float associativity ~1e-12), level-2 terms are destroyed.
@@ -56,7 +54,7 @@ FEATURE NAMES
     res_sig_L{layer}_{basis}_k{k}_{aug|noaug}_lvl2_c{i}c{j}
 
 which ``anamnesis.feature_map`` classifies as
-SOURCE=``residual`` · METHOD=``iterated_integral`` (new) · DEPTH = the site's band ·
+SOURCE=``residual`` · METHOD=``iterated_integral`` · DEPTH = the site's band ·
 DYNAMIC: ``lvl1`` static (a net level), ``lvl2`` dynamic (an order read). Names are IDENTICAL
 under the permutation null so a null run is column-comparable with the real one; the null is
 recorded in :class:`PathSignatureMetadata`, not in the names.
@@ -123,20 +121,19 @@ class PathSignatureConfig(BaseModel):
 
     Every field that changes a number is recorded verbatim into
     :class:`PathSignatureMetadata`, so a feature vector can always be re-derived from its
-    own provenance (the "every number carries n / model / site / projection / augmentation"
-    discipline, spec §6).
+    own provenance: every number carries its model, site, projection and augmentation.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     layer_indices: tuple[int, ...] = Field(
         default=(16,),
-        description="Transformer layer indices (sites) to take the signature at. "
-                    "Spec sites: 3B L14, 8B L16. Per-model, per-site, as everything is.",
+        description="Transformer layer indices (sites) to take the signature at. Sites are "
+                    "per-model: 3B L14, 8B L16.",
     )
     n_components: int = Field(
         default=4, ge=2, le=64,
-        description="k — number of projection-basis directions kept (spec: k in {4, 8}).",
+        description="k — number of projection-basis directions kept.",
     )
     level: Literal[1, 2] = Field(
         default=2,
@@ -147,7 +144,7 @@ class PathSignatureConfig(BaseModel):
         default=True,
         description="Append normalised position t/(T-1) as an extra coordinate before "
                     "integrating. Without it the signature is reparametrisation-invariant "
-                    "and discards pacing/length (spec 'Time augmentation').",
+                    "and discards pacing/length.",
     )
     center_at_origin: bool = Field(
         default=True,
@@ -162,7 +159,7 @@ class PathSignatureConfig(BaseModel):
     )
     permute_increments: bool = Field(
         default=False,
-        description="THE NULL (spec section 2): permute the projected path's increments and "
+        description="THE NULL: permute the projected path's increments and "
                     "re-cumulate. Level-1 terms are invariant by construction; level-2 die.",
     )
     permutation_seed: int | None = Field(
@@ -172,8 +169,8 @@ class PathSignatureConfig(BaseModel):
     )
     on_short_path: Literal["raise", "zeros"] = Field(
         default="raise",
-        description="Behaviour when a generation has too few positions. 'raise' (default, the "
-                    "spec's no-silent-wrong-answers rule) or 'zeros' (the pipeline-contract "
+        description="Behaviour when a generation has too few positions. 'raise' (default — "
+                    "never a silent wrong answer) or 'zeros' (the pipeline-contract "
                     "behaviour of the other families — name-matched zero block, logged).",
     )
     on_missing_layer: Literal["raise", "zeros"] = Field(
@@ -184,8 +181,8 @@ class PathSignatureConfig(BaseModel):
         default="pcaA",
         min_length=1,
         description="Short token naming the projection basis; goes into every feature name. "
-                    "'pcaA' = the banked calibration PCA (spec P-A). Use e.g. 'ldaB' for the "
-                    "supervised P-B basis so the two can never be pooled by accident. "
+                    "'pcaA' = the banked calibration PCA. Use a distinct token (e.g. 'ldaB') "
+                    "for a supervised basis so the two can never be pooled by accident. "
                     "Must be alphanumeric — feature names are parsed by '_'-splitting.",
     )
     min_positions: int = Field(
@@ -220,8 +217,8 @@ class PathSignatureConfig(BaseModel):
         if self.permute_increments and self.permutation_seed is None:
             raise ValueError(
                 "permute_increments=True requires an explicit permutation_seed — the null is "
-                "the primary control and an unreproducible null is worthless (spec section 2 "
-                "asks for >=3 seeds per cell)."
+                "the primary control and an unreproducible null is worthless. Use at least "
+                "three seeds per cell."
             )
         return self
 
@@ -298,7 +295,7 @@ class PathSignatureResult(FeatureFamilyResult):
 
     Subclasses the pipeline's contract type so ``feature_pipeline`` consumes it unchanged
     (``.features`` / ``.feature_names`` / ``.family_name`` / ``len()``); the extra
-    ``metadata`` field is there for the null bookkeeping the spec requires.
+    ``metadata`` field carries the null bookkeeping.
     """
 
     def __init__(
@@ -323,9 +320,9 @@ class ProjectionBasis(BaseModel):
     """A supplied linear projection: ``X_proj = (X - mean) @ components.T``.
 
     Invariants enforced at construction: ``components`` is ``[k, d]`` real and finite,
-    ``mean`` is ``[d]`` or None. This class deliberately has **no fit method** — the spec's
-    leak-proofness rests on the basis coming from calibration (P-A) or from an outer fold
-    (P-B), never from the evaluation data seen inside this module.
+    ``mean`` is ``[d]`` or None. This class deliberately has **no fit method**: leak-proofness
+    rests on the basis coming from calibration or from an outer fold, never from the evaluation
+    data seen inside this module.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
@@ -397,7 +394,7 @@ class ProjectionBasisBank(BaseModel):
 
     The banked 8B calibration PCA is a single global model
     (``outputs/calibration/llama31_8b/pca_model.pkl``: components [50, 4096], mean [4096]);
-    the C5 calibrations are per-layer dicts. Both load through here.
+    per-layer calibrations are dicts keyed by layer index. Both load through here.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
@@ -425,7 +422,7 @@ class ProjectionBasisBank(BaseModel):
 
     @classmethod
     def from_pca_pickle(cls, path: Path | str, label: str = "pcaA") -> "ProjectionBasisBank":
-        """Load a banked calibration PCA (global or C5 per-layer format).
+        """Load a banked calibration PCA (global or per-layer format).
 
         Mirrors ``feature_pipeline._load_pca_model``'s format sniffing so the same artefacts
         that already feed the residual-PCA block feed this family, with no new calibration step.
@@ -481,8 +478,8 @@ class ResidualPath(BaseModel):
     """One generation's residual trajectory at one site, in hidden space.
 
     ``array`` is ``[T, d]`` float64: T generated positions (prefill index 0 already skipped
-    by the source — see spec section 1), d = model hidden dim. Position-mean correction, if
-    any, has already been applied by the source.
+    by the source), d = model hidden dim. Position-mean correction, if any, has already been
+    applied by the source.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
@@ -511,15 +508,12 @@ class ResidualPath(BaseModel):
 class PathSource(abc.ABC):
     """Abstract per-generation supplier of ``[T, d]`` paths for the signature machinery.
 
-    THE ONE SEAM (generalised 2026-09-11, SPEC-path-receptacles-and-span-coverage §1a/§1b):
-    originally named ``ResidualPathSource`` and specific to the residual trajectory, this
-    interface is now source-agnostic — a "site" (the ``layer_idx``/``site_id`` argument) is
-    whatever the concrete source calls one: a transformer layer for the residual and
-    attention-region sources, or a single nominal id for the output-statistics source (which
-    has no per-layer structure). Everything downstream of ``load_path`` — augmentation,
-    integration, the null, the naming — is format-agnostic and does not care which kind of
-    site it got. ``ResidualPathSource`` remains a name-identical alias below so every existing
-    reference (this module, its tests, any caller) keeps working unchanged.
+    THE ONE SEAM. This interface is source-agnostic: a "site" (the ``layer_idx``/``site_id``
+    argument) is whatever the concrete source calls one — a transformer layer for the residual
+    and attention-region sources, or a single nominal id for the output-statistics source,
+    which has no per-layer structure. Everything downstream of ``load_path`` — augmentation,
+    integration, the null, the naming — does not care which kind of site it got, which is what
+    lets one machinery serve every path source.
 
     Contract for an implementation:
 
@@ -549,10 +543,8 @@ class PathSource(abc.ABC):
         ...
 
 
-#: Backward-compat alias — the residual family's seam kept its original name; every existing
-#: reference (``class ResidualPathSource``'s old identity, ``ArrayPathSource(ResidualPathSource)``,
-#: ``RawGenerationDataPathSource(ResidualPathSource)``, external callers) resolves to the exact
-#: same class object as :class:`PathSource`, so residual behaviour is unchanged bit-for-bit.
+#: Alias for the residual family's seam: the same class object as :class:`PathSource`, not a
+#: subclass, so an ``isinstance`` check against either name answers identically.
 ResidualPathSource = PathSource
 
 
@@ -695,19 +687,21 @@ class RawGenerationDataPathSource(ResidualPathSource):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# §1a / §1b — two sibling path sources, NO projection step (natively low-dimensional)
+# Output-statistics and attention-region paths — two sibling sources, NO projection step
+# (both are natively low-dimensional)
 #
-# SPEC-path-receptacles-and-span-coverage-2026-09-11 §1a/§1b. Both feed the SAME signature
-# machinery below (permute_increments / time_augment_path / log_signature_level2) — only the
-# path SOURCE differs, and neither one ever calls ProjectionBasis.project(). Config classes are
-# deliberately separate from PathSignatureConfig (not a subclass, not a refactor of it) so the
-# residual family's class is untouched — its selftest must reproduce bit-for-bit.
+# Both feed the SAME signature machinery below (permute_increments / time_augment_path /
+# log_signature_level2) — only the path SOURCE differs, and neither one ever calls
+# ProjectionBasis.project(). Their config classes are deliberately separate from
+# PathSignatureConfig rather than subclasses of it: the residual family's numbers must stay
+# reproducible bit-for-bit, which a shared base class could silently change.
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 class _NullControlMixin(BaseModel):
-    """Fields + validators shared by the null-battery control, factored out so §1a/§1b don't
-    hand-copy the seeded-null rule. Not used by PathSignatureConfig (left untouched)."""
+    """Fields + validators shared by the null-battery control, factored out so the
+    output-statistics and attention-region configs do not hand-copy the seeded-null rule.
+    PathSignatureConfig does not use it."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -718,9 +712,8 @@ class _NullControlMixin(BaseModel):
     time_augment: bool = Field(
         default=True,
         description="Append normalised position t/(T-1) as an extra coordinate. See "
-                    "PathSignatureConfig.time_augment for the pacing-not-duration rationale "
-                    "(DESK RULING, REPORT-path-signature-family-2026-09-11) — carried forward "
-                    "unchanged for these sources.",
+                    "PathSignatureConfig.time_augment for the pacing-not-duration rationale; "
+                    "the semantics are the same for these sources.",
     )
     center_at_origin: bool = Field(
         default=True,
@@ -739,8 +732,8 @@ class _NullControlMixin(BaseModel):
         if self.permute_increments and self.permutation_seed is None:
             raise ValueError(
                 "permute_increments=True requires an explicit permutation_seed — the null is "
-                "the primary control and an unreproducible null is worthless (spec section 2 "
-                "asks for >=3 seeds per cell)."
+                "the primary control and an unreproducible null is worthless. Use at least "
+                "three seeds per cell."
             )
         return self
 
@@ -775,25 +768,24 @@ OUTPUT_SITE_ID = 0
 
 
 class OutputStatsPathConfig(_NullControlMixin):
-    """Config for the §1a output-statistics path — SOURCE=output.
+    """Config for the output-statistics path — SOURCE=output.
 
-    Native dims (NO PROJECTION — these are already low-dimensional; spec §1 "Both are
-    naturally low-dimensional, so no projection step exists and the projection-adequacy gate
-    cannot bite."): ``entropy, margin, eos_log_mass, varentropy`` — 4 dims.
+    Native dims (NO PROJECTION — 4 coordinates is already low-dimensional, so no
+    projection-adequacy question arises): ``entropy, margin, eos_log_mass, varentropy``.
 
-    ``repetition-mass`` (the spec's fifth functional) is DELIBERATELY OMITTED. Reused verbatim,
-    it is ``annex_potential_gradient.s_terms_repmass``: ``S = sum_{v in prior context} p_t(v)``
-    where "prior context" is every token seen so far, INCLUDING THE PROMPT. That set needs the
-    prompt's actual token ids; ``RawGenerationData`` (this pipeline's per-generation contract,
-    defined in ``anamnesis/extraction/state_extractor.py``) carries only
-    ``prompt_length: int`` — a count, not the ids — so the candidate set
-    cannot be reconstructed from what this family is contracted to read. A scoped substitute
-    (self-only repetition over the generated span, ``annex_cs_pulses.s_terms_selfrep``) exists
-    and IS fully computable from ``chosen_token_ids``, but spec §1a says "reuse those
-    definitions verbatim — do not invent new formulas"; swapping in a differently-scoped
-    quantity under the same name is exactly the kind of invention that rule forbids. So: omit,
-    not misname. Dimension count reflects this — 4 dims, not 5 (spec's own arithmetic: 4 + clock
-    = 5 augmented -> level-1=5, level-2=10, total=15; unaugmented -> 4+6=10).
+    ``repetition-mass`` is DELIBERATELY OMITTED, which is why the count is 4 and not 5. Its
+    definition is ``annex_potential_gradient.s_terms_repmass``:
+    ``S = sum_{v in prior context} p_t(v)``, where "prior context" is every token seen so far,
+    INCLUDING THE PROMPT. That set needs the prompt's actual token ids;
+    ``RawGenerationData`` (this pipeline's per-generation contract, defined in
+    ``anamnesis/extraction/state_extractor.py``) carries only ``prompt_length: int`` — a count,
+    not the ids — so the candidate set cannot be reconstructed from what this family is
+    contracted to read. A differently-scoped substitute does exist and is computable here
+    (self-only repetition over the generated span, ``annex_cs_pulses.s_terms_selfrep``), but
+    emitting it under the repetition-mass name would misname it. So: omit, not misname.
+
+    Arity follows: 4 + clock = 5 augmented -> level-1=5, level-2=10, total=15; unaugmented ->
+    4 + 6 = 10.
     """
 
     NATIVE_DIM: ClassVar[int] = 4  # entropy, margin, eos_log_mass, varentropy — this ORDER
@@ -803,8 +795,8 @@ class OutputStatsPathConfig(_NullControlMixin):
         min_length=1,
         description="EOS token ids for THIS model (CLAUDE.md gotcha: model-specific, e.g. "
                     "Llama 3.2 3B [128001, 128009], Llama 3.1 8B [128001, 128008, 128009]). "
-                    "No default — an unspecified EOS set is a silent-wrong-answer risk the "
-                    "spec's absence-must-raise rule forbids.",
+                    "No default — an unspecified EOS set would silently produce a wrong "
+                    "eos_log_mass column, so absence raises.",
     )
 
     @field_validator("eos_token_ids")
@@ -822,14 +814,14 @@ class OutputStatsPathConfig(_NullControlMixin):
 
 
 class AttentionRegionPathConfig(_NullControlMixin):
-    """Config for the §1b attention-region path — SOURCE=attention.
+    """Config for the attention-region path — SOURCE=attention.
 
     Native dims (NO PROJECTION): the region decomposition
     ``attention_flow.extract_attention_flow`` already computes —
     ``prompt, early_gen, mid_gen, recent`` (4 dims), plus ``sink`` (attention to position 0,
-    ``state_extractor``'s ``cache_sink_mass_L{n}`` formula) as a 5th when ``include_sink=True``
-    (spec: "plus sink mass if separable" — it is, per the existing cache sink feature, so this
-    defaults on). Region order is fixed and documented so coordinate indices ``c0..c{k-1}`` are
+    ``state_extractor``'s ``cache_sink_mass_L{n}`` formula) as a 5th when ``include_sink=True``,
+    which is the default because sink mass is separable from the four regions.
+    Region order is fixed and documented so coordinate indices ``c0..c{k-1}`` are
     interpretable: ``[prompt, early_gen, mid_gen, recent, (sink)]``.
     """
 
@@ -841,7 +833,7 @@ class AttentionRegionPathConfig(_NullControlMixin):
     include_sink: bool = Field(
         default=True,
         description="Append sink mass (attention to position 0) as a 5th native coordinate. "
-                    "False keeps the 4-region-only ablation the spec's '4-5 dims' range allows.",
+                    "False gives the 4-region-only ablation.",
     )
     on_missing_layer: Literal["raise", "zeros"] = Field(default="raise")
 
@@ -1275,12 +1267,12 @@ def signature_features_from_native_path(
 ) -> tuple[F64, int]:
     """(optionally permute) -> (optionally time-augment) -> integrate. NO PROJECTION.
 
-    The §1a/§1b analogue of :func:`signature_features_from_path`, sharing every piece of the
-    actual math (``_as_path_array``, ``permute_increments``, ``time_augment_path``,
+    The output-statistics / attention-region analogue of
+    :func:`signature_features_from_path`, sharing every piece of the actual math
+    (``_as_path_array``, ``permute_increments``, ``time_augment_path``,
     ``log_signature_level2``) and differing only in skipping the ``basis.project(...)`` call —
     these two sources are natively low-dimensional by construction, so there is nothing to
-    project (spec §1: "no projection step exists and the projection-adequacy gate cannot
-    bite").
+    project.
 
     Returns
     -------
@@ -1326,10 +1318,10 @@ def _output_stats_per_token(
     logits: list[NDArray[Any]],
     eos_token_ids: Sequence[int],
 ) -> F64:
-    """``[T, 4]`` matrix — columns ``entropy, margin, eos_log_mass, varentropy`` (§1a).
+    """``[T, 4]`` matrix — columns ``entropy, margin, eos_log_mass, varentropy``.
 
-    Every column is an EXISTING formula, reused verbatim (spec: "do not invent new
-    formulas"), not re-derived:
+    Every column is an EXISTING formula, reused verbatim rather than re-derived, so that a
+    coordinate here and the same-named hand feature can never disagree numerically:
 
     * ``entropy`` — ``state_extractor._compute_logit_features``'s own entropy column, called
       directly on the same ``logits`` list, so this is not a re-implementation, it is the same
@@ -1410,7 +1402,7 @@ def _attention_region_per_token(
     *,
     include_sink: bool,
 ) -> F64:
-    """``[T, 4-or-5]`` matrix — columns ``prompt, early_gen, mid_gen, recent[, sink]`` (§1b).
+    """``[T, 4-or-5]`` matrix — columns ``prompt, early_gen, mid_gen, recent[, sink]``.
 
     Region-mass formulas reused VERBATIM from
     ``feature_families.attention_flow.extract_attention_flow``'s region-decomposition block
@@ -1421,8 +1413,7 @@ def _attention_region_per_token(
     position 0, the BOS/attention-sink position), here additionally divided by ``total_mass``
     so it sits on the same [0,1]-fraction-of-total-attention scale as the four region columns
     (state_extractor's own sink feature skips that division since raw attention weights
-    already sum to ~1; the two are numerically equivalent up to that ~1 factor — see module
-    report for the explicit note).
+    already sum to ~1, so the two agree up to that ~1 factor).
     """
     T = len(data.attentions)
     if T == 0:
@@ -1432,7 +1423,7 @@ def _attention_region_per_token(
         raise KeyError(f"attention layer {layer_idx} out of range for {num_layers} layers")
 
     prompt_len = data.prompt_length
-    mean_rows = data.mean_attention(layer_idx)  # shared per-(gen,layer) cache (C2)
+    mean_rows = data.mean_attention(layer_idx)  # shared per-(gen,layer) cache
     n_cols = 5 if include_sink else 4
     out = np.zeros((T, n_cols), dtype=np.float64)
 
@@ -1506,7 +1497,7 @@ FAMILY_NAME_ATTENTION = "path_signature_attention"
 
 
 def output_stats_feature_names(config: OutputStatsPathConfig) -> list[str]:
-    """All feature names for the §1a output-statistics path (one global site — no ``_L{n}``).
+    """All feature names for the output-statistics path (one global site — no ``_L{n}``).
 
     ``out_sig_{aug|noaug}_lvl{1|2}_c{i}[c{j}]`` — feature_map: SOURCE=output (``out_sig``
     prefix), METHOD=iterated_integral, DEPTH=None (no per-layer site to read — same convention
@@ -1543,7 +1534,7 @@ def attention_region_site_feature_names(
 
 
 def attention_region_feature_names(config: AttentionRegionPathConfig) -> list[str]:
-    """All feature names the §1b family emits under this config, in emission order."""
+    """All feature names the attention-region family emits under this config, in emission order."""
     out: list[str] = []
     for layer_idx in config.layer_indices:
         out.extend(attention_region_site_feature_names(layer_idx, config))
@@ -1696,13 +1687,14 @@ def extract_null_battery(
     config: PathSignatureConfig,
     seeds: Sequence[int],
 ) -> list[PathSignatureResult]:
-    """The increment-permutation null at >=3 seeds (spec section 2), first-class and in-module.
+    """The increment-permutation null, first-class and in-module.
 
-    Returns one result per seed, column-identical to the real extraction.
+    Returns one result per seed, column-identical to the real extraction. At least three seeds
+    are required: a single shuffle cannot separate a real effect from one draw's luck.
     """
     if len(seeds) < 3:
         raise PathSignatureError(
-            f"spec section 2 asks for >=3 shuffle seeds per cell; got {len(seeds)}"
+            f"the null needs >=3 shuffle seeds per cell; got {len(seeds)}"
         )
     out: list[PathSignatureResult] = []
     for s in seeds:
@@ -1720,7 +1712,7 @@ def extract_output_stats_signature_from_source(
     gen_id: int,
     config: OutputStatsPathConfig,
 ) -> PathSignatureResult:
-    """Extract one generation's §1a output-statistics path-signature block."""
+    """Extract one generation's output-statistics path-signature block."""
     names = output_stats_feature_names(config)
     try:
         p = source.load_path(gen_id, OUTPUT_SITE_ID)
@@ -1759,7 +1751,7 @@ def extract_attention_region_signature_from_source(
     gen_id: int,
     config: AttentionRegionPathConfig,
 ) -> PathSignatureResult:
-    """Extract one generation's §1b attention-region path-signature block across all sites."""
+    """Extract one generation's attention-region path-signature block across all sites."""
     all_feats: list[F64] = []
     all_names: list[str] = []
     n_positions: dict[int, int] = {}
@@ -1859,7 +1851,7 @@ def selftest(verbose: bool = True) -> bool:  # noqa: C901 — a linear battery, 
     print("=" * 78)
 
     # ── (a) THE CORE CONTROL: level-1 invariant under increment permutation, level-2 moves ──
-    print("\n(a) increment-permutation null — the spec's primary control")
+    print("\n(a) increment-permutation null — the primary control")
     X = _synthetic_path(rng, T=140, d=48)
     basis = _synthetic_basis(rng, d=48, k_max=16)
     cfg = PathSignatureConfig(layer_indices=(16,), n_components=4, time_augment=True)
@@ -2074,10 +2066,10 @@ def selftest(verbose: bool = True) -> bool:  # noqa: C901 — a linear battery, 
     )
     c.ok("d8 feature names are unique", len(set(names)) == len(names))
 
-    # ── (e) shapes and counts match the spec's arithmetic ──
-    print("\n(e) arity — the spec's own numbers")
+    # ── (e) shapes and counts match the arity arithmetic ──
+    print("\n(e) arity")
     cases = [
-        # (k, augment, level, expected_l1, expected_l2, spec quote)
+        # (k, augment, level, expected_l1, expected_l2, description)
         (4, True, 2, 5, 10, "k=4 augmented to 5 -> 5 level-1 + 10 level-2 = 15"),
         (4, False, 2, 4, 6, "k=4 unaugmented -> 4 + 6 = 10"),
         (8, True, 2, 9, 36, "k=8 augmented to 9 -> 9 + 36 = 45"),
@@ -2240,8 +2232,8 @@ def selftest(verbose: bool = True) -> bool:  # noqa: C901 — a linear battery, 
         ResidualPathSource is PathSource,
     )
 
-    # ── (i) §1a output-statistics path — SOURCE=output ──
-    print("\n(i) §1a output-statistics path (entropy, margin, eos_log_mass, varentropy)")
+    # ── (i) output-statistics path — SOURCE=output ──
+    print("\n(i) output-statistics path (entropy, margin, eos_log_mass, varentropy)")
     out_native = _synthetic_path(rng, T=110, d=4)   # a curved, order-structured 4-dim path
     out_cfg = OutputStatsPathConfig(eos_token_ids=(3, 7), time_augment=True)
     out_real, _ = signature_features_from_native_path(
@@ -2323,8 +2315,8 @@ def selftest(verbose: bool = True) -> bool:  # noqa: C901 — a linear battery, 
         and out_zres.metadata.degraded_sites == (OUTPUT_SITE_ID,),
     )
 
-    # ── (j) §1b attention-region path — SOURCE=attention ──
-    print("\n(j) §1b attention-region path (prompt/early_gen/mid_gen/recent[/sink])")
+    # ── (j) attention-region path — SOURCE=attention ──
+    print("\n(j) attention-region path (prompt/early_gen/mid_gen/recent[/sink])")
     attn_native = _synthetic_path(rng, T=95, d=5)
     attn_cfg = AttentionRegionPathConfig(layer_indices=(16,), include_sink=True, time_augment=True)
     attn_real, _ = signature_features_from_native_path(
@@ -2486,7 +2478,7 @@ def selftest(verbose: bool = True) -> bool:  # noqa: C901 — a linear battery, 
     )
 
     # ── (l) feature_map classification — output + attention families, zero unclassified ──
-    print("\n(l) feature_map classification — §1a/§1b families")
+    print("\n(l) feature_map classification — output-statistics / attention-region families")
     out_names_full = output_stats_feature_names(
         OutputStatsPathConfig(eos_token_ids=(3, 7), time_augment=True),
     )
@@ -2574,7 +2566,7 @@ class _FakeRawGenerationData:
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(
-        description="Path-signature feature family (level-2 log-signature, spec 2026-09-11)",
+        description="Path-signature feature family (level-2 log-signature)",
     )
     parser.add_argument(
         "--selftest", action="store_true",

@@ -313,10 +313,10 @@ def compute_features_v2_from_data(
             all_names.extend(result.feature_names)
             offset += len(result)
 
-    # Path signature (level-2 log-signature of the residual trajectory; spec 2026-09-11).
+    # Path signature (level-2 log-signature of the residual trajectory).
     # Unlike the other families this one needs an EXTERNAL artefact (the calibration PCA that
     # supplies the projection basis) and deliberately does NOT degrade to a skip when it is
-    # missing — a silently-absent family is exactly the failure the spec's discipline forbids.
+    # missing: a silently-absent family looks identical to a family that found no signal.
     if family_config.enable_path_signature:
         from anamnesis.extraction.feature_families.path_signature import (
             PathSignatureConfig,
@@ -364,7 +364,7 @@ def compute_features_v2_from_data(
             all_names.extend(result.feature_names)
             offset += len(result)
 
-    # MoE expert routing (vmb arm A7, M6 DeepSeek-V2-Lite class; needs router_dist capture — dense
+    # MoE expert routing (DeepSeek-V2-Lite class; needs router_dist capture — dense
     # models leave it None → skipped). MoE layers are those the capture actually banked a router for,
     # so dense prefix layers (e.g. DeepSeek layer 0) are excluded data-drivenly, not by a magic index.
     if family_config.enable_expert_routing and raw_data.router_dist:
@@ -744,7 +744,7 @@ def _load_pca_model(
         pca_data = pickle.load(f)
 
     if isinstance(pca_data, dict):
-        # C5 per-layer format: {layer_idx: {"components", "mean", ...}} → return dicts
+        # Per-layer format: {layer_idx: {"components", "mean", ...}} → return dicts
         vals = list(pca_data.values())
         if vals and isinstance(vals[0], dict) and "components" in vals[0]:
             comp = {int(k): np.asarray(v["components"], dtype=np.float32) for k, v in pca_data.items()}

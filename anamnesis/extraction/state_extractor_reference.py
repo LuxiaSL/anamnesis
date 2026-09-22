@@ -497,8 +497,8 @@ def _extract_spectral_features(
 
     # Unnormalized graph Laplacian L = D - A. (The symmetric normalized Laplacian
     # collapses this near-complete attention-similarity graph to a near-constant
-    # spectrum — verified WORSE for fiedler/spectral_entropy, v3/B2 — so keep L's
-    # discriminative spectrum and make the SUMMARIES scale-free instead.)
+    # spectrum, which costs fiedler/spectral_entropy their discrimination — so keep L's
+    # spectrum and make the SUMMARIES scale-free instead.)
     D = np.diag(A.sum(axis=1))
     L = D - A
     L += np.eye(n) * 1e-10  # numerical stability
@@ -509,7 +509,7 @@ def _extract_spectral_features(
     lam_max = float(eigenvalues[-1]) if n > 0 else 0.0
 
     # Fiedler normalized by the spectral radius → scale-free (the raw 2nd
-    # eigenvalue scales with graph size n ∝ T) (v3/B2).
+    # eigenvalue scales with graph size n ∝ T).
     fiedler = float(eigenvalues[1] / lam_max) if (n > 1 and lam_max > 1e-12) else 0.0
 
     # HFER: high-frequency energy ratio (a fraction, already scale-free).
@@ -521,7 +521,7 @@ def _extract_spectral_features(
 
     # Spectral entropy of the (sum-normalized, scale-free) eigenvalue
     # distribution, divided by log(n) so it doesn't grow with the node count
-    # (= sampled steps ∝ T) (v3/B2).
+    # (= sampled steps ∝ T).
     if total_energy > 1e-12 and n > 1:
         normalized_ev = eigenvalues / total_energy
         spec_entropy = float(scipy_entropy(normalized_ev + 1e-12) / np.log(n))
@@ -530,8 +530,8 @@ def _extract_spectral_features(
 
     # Smoothness: Rayleigh quotient on the symmetric NORMALIZED Laplacian (bounded
     # [0,2], so it doesn't scale with n) of a meaningful graph signal — the
-    # positionally-corrected hidden-state NORM per step (v3/C2). Old signal was
-    # hidden_state.mean() = scalar mean of a ~4096-dim RMSNorm residual ≈ noise.
+    # positionally-corrected hidden-state NORM per step. The scalar MEAN of a ~4096-dim
+    # RMSNorm residual is near-constant by construction and carries no signal here.
     deg = A.sum(axis=1)
     d_inv_sqrt = 1.0 / np.sqrt(np.maximum(deg, 1e-12))
     L_sym = np.eye(n) - (d_inv_sqrt[:, None] * A * d_inv_sqrt[None, :])
@@ -618,7 +618,7 @@ def extract_cache_and_keys(
         recency_biases = []
         sink_masses = []
         cache_coverages = []
-        prompt_masses = []   # v3/B1: accumulate raw masses for ratio-of-means lookback
+        prompt_masses = []   # accumulate raw masses for ratio-of-means lookback
         gen_masses = []
 
         for t in range(T):
@@ -634,9 +634,9 @@ def extract_cache_and_keys(
             recency = float(mean_attn[cutoff:].sum() / max(mean_attn.sum(), 1e-12))
             recency_biases.append(recency)
 
-            # Sink mass: attention to position 0 (BOS / attention sink). On this
-            # corpus the sink dominates (argmax==0 ~100%), so this equals the old
-            # "anchor_strength" = max(attention); named honestly now (v3/C1).
+            # Sink mass: attention to position 0 (BOS / attention sink). Named for the
+            # position it reads, not for an interpretation of it — where the sink dominates
+            # this coincides with max(attention), but the two are not the same quantity.
             sink_masses.append(float(mean_attn[0]))
 
             # Cache coverage: fraction of positions with > 1/N attention
@@ -644,8 +644,8 @@ def extract_cache_and_keys(
             cache_coverages.append(float((mean_attn > threshold).sum() / seq_len))
 
             # Lookback: prompt vs generated attention mass. Accumulate raw masses
-            # and aggregate as a ratio-of-means below (v3/B1) — the old
-            # mean-of-ratios blew up at early steps where gen_mass≈0.
+            # and aggregate as a ratio-of-means below: a mean-of-ratios blows up at early
+            # steps, where gen_mass is ~0.
             prompt_masses.append(float(mean_attn[:data.prompt_length].sum()))
             gen_masses.append(float(mean_attn[data.prompt_length:].sum()))
 
@@ -658,7 +658,7 @@ def extract_cache_and_keys(
             features.append(float(np.mean(arr)) if arr else 0.0)
             names.append(f"cache_{name}_L{l_idx}")
 
-        # Lookback ratio: ratio-of-means Σ(prompt_mass) / Σ(gen_mass) (v3/B1).
+        # Lookback ratio: ratio-of-means Σ(prompt_mass) / Σ(gen_mass).
         total_gen = float(np.sum(gen_masses)) if gen_masses else 0.0
         total_prompt = float(np.sum(prompt_masses)) if prompt_masses else 0.0
         features.append(total_prompt / max(total_gen, 1e-12))
@@ -718,9 +718,8 @@ def extract_cache_and_keys(
             else:
                 eff_dim = 0.0
             # Bound as a fraction of the max possible rank so it doesn't grow
-            # toward head_dim with generation length (v3/B4). Residual length
-            # coupling (PR still rises with T) is left to analysis-side
-            # residualization; subsampling to fixed #keys is a later option.
+            # toward head_dim with generation length. The residual coupling that remains
+            # (PR still rises with T) is left to analysis-side residualization.
             eff_dim = eff_dim / max(min(key_matrix.shape[0], key_matrix.shape[1]), 1)
         except Exception:
             eff_dim = 0.0
@@ -757,11 +756,10 @@ def extract_cache_and_keys(
             features.append(novelties[ti] if ti < len(novelties) else 0.0)
             names.append(f"kv_key_novelty_traj{i}_L{l_idx}")
 
-    # ── 2.5.3 Cross-Layer Key Agreement: ABSENT (v3/C4) ──
-    # Raw cross-layer key cosine compares vectors in unrelated learned bases, so
-    # neither extractor emits it and the two stay equivalent here; the
-    # basis-invariant replacement is the kv_cka feature family
-    # (prereg-vmb-v1 Stage A item v, 2026-07-12).
+    # ── 2.5.3 Cross-Layer Key Agreement: ABSENT ──
+    # Raw cross-layer key cosine compares vectors in unrelated learned bases, so neither
+    # extractor emits it and the two stay equivalent here. The basis-invariant read of the
+    # same thing is the kv_cka feature family.
 
     # ── 2.5.4 KV Cache Epoch Detection ──
     epoch_feats = _extract_epoch_features(data, config)
@@ -794,7 +792,7 @@ def _fit_attention_decay(
             continue
         current_pos = prompt_length + t
         # Exclude position 0 (BOS / attention sink): it carries large mass at the
-        # MAX distance, which flattens/biases the exponential-decay fit (v3/C1).
+        # MAX distance, which flattens/biases the exponential-decay fit.
         distances = np.array([current_pos - i for i in range(1, seq_len)], dtype=np.float64)
         distances = np.maximum(distances, 1)
         all_distances.extend(distances.tolist())
