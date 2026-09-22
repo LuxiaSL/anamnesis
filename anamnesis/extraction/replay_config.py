@@ -18,10 +18,8 @@ def native_replay_configs(
         enable_residual_trajectory=True,
         enable_attention_flow=True,
         enable_gate_features=True,
-        enable_temporal_dynamics=False,  # v3: temporal_dynamics ignored
-        enable_per_head=True,  # v3: new surface
+        enable_per_head=True,
         enable_stft=True,
-        enable_contrastive_projection=False,  # contrastive is a separate addon
         # A floor must cover every featurized cell natively, so the battery vector enables
         # these three families even though the frozen fat_01 signatures on disk predate them
         # and carry none of their columns. The battery vector is a superset of that baseline,
