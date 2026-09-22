@@ -50,20 +50,16 @@ logger = logging.getLogger(__name__)
 
 
 # ── Block labels ──────────────────────────────────────────────────────────────
-# A feature vector is addressed in contiguous blocks, and every block has a label
-# it is reported under: printed in this module's log lines, and used as a key in
-# the per-block numbers of an analysis result. A label therefore says what its
-# block reads, because it is what a reader of a results file sees.
-#
-# A label is not the name the block is stored under. The stored names are frozen
-# in `anamnesis/extraction/state_extractor.py` and reach disk through
-# BLOCK_STORED_NAMES below; an older results file's labels reach the current ones
-# through `anamnesis/analysis/gauntlet/schemas/compat.py`.
+# A feature vector is addressed in contiguous blocks, each reported under a label.
+# A label is what a reader of a results file sees, so it says what its block reads;
+# it is not the name the block is stored under. BLOCK_STORED_NAMES below is where
+# the two meet, and `anamnesis/analysis/gauntlet/schemas/compat.py` maps the labels
+# of an older results file onto the current ones.
 #
 # The four core blocks read, in order: residual activation norms with output
-# statistics; attention distributions with cross-layer residual deltas;
-# cache-read profiles with pre-RoPE key geometry; residual-stream PCA. The third
-# spans two substrates, which is why a block is an address and not a finding —
+# statistics; attention distributions with cross-layer residual deltas; cache-read
+# profiles with pre-RoPE key geometry; residual-stream PCA. The third spans two
+# substrates, which is why a block is an address and not a finding —
 # `anamnesis/feature_map.py` is what says which substrate a feature reads.
 
 NORMS_AND_OUTPUT_STATS = "norms_and_output_stats"
@@ -120,10 +116,8 @@ FAMILY_BLOCKS = [
 
 # A union is built only when every member it names is present; a union missing a
 # member is omitted rather than built short, because a short union would be a
-# different feature set reported under the same label. A corpus of the four
-# engineered families alone would otherwise report `every_block` and
-# `attention_and_cache+engineered` at the width of `engineered`, naming four
-# blocks it does not contain and three it does not.
+# different feature set reported under the same label — a label naming blocks the
+# numbers do not contain.
 BLOCK_UNIONS: dict[str, list[str]] = {
     ATTENTION_AND_CACHE: [ATTENTION_AND_DELTAS, CACHE_AND_KEYS],
     ALL_CORE: list(CORE_BLOCKS),

@@ -123,10 +123,14 @@ FIELD_RENAMES: dict[str, dict[str, str]] = {
 }
 
 
-# Current label → the label banked files carry for it, or None where the label has
-# always been the one in use. Keyed by the current label and total over the label set,
-# so a block or union added to `anamnesis/analysis/gauntlet/signature_io.py` has to
-# say which it is, and a rename cannot land without an entry here.
+# WIRE VOCABULARY, read-side only: the right-hand strings are label spellings that
+# banked files carry, matched against what comes off disk and never written. They are
+# not a taxonomy, and editing one to look better makes an existing file unreadable.
+#
+# Current label → the retired spelling, or None where the current label is the only
+# one a file has ever carried. Keyed by the current label and total over the label
+# set, so a block or union added to `anamnesis/analysis/gauntlet/signature_io.py` has
+# to say which it is, and a rename cannot land without an entry here.
 RETIRED_LABEL_SPELLINGS: dict[str, str | None] = {
     NORMS_AND_OUTPUT_STATS: "T1",
     ATTENTION_AND_DELTAS: "T2",
@@ -150,14 +154,11 @@ BLOCK_LABEL_RENAMES: dict[str, str] = {
     if retired is not None
 }
 
-# Fields whose keys are not one label but several joined with ``+``, and how to read
-# one. ``members`` means the key is a combination of individual blocks, so each
-# component is translated on its own. ``union_first`` means the key leads with a union
-# and names what was added to it, so the longest leading run that is a label is
-# translated as that label. The distinction is load-bearing: ``T2+T2.5`` is the pair
-# (attention, cache) in a combinations table and the attention-and-cache union
-# everywhere else, and translating it the same way in both would give one cell two
-# spellings.
+# Fields whose keys are several labels joined with ``+``, and which reading applies:
+# ``members`` translates each component on its own, ``union_first`` takes the longest
+# leading run that is a label. The distinction is load-bearing — ``T2+T2.5`` is the
+# pair (attention, cache) in a combinations table and the attention-and-cache union
+# everywhere else, so one reading for both would give one cell two spellings.
 COMPOUND_LABEL_FIELDS: dict[str, str] = {
     "pairwise_block_combinations": "members",
     "triple_block_combinations": "members",

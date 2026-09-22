@@ -1,17 +1,17 @@
 """Section 2: Classification — 5-way mode discrimination.
 
-2026-07-11 sweep: topic-grouped CV (StratifiedGroupKFold) is the DEFAULT for every
-number this module reports — ungrouped StratifiedKFold lets same-topic samples
-straddle train/test, and every repetition of a topic shares its prompt, so a
-classifier can recognise the topic and be scored as if it had recognised the mode.
-That leak is what the grouped default exists to prevent. The ungrouped path survives
-only as a fallback when no topic labels exist, and is labeled as legacy in the
-printed output. Pairwise-binary accuracies carry no p-values, and the ten-pair grid
-is one family read off one set of signatures rather than ten findings: at n=100 the
-spread between folds is of the same order as the spread between pairs, so a gap
-under roughly 15pp is fold noise. ``cv_stability`` on the key blocks measures that
-spread directly — its ``std`` and 95% interval are what a pairwise gap should be
-weighed against.
+Topic-grouped CV (StratifiedGroupKFold) is the DEFAULT for every number this module
+reports — ungrouped StratifiedKFold lets same-topic samples straddle train/test, and
+every repetition of a topic shares its prompt, so a classifier can recognise the
+topic and be scored as if it had recognised the mode. That leak is what the grouped
+default exists to prevent. The ungrouped path survives only as a fallback when no
+topic labels exist, and is labeled as legacy in the printed output. Pairwise-binary
+accuracies carry no p-values, and the ten-pair grid is one family read off one set
+of signatures rather than ten findings: the spread between folds is of the same
+order as the spread between pairs, so a pairwise gap can be fold noise and nothing
+else. ``cv_stability`` on the key blocks measures that spread directly — its ``std``
+and 95% interval are what a pairwise gap has to be weighed against, rather than
+against zero.
 
 One number here is not a finding but a ruler: the length-only baseline, a forest on
 generated-token count alone. Every mode accuracy in this section is read against it,
@@ -253,8 +253,8 @@ def _run_pairwise_binary(
 ) -> dict[str, ClassifierAccuracyResult]:
     """Binary RF for all mode pairs.
 
-    No per-pair p-values are computed; interpret the 10-pair grid against the
-    fold-noise law (n=100 → diffs <15pp are noise), not as independent findings.
+    No per-pair p-values are computed. Read the 10-pair grid against the
+    fold-to-fold spread ``cv_stability`` reports, not as ten independent findings.
     """
     modes = sorted(set(y))
     results: dict[str, ClassifierAccuracyResult] = {}

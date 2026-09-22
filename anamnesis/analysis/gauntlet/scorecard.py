@@ -273,7 +273,7 @@ def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
         removal_costs=removal_cost,
     ))
 
-    # ── Prediction 7: 5-way accuracy ~67-73% ──
+    # ── Prediction 7: the 5-way accuracy band ──
     attention_and_cache_acc: float | None = None
     combined_acc: float | None = None
     if clf_result is not None:
