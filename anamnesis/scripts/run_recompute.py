@@ -71,8 +71,7 @@ def configs(model: str) -> tuple[ExtractionConfig, FeaturePipelineConfig]:
 
     The family set is the one the banked vectors were computed with: the baseline
     surfaces, the residual trajectory, attention flow, gate features, per-head
-    heterogeneity and the spectral operator, with windowed temporal decomposition
-    and the learned contrastive projection off. Naming it here rather than reusing
+    heterogeneity and the spectral operator. Naming it here rather than reusing
     the replay surface's set is deliberate — the replay surface grew families that
     the banked vectors this command reproduces do not contain, and a recompute
     that silently widened its vector would not be a recompute.
@@ -86,10 +85,8 @@ def configs(model: str) -> tuple[ExtractionConfig, FeaturePipelineConfig]:
             enable_residual_trajectory=True,
             enable_attention_flow=True,
             enable_gate_features=True,
-            enable_temporal_dynamics=False,
             enable_per_head=True,
             enable_stft=True,
-            enable_contrastive_projection=False,
         ),
     )
 

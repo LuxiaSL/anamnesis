@@ -183,10 +183,8 @@ def test_recompute_configs_match_the_records_own_construction(model: str) -> Non
         enable_residual_trajectory=True,
         enable_attention_flow=True,
         enable_gate_features=True,
-        enable_temporal_dynamics=False,
         enable_per_head=True,
         enable_stft=True,
-        enable_contrastive_projection=False,
         trajectory_layers=preset.trajectory_layers,
         contrastive_layers=preset.contrastive_layers,
     )
