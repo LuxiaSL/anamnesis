@@ -1,28 +1,27 @@
-"""Stage-0 floor estimation + the noise law (prereg-vmb-v1 §5, addendum 2026-07-12a).
+"""Stage-0 floor estimation and the noise law.
 
-Two floor types (ratified §1):
+Two floor types:
   - STOCHASTIC: matched-history, different-seed pair deltas within a prompt class
-    (topic × task stratum). 80 classes × 10 seeds → C(10,2)=45 pairs/class →
-    3,600 pairs/model.
+    (topic × task stratum) — every within-class pair the floor corpus affords.
   - FAITHFULNESS: replay-vs-replay deltas of an identical continuation, STRATIFIED
-    (addendum item 3) into within-device (pinned repeats — pure replay determinism)
-    and cross-device (operational jitter) components.
+    into within-device (pinned repeats — pure replay determinism) and cross-device
+    (operational jitter) components.
 
-Delta metric (the exp11 template generalized over feature_map cells):
-  per-feature robust z (median/MAD over the floor corpus) → per-cell delta of a
-  pair = mean |z_i − z_j| over the cell's features. Whole-vector = the all-feature
-  cell. Cells at three granularities: whole_vector, legacy family, source × band.
+Delta metric, over feature_map cells: per-feature robust z (median/MAD over the
+floor corpus) → per-cell delta of a pair = mean |z_i − z_j| over the cell's
+features. Whole-vector = the all-feature cell. Cells at four granularities:
+whole_vector, legacy family, source, source × band.
 
-The law (§5, finalized by addendum item 1): for each (cell × model), n_min =
-smallest n at which a two-sample comparison of delta distributions detects a
-k=2× floor-median shift with power 0.9 at the effective per-test α. Published as
-a TABLE over α_test ∈ {0.05, 0.01, 1e-3, 1e-4}; the ruled row at arm-prereg time
-is α = 0.05 / m with m = that arm's pre-registered confirmatory cell count
-(Bonferroni planning bound — conservative for BH). Battery n = 2× n_min
-(A2 cells 4×). Shift definition (conservative reading, documented): the arm
-delta's location exceeds the floor median by (k−1)×median — i.e. "the arm sits
-at k× floor", the floor-ruler criterion — so effect size d = (k−1)·median/σ_floor.
-A rank-test variant inflates n by 1/0.955 (Mann-Whitney ARE vs t).
+The law: for each (cell × model), n_min = smallest n at which a two-sample
+comparison of delta distributions detects a k=2× floor-median shift with power 0.9
+at the effective per-test α. Published as a TABLE over α_test ∈ {0.05, 0.01, 1e-3,
+1e-4}; a planner reads the row α = 0.05 / m, where m is the confirmatory-cell count
+its comparison declares — ``BatteryManifest.confirmatory_m`` totals it, and reading
+it as a Bonferroni bound is conservative for BH. Shift definition (the conservative
+reading): the arm delta's location exceeds the floor
+median by (k−1)×median — i.e. "the arm sits at k× floor", the floor-ruler
+criterion — so effect size d = (k−1)·median/σ_floor. A rank-test variant inflates
+n by 1/0.955 (Mann-Whitney ARE vs t).
 
 Every emitted number is stamped (n, M, law, floor_type), and localization is a
 feature_map cell rather than a coarse feature block.
@@ -48,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 F32 = NDArray[np.float32]
 
-#: α grid the law table is published over (addendum 2026-07-12a item 1).
+#: α grid the law table is published over.
 ALPHA_GRID: tuple[float, ...] = (0.05, 0.01, 1e-3, 1e-4)
 
 #: Mann-Whitney asymptotic relative efficiency vs the t-test (normal shift).
@@ -87,10 +86,10 @@ class FloorCell(BaseModel):
     n_min_by_alpha_robust: dict[str, int]  # σ_robust = MAD(deltas)·1.4826 (heavy-tail resistant)
     effect_d: float                # (k−1)·median / σ_floor
     effect_d_robust: float         # (k−1)·median / σ_robust — planning uses max(n_min, n_min_robust)
-    exact_zero: bool = False       # floor distribution is EXACTLY zero (bitwise-deterministic
-                                   # replay, measured 2026-07-12 on the B200 fleet): any nonzero
-                                   # delta exceeds floor; n is set by effect-side estimation only,
-                                   # and the k×-floor ruler degenerates to "nonzero at all".
+    exact_zero: bool = False       # floor distribution is EXACTLY zero, which replay-
+                                   # deterministic hardware gives: any nonzero delta exceeds
+                                   # floor, so n is set by effect-side estimation alone and the
+                                   # k×-floor ruler degenerates to "nonzero at all".
     law: LawParams
 
 
@@ -139,20 +138,19 @@ def load_signature_matrix(
     if not loaded:
         raise ValueError(f"no usable signatures under {sig_dir}")
     # The model's STANDARD vector = the modal feature-name set. Generations too
-    # short to emit it (e.g. 2-token instant-EOS gens dropping gate-drift/STFT
-    # and CKA families — observed on OLMo-2 base, 2026-07-12) are EXCLUDED,
-    # loudly: a truncated vector is not the same measurement.
+    # short to emit it — a 2-token instant-EOS gen drops the gate-drift, STFT and
+    # CKA families, which need a window — are EXCLUDED, loudly: a truncated vector
+    # is not the same measurement.
     name_counts: dict[tuple[str, ...], int] = {}
     for _, _, nm, _ in loaded:
         name_counts[nm] = name_counts.get(nm, 0) + 1
     modal = max(name_counts, key=lambda k: name_counts[k])
     modal_len = len(modal)
-    # A signature is standard iff its names ARE the modal set AND its feature VECTOR length
-    # matches (== modal_len). The second guard catches malformed sigs where a family emitted
-    # features/names of divergent length while the name TUPLE still matched the modal.
-    # Observed: residual_trajectory 215-vs-205 on 3 M6 pure_contrastive gens (2026-07-18),
-    # where grouping by names alone let those into np.stack and crashed it. Drop them loudly,
-    # same as short gens.
+    # A signature is standard iff its names ARE the modal set AND its feature VECTOR
+    # length matches. The second guard catches a malformed signature whose family
+    # emitted features and names of divergent length while the name TUPLE still
+    # matched the modal set: grouping by names alone lets it reach np.stack, which
+    # then raises. Drop it loudly, same as a short gen.
     def _standard(f: F32, nm: tuple[str, ...]) -> bool:
         return nm == modal and int(f.shape[0]) == modal_len
     dropped = [gid for gid, f, nm, _ in loaded if not _standard(f, nm)]
@@ -184,11 +182,10 @@ def robust_scale(X: F32) -> tuple[F32, F32]:
     """Per-feature (median, scale) over the floor corpus.
 
     Scale = max(MAD·1.4826, 0.05·std): MAD-primary for outlier resistance, but
-    floored at a fraction of std so NEAR-CONSTANT features (e.g. the saturated
-    spectral_spectral_entropy_*, MAD ~1e-7 vs std ~4e-4 on the 3B floor corpus)
-    cannot inflate |z| astronomically on rare deviations — that pathology put
-    σ=229 on one 28-feature cell and poisoned every aggregate containing it
-    (diagnosed 2026-07-12, Stage-0 first pass). For healthy features
+    floored at a fraction of std so NEAR-CONSTANT features — a saturated
+    spectral-entropy feature has a MAD orders of magnitude below its std — cannot
+    inflate |z| astronomically on a rare deviation. One such feature is enough to
+    poison every cell aggregate that contains it. For healthy features
     MAD·1.4826 ≈ std, so the floor never binds. Degenerate both → 1.
     """
     med = np.median(X, axis=0)
@@ -201,8 +198,8 @@ def robust_scale(X: F32) -> tuple[F32, F32]:
 
 def build_cells(names: list[str], n_layers: int) -> dict[str, NDArray]:
     """Cell name → boolean feature mask, at four floor granularities:
-    whole_vector, legacy family, source (covers unbanded sources like output —
-    A1's primary confirmatory cell; added 2026-07-12b), source × band."""
+    whole_vector, legacy family, source (which is the only granularity covering a
+    source that carries no band, such as output), source × band."""
     fm = FeatureMap(names, n_layers)
     cells: dict[str, NDArray] = {"whole_vector": np.ones(len(names), dtype=bool)}
     for i, t in enumerate(fm.tags):
@@ -303,7 +300,7 @@ def compute_stochastic_floors(
     n_layers: int,
     law: LawParams | None = None,
 ) -> FloorReport:
-    """The Stage-0 stochastic-floor pipeline for one model (§5)."""
+    """The Stage-0 stochastic-floor pipeline for one model."""
     law = law or LawParams()
     X, names, gen_ids = load_signature_matrix(sig_dir)
     labels = load_class_labels(metadata_path)
@@ -334,7 +331,7 @@ def compute_faithfulness_floors(
     law: LawParams | None = None,
     scale_from: tuple[F32, F32] | None = None,
 ) -> list[FloorReport]:
-    """Faithfulness floors, stratified within/cross-device (addendum item 3).
+    """Faithfulness floors, stratified within-device and cross-device.
 
     replay_index_path: JSON list of {"sig": "gen_XXX", "continuation_id": int,
     "replay_idx": int, "device": str} — written by the Stage-0 replay driver.

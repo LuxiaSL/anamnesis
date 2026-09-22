@@ -19,13 +19,13 @@ rows in different units are never averaged.
 Two asymmetries are load-bearing and are the reason this is code rather than a
 spreadsheet. First, the content rung is a **maximum over a declared detector
 set**: adding a detector can only raise it, so membership is monotone-conservative
-— "not yet defeated by any detector we ran". Second, a **judge failure** is not
-symmetric with a judge success. A judge that fails to tell two texts apart may
-simply have been asked badly, so its failure defends membership only at the
-hardened reading (a forced-choice contrast, plus a second judge family), while a
-judge *success* defeats membership directly, because a blind reader succeeding is
-a lower bound on what a hardened reader would do. That rule is enforced by
-:func:`~anamnesis.analysis.battery.gates.reject_blind_judge_defense`, which this
+— it says "no detector in the set defeats this row", never "none could". Second, a
+**judge failure** is not symmetric with a judge success. A judge that fails to tell
+two texts apart may simply have been asked badly, so its failure defends membership
+only at the hardened reading (a forced-choice contrast, plus a second judge family),
+while a judge *success* defeats membership directly, because a blind reader
+succeeding is a lower bound on what a hardened reader would do. That rule is enforced
+by :func:`~anamnesis.analysis.battery.gates.reject_blind_judge_defense`, which this
 module calls before it will produce a census at all.
 
 The census re-runs at every scale point. Its object is not a row but the *set*:
@@ -187,8 +187,8 @@ def a1_rows(arms_root: Path, *, record_dirs: Iterable[str] = A1_RECORD_DIRS) -> 
 def load_2afc_rates(arms_root: Path) -> dict[str, float]:
     """Forced-choice rates per model, from whichever hardening tables are banked.
 
-    An empty result means the hardening pass has not run, which is a different
-    state from a judge having failed it — every row reads the absence as *pending*
+    An empty result means no hardening table is banked, which is a different state
+    from a judge having failed one — every row reads that absence as ``PENDING``
     rather than as a pass.
     """
     rates: dict[str, float] = {}

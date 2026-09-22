@@ -1,10 +1,11 @@
-"""Channel decomposition (§1, fourth readout) — implemented 2026-07-13 (addendum 13d).
+"""Channel decomposition: which part of a deformation needed the tokens to change.
 
 Every arm: compare the matched-token delta (replay channel; deformation at fixed
-tokens = DIRECT component) against the free-generation delta; the remainder is
-the TOKEN-MEDIATED component. Structural predictions live in §2c (A1 = 100%
-token-mediated — matched-token delta AT faithfulness floor, parameter-free;
-A4/A5 have direct components by construction). Output: the map's channel column.
+tokens = DIRECT component) against the free-generation delta; the remainder is the
+TOKEN-MEDIATED component. An arm that only changes how tokens are drawn cannot
+deform a fixed-token replay at all, so its direct component sits at the
+faithfulness floor and its whole effect is token-mediated; an arm that writes into
+activations has a direct component by construction. Output: the channel column.
 
 The typed `ChannelSplit` (below) is the report-layer container (referenced by
 `report.py`); the working readout is `decompose_channel`, which returns a plain
@@ -52,8 +53,8 @@ def decompose_channel(
       direct_vec:   signed mean matched-token delta (steered-replay − unsteered), z-space.
       free_gen_vec: signed free-gen centroid shift (steered − rider), z-space.
       mask:         boolean feature mask for the family cell.
-      faithfulness_floor: replay floor for this cell (bitwise-zero on the anchors per 12b,
-        so any nonzero direct clears it — direct_at_floor is then True only at exactly 0).
+      faithfulness_floor: replay floor for this cell — zero wherever replay is
+        bitwise-deterministic, in which case direct_at_floor is True only at exactly 0.
 
     Returns a dict: direct/token-mediated/free-gen RMS (floor-z), a rough magnitude split
     `fraction_direct`, the alignment `cos_direct_freegen` (is the fixed-token deformation

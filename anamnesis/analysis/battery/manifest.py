@@ -1,9 +1,9 @@
-"""Battery manifest — the typed registry every §2c prediction block compiles into.
+"""Battery manifest — the typed registry a prediction block compiles into.
 
-prereg-vmb-v1 §6b: one analysis template for every arm × model. A BatteryCell is
-the unit of the visibility map: (arm, model, dose, cell type), with its floor
-type declared per the ratified two-floor design (§1). Localization speaks feature_map
-(source × method × dynamic × depth); a coarse feature block never stands in for a cell.
+One analysis template for every arm × model. A BatteryCell is the unit of the
+visibility map: (arm, model, dose, cell type), each declaring the floor it is ruled
+against. Localization speaks feature_map (source × method
+× dynamic × depth); a coarse feature block never stands in for a cell.
 
 Every emitted number downstream carries (n, M, law, floor-type); the manifest is
 where those stamps originate.
@@ -17,7 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Arm(str, Enum):
-    """Perturbation classes (prereg §2) + pre-registered null arms (§3)."""
+    """The perturbation classes (``A``-prefixed) and the nulls (``N``) read beside them.
+
+    A null is built to move nothing, so a signature that moves under one is
+    measuring the instrument.
+    """
 
     A1_sampling = "A1_sampling"
     A2_instruction_vs_execution = "A2_instruction_vs_execution"
@@ -29,9 +33,9 @@ class Arm(str, Enum):
     A7_routing_perturbation = "A7_routing_perturbation"
     N1_context_prefix = "N1_context_prefix"
     N1b_unexecuted_instruction = "N1b_unexecuted_instruction"
-    N3_wrong_channel = "N3_wrong_channel"       # lives inside A6
+    N3_wrong_channel = "N3_wrong_channel"       # runs inside A6_weight_delta
     N4_family_level = "N4_family_level"          # localization-row blindness inside visible arms
-    N5_source_side_dose_zero = "N5_source_side_dose_zero"  # inside A6
+    N5_source_side_dose_zero = "N5_source_side_dose_zero"  # also inside A6_weight_delta
     stage0_floor = "stage0_floor"                # the floors themselves (not an arm)
 
 
@@ -43,7 +47,7 @@ class CellType(str, Enum):
 
 
 class FloorType(str, Enum):
-    """Ratified two-floor design (§1) + the addendum 2026-07-12a stratified split."""
+    """The two floor designs, with faithfulness split by where its replays ran."""
 
     stochastic = "stochastic"                     # matched-history, different-seed pairs
     faithfulness = "faithfulness"                 # replay-vs-replay identity (pooled)
@@ -54,9 +58,10 @@ class FloorType(str, Enum):
 class ModelMeta(BaseModel):
     """Analyzer-side metadata per onboarded model label.
 
-    `label` is what arm corpora dirs use (vmb_a1_{label}_{dose} — the preset
-    key for M3+ models); `stage0_dir` is the banked Stage-0 run name, which
-    predates the convention (qwen7b, not qwen-7b) and is never renamed.
+    `label` is the model's preset key, and what an arm corpus directory is named
+    after (vmb_a1_{label}_{dose}). `stage0_dir` is the banked Stage-0 run name,
+    which spells some labels differently (qwen7b, not qwen-7b) because those
+    directories exist on disk and are never renamed.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -96,18 +101,18 @@ class BatteryCell(BaseModel):
     description: str = ""
     n_planned: Optional[int] = Field(
         default=None,
-        description="Planned n = multiplier × Stage-0 n_min (2× default, A2 cells 4×; §5).",
+        description="Sample count for this cell: law_multiplier × the Stage-0 law's n_min.",
     )
     law_multiplier: float = Field(
         default=2.0,
-        description="Battery n as a multiple of the Stage-0 law n_min (A2 = 4.0).",
+        description="Battery n as a multiple of the Stage-0 law n_min (A2 cells: 4.0).",
     )
     confirmatory_cells: Optional[list[str]] = Field(
         default=None,
         description=(
-            "Pre-registered confirmatory family-cells for this arm (feature_map keys). "
-            "THESE and only these count toward the law's m (addendum 2026-07-12a item 1); "
-            "every other decomposition cell is exploratory / hypothesis-generating."
+            "The confirmatory family-cells declared for this arm (feature_map keys). "
+            "THESE and only these count toward the law's m; every other decomposition "
+            "cell is exploratory / hypothesis-generating."
         ),
     )
 
@@ -117,7 +122,7 @@ class BatteryCell(BaseModel):
 
 
 class BatteryManifest(BaseModel):
-    """The registry all §2c blocks compile into. Duplicate cell_ids are rejected."""
+    """The registry a prediction block compiles into. Duplicate cell_ids are rejected."""
 
     cells: list[BatteryCell] = Field(default_factory=list)
 
@@ -133,10 +138,10 @@ class BatteryManifest(BaseModel):
         return [c for c in self.cells if c.model == model]
 
     def confirmatory_m(self) -> int:
-        """Total pre-registered confirmatory cell count → the law's Bonferroni-style m.
+        """Total declared confirmatory cell count → the law's Bonferroni-style m.
 
         Counts (cell × confirmatory family-cell) pairs across the manifest. Cells
-        with no confirmatory_cells contribute 0 (exploratory-only cells never
-        inflate m — addendum 2026-07-12a item 1).
+        with no confirmatory_cells contribute 0, so an exploratory-only cell can
+        never inflate m.
         """
         return sum(len(c.confirmatory_cells or []) for c in self.cells)

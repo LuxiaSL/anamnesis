@@ -1,9 +1,10 @@
 """anamnesis.analysis.battery — the one analysis template for every arm × model.
 
-prereg-vmb-v1 §6b. Typed (pydantic) throughout; prereg-locked readouts; localization
-in feature_map cells, in code and in output strings alike; every emitted number carries
-(n, M, law, floor-type). Stage 0 ships manifest + floors + stats functional;
-deltas / decomp / channel / dissoc / report are typed Wave-1 stubs.
+Typed (pydantic) throughout; localization in feature_map cells, in code and in
+output strings alike; every emitted number carries (n, M, law, floor-type).
+``decomp`` and ``dissoc`` are typed contracts whose compute functions raise
+``NotImplementedError``, so a caller reaching one is told so rather than handed a
+plausible number.
 
 Two modules are the protocols the metrology is collected and read through:
 ``stage0`` is the faithfulness-replay plan and the floors-to-n-min law table —

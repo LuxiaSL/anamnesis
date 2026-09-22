@@ -84,8 +84,8 @@ class PermutationTestResult(BaseModel):
     null_p95: float
     null_p99: float
     n_permutations: int
-    # BH-FDR q-value across the per-group permutation family for this run
-    # (2026-07-11 sweep). None when the family has a single member.
+    # BH-FDR q-value across the per-group permutation family for this run.
+    # None when the family has a single member.
     q_value: float | None = None
 
 
