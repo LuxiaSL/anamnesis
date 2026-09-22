@@ -286,15 +286,22 @@ def resolve_fast_lane(
     from anamnesis.extraction.fast.features import GpuFeatureLane
     from anamnesis.extraction.model_loader import load_model
 
-    all_layers = list(range(preset.num_layers))
+    # This lane banks features and no raw tensors, so it hooks exactly the surfaces
+    # its reducers read and nothing else: :class:`anamnesis.extraction.fast.features.GpuFeatureLane`
+    # takes pre-RoPE keys, values, queries and gate activations for
+    # ``preset.sampled_layers``, and no consumer of this runtime reads o_proj
+    # outputs, so no attention-output hook is registered. Capturing every layer
+    # belongs to :mod:`anamnesis.extraction.replay.cell`, which banks the tensors
+    # themselves and therefore has to keep depth available as an axis to measure
+    # later. A capture nothing reads costs device memory per step and buys nothing.
+    sampled = list(preset.sampled_layers)
     loaded = load_model(
         ModelConfig.from_preset(preset, model_id=model_path, device_map=device),
         sampled_layers=preset.sampled_layers,
         register_gate_hooks=True,
-        key_layers=all_layers,
-        value_layers=all_layers,
-        query_layers=all_layers,
-        attn_output_layers=all_layers,
+        key_layers=sampled,
+        value_layers=sampled,
+        query_layers=sampled,
     )
     lane = GpuFeatureLane(
         extraction,
