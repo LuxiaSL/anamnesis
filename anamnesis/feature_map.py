@@ -9,30 +9,30 @@ vector and nothing more. Three of the four span several sources at once, so a bl
 accuracy is not a reading of any single substrate and no claim is stated per block. Address a
 stored artifact by its block; describe a feature by its cell.
 
-This module tags every signature feature by the axes that ARE interpretable and were
-empirically validated on the merged v3 corpus (2026-06-14):
+This module tags every signature feature on four axes:
 
-  SOURCE   = which substrate is read.   Ranked (LDA, model-stable): attention >> residual > gate > keys > output.
-  METHOD   = the base operator (magnitude / distributional / geometry / spectral / learned /
-             iterated_integral [added 2026-09-11 for the path-signature family]).
-  DYNAMIC  = the temporal wrapper: static (a *_mean / snapshot) vs dynamic (*_std / slope / trajectory /
-             window / drift / novelty). [modes ≈ average level (static) ≥ dynamics, at n≈900.]
-  DEPTH    = layer + band (early/mid/late). [mode signal concentrates at MID layers.]
+  SOURCE   = which substrate is read (`Source`).
+  METHOD   = the base operator: magnitude / distributional / geometry / spectral /
+             iterated_integral (`Method`).
+  DYNAMIC  = the temporal wrapper: static (a *_mean / snapshot) vs dynamic (*_std / slope /
+             trajectory / window / drift / novelty).
+  DEPTH    = layer, and the band it falls in — a band is a fraction of the network, so the
+             model's layer count is part of every depth label.
 
 This is the reusable substrate for the discover→decompose→distill workflow:
   raw -> encoder (per-model discovery, all sources) -> decompose by CELL (this map) -> which (source,method,
   depth) cells carry THIS task -> instantiate theory-motivated features for those cells -> portable,
   lightweight signature. Redundancy is task-specific, so you re-decompose per task; the cells are the unit.
 
-Design: pure-numpy/pydantic (no torch/sklearn — importable anywhere, like state_extractor). Classification
-is name-based and TRANSPARENT — `FeatureMap.unclassified()` and `.summary()` expose every call so it can be
-audited/overridden. (Long-term ideal: tag at generation time; this is the pragmatic post-hoc parser
-over the frozen v3 names.)
+Design: pure-numpy/pydantic (no torch/sklearn — importable anywhere, like state_extractor).
+Classification is a parser over banked feature names, so it can be wrong and says where:
+`FeatureMap.unclassified()` lists the names it could not place and `.summary()` exposes every
+call it did make, so a tag is auditable and overridable rather than taken on trust.
 
   >>> fm = FeatureMap(feature_names, n_layers=32)
   >>> X_attn_mid = X[:, fm.mask(source=Source.attention, band=Band.mid)]   # slice a cell
   >>> for cell, idx in fm.cells("source", "band").items(): acc[cell] = lda(X[:, idx], y)   # decompose
-  >>> lean = fm.select(source=Source.attention)            # the ~600-780-feat lean mode/taste signature
+  >>> lean = fm.select(source=Source.attention)            # every attention-source feature
 
 Run as a script to validate the taxonomy + coverage on a real run:
     ANAMNESIS_RUNS=/models/anamnesis-extract/runs python -m anamnesis.feature_map 8b_fat_01
@@ -52,7 +52,7 @@ from pydantic import BaseModel, ConfigDict
 # Model layer counts (for depth bands). Extend per model/architecture.
 MODEL_LAYERS = {"3b": 28, "8b": 32, "kotodama_3b": 28,
                 "olmo2-7b": 32, "gemma3-27b": 62, "qwen-7b": 28,
-                "dsv2": 27, "dsv2_lite": 27, "dsv2-lite": 27}  # M6 DeepSeek-V2-Lite (27 layers)
+                "dsv2": 27, "dsv2_lite": 27, "dsv2-lite": 27}  # three spellings of DeepSeek-V2-Lite
 
 
 class UnknownDepthError(ValueError):
@@ -94,14 +94,12 @@ class Source(str, Enum):
     attention = "attention"    # attention-weight reads: entropy, head-agreement, flow/region/recency, cache mass
     keys = "keys"              # pre-RoPE key-vector geometry (spread/drift/novelty/eff_dim) + epoch detection
     gate = "gate"              # SwiGLU gate activations
-    values = "values"          # v_proj (future — banked, not yet featurized)
-    qk = "qk"                  # post-RoPE QK geometry (future)
+    values = "values"          # v_proj value-vector geometry, and value-vs-key coupling
+    qk = "qk"                  # pre-RoPE query geometry and q·k content alignment (position-free)
     routing = "routing"        # cross-block attention-residual routing weights (block-routing architectures)
-    expert_routing = "expert_routing"  # MoE router: expert-allocation reads. Distinct from
-                               # `routing` above, which is cross-block attention-residual routing:
-                               # one reads which expert a token was sent to, the other how much of
-                               # its own history a block attended over. Mixture-of-experts models
-                               # only; a dense model has no expert allocation to read.
+    expert_routing = "expert_routing"  # MoE router: which expert a token was sent to. Not
+                               # `routing` above, which is how much of its own history a block
+                               # attended over. A dense model has no expert allocation to read.
     unknown = "unknown"        # flagged: classifier did not match (audit these)
 
 
@@ -110,17 +108,9 @@ class Method(str, Enum):
     distributional = "distributional"  # entropy, JSD/agreement, top-k mass, coverage, mass fractions, sparsity
     geometry = "geometry"              # cosine / spread / drift / novelty / participation-ratio / PCA projection
     spectral = "spectral"              # graph-spectral (Fiedler, HFER, spectral entropy, smoothness)
-    learned = "learned"                # contrastive projection / encoder (future in-signature)
-    iterated_integral = "iterated_integral"  # rough-path log-signature: level-1 displacement +
-                                       # level-2 Levy areas of a (projected or natively low-dim),
-                                       # time-augmented trajectory. NEW axis value (SPEC-path-
-                                       # signature-family-2026-09-11 section 5): the other methods
-                                       # are all MARGINAL reads of one series at a time; this one is
-                                       # the JOINT order of two coordinates (did i move before j).
-                                       # Emitted by `res_sig_` (residual path, projected), and by its
-                                       # two no-projection siblings `out_sig_` (output-statistics
-                                       # path) / `attn_sig_` (attention-region path), per
-                                       # SPEC-path-receptacles-and-span-coverage-2026-09-11 §1a/§1b.
+    iterated_integral = "iterated_integral"  # log-signature of a time-augmented trajectory: level-1
+                                       # displacement, level-2 Levy areas. The other methods each read
+                                       # one series alone; this reads two coordinates' joint order.
     unknown = "unknown"
 
 
@@ -144,11 +134,10 @@ class FeatureTag(BaseModel):
 
 # ---------------------------------------------------------------------------- classification rules
 
-# The family labels that follow the stored block layout rather than naming a family.
-# They are a wire vocabulary, not a description: `anamnesis/analysis/battery/floors.py`
-# keys its floor results by `family:<label>`, so a label that changed would stop lining
-# up with the numbers already banked under it. The constants carry what each one groups;
-# the strings stay where they belong, on disk.
+# FROZEN WIRE VOCABULARY — do not change these strings. `anamnesis/analysis/battery/floors.py`
+# keys floor results by `family:<label>`, so a relabelled family stops lining up with the numbers
+# banked under it. The constant names say what each label groups; the labels themselves follow the
+# stored block layout and describe nothing.
 STORED_FAMILY_CACHE_AND_KEYS = "T2.5"
 STORED_FAMILY_ATTENTION_SPECTRAL = "T2_spectral"
 STORED_FAMILY_ATTENTION_OTHER = "T2_other"
@@ -254,30 +243,27 @@ def _source(n: str) -> Source:
     # Attention-residual routing FIRST — its names contain "entropy"/"top" which would else mis-hit output.
     if n.startswith("attnres_committed"): return Source.residual   # committed residual-block snapshots (geometry)
     if n.startswith("attnres_"): return Source.routing             # block-routing softmax = cross-block allocation
-    # MoE expert routing (vmb arm A7) — before output rules: router names will contain entropy/top-k.
-    if n.startswith(("xrt_", "expert_routing_")): return Source.expert_routing  # reserved prefix for A7 router features
-    # Path-signature SIBLING sources (SPEC-path-receptacles-and-span-coverage-2026-09-11 §1a/§1b):
-    # out_sig_ / attn_sig_ are new prefixes disjoint from every existing family's names, so adding
-    # these two branches cannot reclassify anything in the frozen corpus (regression bar, spec §3).
+    # MoE expert routing before the output rules: router names contain entropy/top-k.
+    if n.startswith(("xrt_", "expert_routing_")): return Source.expert_routing
+    # The path-signature siblings. Their prefixes are disjoint from every other family's names,
+    # which is what keeps these two branches from reclassifying anything already banked.
     if n.startswith("out_sig"): return Source.output       # output-statistics path (entropy/margin/eos/varentropy)
     if n.startswith("attn_sig"): return Source.attention   # attention-region path (prompt/early/mid/recent[/sink] mass)
-    # v3 hand-suite (checked first; these prefixes are specific). value_* incl value↔key corr = a value prop.
-    if n.startswith("value_"): return Source.values            # v_proj value-vector geometry
+    # Checked before the keyword scan below, because these prefixes are specific and it is not.
+    if n.startswith("value_"): return Source.values            # incl. value↔key coupling: a value property
     if n.startswith(("qk_", "q_")): return Source.qk           # query / q·k content geometry
     if n.startswith("kv_value"): return Source.values          # cross-layer value CKA (before the kv_→keys rule)
     if n.startswith("gate_"): return Source.gate
     if n.startswith("kv_") or n.startswith("epoch_"): return Source.keys      # key-vector geometry / key-centroid epochs
     if n.startswith(("cache_", "attn_flow_", "attn_entropy_", "head_agreement_", "ph_", "spectral_")):
-        return Source.attention   # attention-weight reads, spectral_* among them:
-        # (addendum 2026-07-12b): the similarity graph is built from ATTENTION distributions
-        # (_extract_spectral_features), not hidden states — the old comment sided with a stale
-        # docstring; the code's behavior says attention. smoothness is hybrid (attention graph
-        # × residual-norm signal) and rides with its graph. Pre-retag analyses counted these
-        # 66 features under residual — cross-date family-mass comparisons carry that asterisk.
+        return Source.attention   # attention-weight reads, spectral_* among them: the similarity
+        # graph `_extract_spectral_features` builds comes from attention distributions, not from
+        # hidden states. smoothness is hybrid (attention graph × residual-norm signal) and is read
+        # here, with its graph.
     if n.startswith(("activation_norm", "res_traj", "res_sig", "delta_", "pca_")):
-        return Source.residual   # residual stream. res_sig_* = the path-signature family:
-        # iterated integrals OF the residual trajectory — the substrate read is the residual
-        # stream, exactly as res_traj_*; only the operator is new.
+        return Source.residual   # residual stream. res_sig_* takes iterated integrals OF the
+        # residual trajectory, so the substrate it reads is the residual stream exactly as
+        # res_traj_* does; only the operator differs.
     # output / token-distribution stats
     if any(k in n for k in ("logit", "surpris", "entropy", "token", "chosen", "top",
                             "perplex", "ppl", "prob", "rank")):
@@ -293,16 +279,13 @@ _DIST = ("entropy", "agreement", "coverage", "sink", "recency", "prompt_mass", "
 
 
 def _method(n: str, source: Source) -> Method:
-    # Path-signature family (+ its two sibling sources) FIRST — none of these names
-    # carry an operator keyword the generic scan would catch, and letting them fall through to
-    # Method.unknown would flag the whole family. New prefixes only (regression-safe, see _source).
+    # The path-signature names carry no operator keyword the generic scan below would catch, so
+    # they are matched first; falling through would flag the whole family as unplaced.
     if n.startswith(("res_sig_", "out_sig_", "attn_sig_")): return Method.iterated_integral
     if source == Source.routing: return Method.distributional      # routing summaries (entropy/top1/anchor/recency/eff_src)
-    if source == Source.expert_routing:                            # MoE router allocation reads (arm A7, M6). Spec §3 + v2.1:
-        # Placed BEFORE the generic _GEOM/_DIST scan (else "top"/"mass"/"drift"/"norm" mis-route). All four
-        # non-learned methods now present (v2.1 48870af4): geometry (cka/cos/eff_experts), magnitude
-        # (margin/mass/logit_norm), spectral (spectral/period), else distributional (entropy/KL/JSD/coverage/
-        # switch/churn/topk_weight). Order matters: geometry first so shared_routed_cos ≠ shared_mass.
+    if source == Source.expert_routing:                            # MoE router allocation reads
+        # Ahead of the generic _GEOM/_DIST scan, which "top"/"mass"/"drift"/"norm" would mis-route,
+        # and geometry first within the branch so shared_routed_cos does not read as shared_mass.
         if any(k in n for k in ("cka", "cos", "eff_experts")): return Method.geometry
         if any(k in n for k in ("margin", "mass", "logit_norm")): return Method.magnitude
         if any(k in n for k in ("spectral", "period")): return Method.spectral
@@ -321,15 +304,11 @@ def _method(n: str, source: Source) -> Method:
 _STATIC_TOK = {"mean", "traj0", "lvl1"}
 _DYNAMIC_TOK = {"std", "slope", "traj1", "traj2", "traj3", "traj4", "drift", "switch",
                 "churn", "flatness", "period", "lvl2"}
-# "lvl1"/"lvl2" (path-signature family): level-1 log-signature terms are the path's
-# NET DISPLACEMENT — a level, and literally invariant under the increment-permutation null, so
-# static is the correct reading. Level-2 Levy areas exist only because of order and are destroyed
-# by that same shuffle — dynamic, and the sharpest example of it in the suite. Both tokens are
-# res_sig-UNIQUE across the frozen v3 name corpus, so the sets stay safe.
-# "switch" (xrt_switch_rate), and v2.1 (48870af4): "churn" (xrt_set_churn_rate), "flatness"
-# (xrt_alloc_entropy_spectral_flatness), "period" (xrt_switch_dominant_period) — all per-step temporal
-# reads. Each token is xrt-UNIQUE (deliberately NOT "spectral", which the corpus-wide stft features use
-# as a static snapshot — adding it globally would reclassify 3B/8B spectral features), so the set stays safe.
+# A token belongs in these sets only when one family's names use it: a token shared with a second
+# family silently reclassifies that family. "spectral" is the deliberate omission — the STFT features
+# spell it too, and read it as a static snapshot. The path-signature tokens sit where they do because
+# a level-1 log-signature term is the path's net displacement, invariant under permuting the
+# increments, while the level-2 Levy areas exist only because of order and that shuffle destroys them.
 
 
 def _dynamic(n: str) -> Optional[bool]:

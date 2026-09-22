@@ -190,10 +190,9 @@ class PromptSet(BaseModel):
 
 
 # ── 1. MODE — census contrast-hardening and pole-vs-pole qualification ────────
-# Verbatim from run_2afc_mode_hardening.py. Its mode descriptions are paraphrased
-# from the mode definitions themselves (anamnesis/modes/run4_modes.py) with the
-# format constraint dropped, which is what keeps them independent of any marker
-# battery that scores the same texts.
+# Its mode descriptions are paraphrased from the mode definitions themselves
+# (anamnesis/modes/run4_modes.py) with the format constraint dropped, which is what
+# keeps them independent of any marker battery that scores the same texts.
 
 MODE_DESCRIPTIONS: dict[str, str] = {
     "linear": ("A clear forward sequence, each idea building on the last, laid out step by step "
@@ -228,9 +227,8 @@ MODE = PromptSet(
 )
 
 # ── 2. SOCRATIC — the steering-shift mode axis ────────────────────────────────
-# Verbatim from vmb_a5_judge_socratic.py: one user turn, "which is MORE X", and
-# its own description table, written for a shift readout rather than for an
-# instruction-following readout.
+# One user turn, "which is MORE X", with its own description table: written for a
+# shift readout rather than for an instruction-following readout.
 
 SHIFT_MODE_DESCRIPTIONS: dict[str, str] = {
     "socratic": ("drives inquiry through probing questions, draws the reader forward by interrogation "
@@ -267,9 +265,9 @@ Answer with exactly one letter: A or B.""",
 )
 
 # ── 3. ANALOGICAL — the off-genre behavioural leg ─────────────────────────────
-# Verbatim from vmb_d4_judge_analogical.py. Its criterion is inline and longer
-# than the shift table's analogical entry, written for a narrative corpus where
-# the marker instrument is genre-noisy and the judge is the leg of record.
+# Its criterion is inline and longer than the shift table's analogical entry, written
+# for a narrative corpus where the marker instrument is genre-noisy and the judge is
+# the leg of record.
 
 ANALOGICAL = PromptSet(
     name="analogical",
@@ -294,8 +292,8 @@ Answer with exactly one letter: A or B.""",
 )
 
 # ── 4. TEMPERATURE — the sampling-temperature axis ────────────────────────────
-# Verbatim from run_2afc_temperature_hardening.py. The temperature axis has no
-# pure-mode corpus, so the contrast is hot-versus-same-topic-cold.
+# The temperature axis has no pure-mode corpus, so the contrast is
+# hot-versus-same-topic-cold.
 
 TEMPERATURE_DESCRIPTION = (
     "produced at a HIGHER sampling temperature — its word choices are more random, "
@@ -321,7 +319,7 @@ TEMPERATURE = PromptSet(
 )
 
 # ── 5. FORMALITY — the register axis ─────────────────────────────────────────
-# Verbatim from vmb_a5_judge_formality.py, criterion inline.
+# Criterion inline.
 
 FORMALITY = PromptSet(
     name="formality",
@@ -359,10 +357,9 @@ def prompt_set(name: str) -> PromptSet:
 
 
 # ── The coherence gate ───────────────────────────────────────────────────────
-# Verbatim from vmb_a5_judge_socratic.py. A single text, blind, 1-5. This is what
-# separates an in-window shift (the effect moves, the text stays readable) from a
-# collapse (the effect moves because the text fell apart), and a shift number
-# reported without it is not interpretable.
+# A single text, blind, 1-5. This is what separates an in-window shift (the effect
+# moves, the text stays readable) from a collapse (the effect moves because the text
+# fell apart), and a shift number reported without it is not interpretable.
 
 COHERENCE_PROMPT = """You will see one AI-generated text. Rate its COHERENCE on a 1-5 scale:
 
@@ -380,9 +377,9 @@ Answer with exactly one digit: 1, 2, 3, 4, or 5."""
 COHERENCE_DONOR = "anamnesis/scripts/vmb_a5_judge_socratic.py"
 
 # ── The generic carrier for a banked packet's own question ───────────────────
-# Verbatim from vmb_judge_family2_annex.py. A banked packet states the question
-# it was judged under; a second judge family re-reads the same items under the
-# same words, which is what makes the two passes comparable.
+# A banked packet states the question it was judged under; a second judge family
+# re-reads the same items under the same words, which is what makes the two passes
+# comparable.
 
 ANNEX_TEMPLATE = """You will see two AI-generated texts, A and B.
 
@@ -400,9 +397,8 @@ ANNEX_DONOR = "anamnesis/scripts/vmb_judge_family2_annex.py"
 
 
 # ── The Likert rubric — the non-2AFC paradigm ────────────────────────────────
-# Verbatim from run_judge_scoring.py: five dimensions rated 1-5 plus a primary
-# classification, from which purity is the intended rating minus the mean of the
-# other four.
+# Five dimensions rated 1-5 plus a primary classification, from which purity is the
+# intended rating minus the mean of the other four.
 
 VALID_MODES: tuple[str, ...] = ("linear", "analogical", "socratic", "contrastive", "dialectical")
 
