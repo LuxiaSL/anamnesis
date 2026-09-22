@@ -104,9 +104,7 @@ class RawGenerationData:
     # routed experts. Banked reading = the DENSE pre-topk softmax (recomputed in the MoE-module pre-hook
     # from gate.weight, because DeepseekV2Moe bypasses gate.forward — F.linear(h, gate.weight)). Under
     # greedy top-k the selected set is exactly argtop-k of this vector, so coverage/load/drift are
-    # derived in-module. The reading is fixed by the capture hook rather than chosen per run, so what a
-    # banked vector holds is said here and in `_make_moe_router_prehook` in
-    # `anamnesis/extraction/model_loader.py`; no per-run stamp records it. Prefill step 0 excluded.
+    # derived in-module. Prefill step 0 excluded.
     router_branch_norms: dict[int, list[F32]] | None = None
     # layer_idx → T × [2 or 3] = (‖shared-expert branch output‖, ‖routed-expert sum output‖[, cos]) per
     # token, from forward hooks on mlp.shared_experts and mlp.experts outputs. Feeds xrt_shared_mass; the
@@ -808,9 +806,9 @@ def extract_cache_and_keys(
             recency = float(mean_attn[cutoff:].sum() / max(mean_attn.sum(), 1e-12))
             recency_biases.append(recency)
 
-            # Sink mass: attention to position 0 (BOS / attention sink). On this
-            # corpus the sink dominates (argmax==0 ~100%), so this equals the old
-            # "anchor_strength" = max(attention); named honestly now.
+            # Sink mass: attention to position 0 (BOS / attention sink). Named for the
+            # position it reads, not for an interpretation of it — where the sink dominates
+            # this coincides with max(attention), but the two are not the same quantity.
             sink_masses.append(float(mean_attn[0]))
 
             # Cache coverage: fraction of positions with > 1/N attention
