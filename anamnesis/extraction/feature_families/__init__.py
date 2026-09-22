@@ -10,10 +10,8 @@ Shared machinery:
 
 Families, by the substrate they read:
     attention_flow   — Region decomposition, recency bias, head diversity
-    temporal_dynamics— Windowed attention/cache/key metrics with STFT
     per_head         — Head heterogeneity that head-averaging destroys
     residual_stream  — Trajectory features: velocity, curvature, directness
-    contrastive_projection — A trained projection applied to hidden states
     path_signature   — Level-2 log-signature (iterated integrals) of a projected path
     gate_features    — SwiGLU gate sparsity, drift, effective dimension
     value_geometry   — v_proj value-vector spread, effective dimension, drift
