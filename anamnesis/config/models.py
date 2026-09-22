@@ -176,8 +176,7 @@ class ModelPreset(BaseModel):
 
         Local sliding-window layers are structurally recency-dominated, so
         cross-model comparisons of the attention source use global layers; local
-        attention cells stay per-model exploratory. Pre-committed by operator
-        ruling ahead of the first interleaved-architecture floors.
+        attention cells stay per-model exploratory.
         """
         return tuple(layer for layer in self.sampled_layers if self.attention_kind(layer) == "global")
 
@@ -239,9 +238,8 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         # system prompt. Full multi-head attention, so the grouped-query caveat
         # about head indexing does not apply. Query and key RMSNorm sit between
         # the projections and RoPE, so k_proj hooks capture pre-norm pre-RoPE
-        # keys: position-free holds, and the substrate differs from a Llama
-        # checkpoint's post-projection keys (onboarding audit, journal
-        # wave1-continuation W4).
+        # keys: position-free holds, but the substrate is not a Llama
+        # checkpoint's post-projection keys.
         name="olmo2-7b",
         model_id="allenai/OLMo-2-1124-7B",
         torch_dtype="bfloat16",
@@ -324,18 +322,14 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
     ),
     "dsv2-lite": ModelPreset(
         # A mixture-of-experts checkpoint: two shared and sixty-four routed
-        # experts, greedy top-6, with layer 0 a dense MLP and layers 1-26 routed.
-        # Load it through the native transformers integration with
-        # trust_remote_code=False — the bundled remote code has a different
-        # internal structure (per-expert gate projections) that the routing hooks
-        # do not target. Attention is latent: the keys-source analogue is the
-        # compressed key/value latent from the fused projection's first 512
-        # dimensions, which is position-free; the 64-dimension positional part is
-        # banked rather than featurized. There is no separate key or value
-        # projection module and each query head is 192-wide (128 content + 64
-        # positional), so queries and values are not part of this checkpoint's
-        # feature surface. Architecture numbers verified against the downloaded
-        # config.json.
+        # experts, greedy top-6, layer 0 a dense MLP and layers 1-26 routed.
+        # Load it with trust_remote_code=False — the bundled remote code puts
+        # gate projections per expert, which the routing hooks do not target.
+        # Attention is latent: the keys source is the position-free part of the
+        # fused key/value projection, sliced in
+        # `anamnesis/extraction/model_loader.py`. With no separate key or value
+        # projection module, values and queries are not part of this
+        # checkpoint's feature surface.
         name="dsv2-lite",
         model_id="deepseek-ai/DeepSeek-V2-Lite-Chat",
         torch_dtype="bfloat16",
@@ -345,7 +339,8 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         # the keys-source capture is the 512-wide latent, not these heads.
         num_attention_heads=16,
         num_kv_heads=16,
-        # The value head width; the query/key content width is 192.
+        # The value head width. Query and key heads are 192 wide: 128 content
+        # dimensions and 64 positional ones.
         head_dim=128,
         # Proportional depth, mid-heavy. Layer 0 is dense, so it yields no
         # expert-routing features.
@@ -355,8 +350,8 @@ MODEL_PRESETS: dict[str, ModelPreset] = {
         contrastive_layers=(5, 11, 15, 18, 22),
         early_layer_cutoff=7,
         late_layer_cutoff=20,
-        # The checkpoint's own generation_config.json, which differs from the
-        # 0.7 the model roster anticipated.
+        # The checkpoint's own generation_config.json, which is colder than
+        # every other preset here.
         temperature=0.3,
         top_p=0.95,
         max_new_tokens=512,
