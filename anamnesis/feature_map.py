@@ -264,6 +264,29 @@ def _source(n: str) -> Source:
         return Source.residual   # residual stream. res_sig_* takes iterated integrals OF the
         # residual trajectory, so the substrate it reads is the residual stream exactly as
         # res_traj_* does; only the operator differs.
+    # The short spellings of three engineered families. Banks disagree on how those
+    # families spell their columns, and a spelling with no rule of its own reaches the
+    # keyword scan below, which reads "entropy" or "top" as a token-distribution
+    # statistic — a complete, plausible answer naming the wrong substrate.
+    if n.startswith("af_"): return Source.attention        # attn_flow_: region / recency / head diversity
+    if n.startswith("gf_"): return Source.gate             # gate_: SwiGLU activations
+    if n.startswith("rt_"): return Source.residual         # res_traj_: residual trajectory
+    if n.startswith("cp_"): return Source.residual         # a learned projection OF the hidden state
+    # Cosines between the pre-RoPE keys one position gets at different layers. No
+    # extractor here emits them; corpora banked before they were dropped carry them,
+    # and the substrate they read is the key space. `gate_cross_layer_*`, which the
+    # gate family does emit, is answered by the `gate_` rule above and never reaches here.
+    if n.startswith("cross_layer_"): return Source.keys
+    if n.startswith("td_"):
+        # A windowed read's substrate is the substrate of the signal it windows, and this
+        # family's names carry that signal's own name after the layer marker. The five
+        # signals are stated rather than pattern-matched, so a sixth one is reported as
+        # unplaced instead of being credited to whichever of these it resembles.
+        if any(k in n for k in ("_attn_entropy", "_head_agreement", "_lookback_ratio")):
+            return Source.attention
+        if any(k in n for k in ("_key_drift", "_key_novelty")):
+            return Source.keys
+        return Source.unknown
     # output / token-distribution stats
     if any(k in n for k in ("logit", "surpris", "entropy", "token", "chosen", "top",
                             "perplex", "ppl", "prob", "rank")):
@@ -291,6 +314,14 @@ def _method(n: str, source: Source) -> Method:
         if any(k in n for k in ("spectral", "period")): return Method.spectral
         return Method.distributional
     if n.startswith("pca_"): return Method.geometry
+    # A learned projection of a hidden state onto a trained basis. The operator is the
+    # same kind as the PCA projection above — a coordinate read of the residual state —
+    # and the names carry no keyword the scan below would catch, so without this rule
+    # the whole family reports as unplaced.
+    if n.startswith("cp_"): return Method.geometry
+    # A cosine between key directions. "agreement" in the distributional keywords below
+    # would name the operator of a head-agreement divergence, which this is not.
+    if n.startswith("cross_layer_"): return Method.geometry
     if "spectral" in n or "fiedler" in n or "hfer" in n: return Method.spectral
     if "_norm" in n: return Method.magnitude                       # activation_norm / delta_norm — before distributional
     if any(k in n for k in _GEOM): return Method.geometry
