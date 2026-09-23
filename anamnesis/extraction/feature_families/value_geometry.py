@@ -1,11 +1,11 @@
 """Value-vector (v_proj) geometry — the OV-circuit storage surface.
 
 The KV-cache "address" side (keys) is featurized by `kv_key_*`; the **content** side
-(values — what gets pulled back when the model attends) has **never been featurized**. v3 raw banks
-`v_proj_values` all-layer per-KV-head, so this is CPU-only on banked tensors.
+(values — what gets pulled back when the model attends) is featurized here and by no other family.
+An all-layer raw bank carries `v_proj_values` per KV head, so this is CPU-only on banked tensors.
 
 Mirrors the key-geometry math (spread / eff_dim / drift / novelty) on the head-mean value vector,
-plus temporal operators (consistent with the v2 families) and a few value-specific stats.
+plus temporal operators (consistent with the other temporal families) and a few value-specific stats.
 
 METHODOLOGY — basis-free only. Vectors from different learned projections live in unrelated bases,
 so a cosine between them is uninterpretable. That holds across surfaces (v_proj basis ≠ k_proj
@@ -17,7 +17,7 @@ cross-layer relations are expressed **basis-free**:
   - cross-layer structure -> dispersion of the per-layer *spread* scalar (basis-free)
 
 Self-contained family module (same contract as gate_features). Reads `data.v_proj_values` and
-`data.pre_rope_keys` (both all-layer in v3). Returns empty if values are absent.
+`data.pre_rope_keys` (both all-layer in an all-layer raw bank). Returns empty if values are absent.
 """
 from __future__ import annotations
 

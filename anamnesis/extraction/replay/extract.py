@@ -5,8 +5,9 @@ Why replay (vs re-generating):
     A decoder forward is a deterministic function of the input token sequence.
     Teacher-forcing the full realized sequence [prompt + generated] in a single
     causal forward reproduces every per-position internal state that incremental
-    generation produced — so v2↔v3 signatures stay byte-comparable (modulo the
-    ~1e-3 cache-vs-no-cache kernel noise, which washes out of aggregate features).
+    generation produced — so replayed and generated signatures stay comparable
+    (modulo the ~1e-3 cache-vs-no-cache kernel noise, which washes out of aggregate
+    features).
     One forward instead of an N-step autoregressive loop → much cheaper.
 
 Alignment (must match generation_runner._convert_outputs_to_raw):
@@ -48,8 +49,9 @@ def replay_extract(
     Parameters
     ----------
     loaded : LoadedModel
-        Model loaded with eager attention + the desired hooks (for the full v3
-        surface: key_layers=value_layers=all, query_layers=sampled, gate on sampled).
+        Model loaded with eager attention + the desired hooks (for the full replay
+        capture surface: key_layers=value_layers=all, query_layers=sampled, gate on
+        sampled).
     full_token_ids : sequence of int
         The realized [prompt + generated] token ids, length L = P + N.
     prompt_length : int

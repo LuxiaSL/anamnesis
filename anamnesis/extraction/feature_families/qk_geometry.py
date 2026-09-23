@@ -11,7 +11,7 @@ RoPE scope (why we stay pre-RoPE, deliberately):
     IS already captured by the ATTENTION surface (post-softmax). Recomputing it here would duplicate that
     and require O(T²) RoPE re-application. So we compute the **pre-RoPE CONTENT geometry** (position-free:
     what the token *looks for* vs what cached tokens *offer*), which the attention surface does NOT carry.
-  Per-head q·k and explicit post-RoPE relative geometry are documented extensions (not v1).
+  Per-head q·k and explicit post-RoPE relative geometry are outside this family.
 
 GQA: q has n_q_heads, k has n_kv_heads (3:1/4:1). We use head-MEAN q/k in the shared head_dim space where
 the model computes q·k (mirrors value/key geometry's head-mean). Reads `data.queries` + `data.pre_rope_keys`.

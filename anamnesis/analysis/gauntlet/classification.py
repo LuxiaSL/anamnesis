@@ -79,7 +79,7 @@ def _make_splits(
     X: NDArray, y: NDArray, groups: NDArray | None, n_splits: int, seed: int,
 ) -> list[tuple[NDArray, NDArray]]:
     """CV splits: topic-grouped + stratified when groups exist (leak-proof default),
-    plain stratified otherwise (legacy fallback — pre-v3 behavior)."""
+    plain stratified otherwise, for a corpus that records no topic groups."""
     if groups is not None:
         n_eff = min(n_splits, len(np.unique(groups)))
         sgkf = StratifiedGroupKFold(n_splits=n_eff, shuffle=True, random_state=seed)

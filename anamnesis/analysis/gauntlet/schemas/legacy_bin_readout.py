@@ -160,8 +160,8 @@ class CohensDPerTopicResult(BaseModel):
 class LegacyBinReadoutResult(BaseModel):
     """Section 3 result: the per-block readout plus feature importance.
 
-    Several fields are present only for v2 runs (``cross_group_ablation``,
-    ``top_features_rf``, etc.). ``top_features_rf_combined`` is a legacy
+    Several fields (``cross_group_ablation``, ``top_features_rf``, etc.) are
+    optional because banked baseline snapshots do not carry them. ``top_features_rf_combined`` is a legacy
     key from pre-``feature_importance_composite`` snapshots and is
     preserved for round-trip of older baseline runs.
     """
@@ -184,7 +184,7 @@ class LegacyBinReadoutResult(BaseModel):
     top_features_lr_attention_and_cache: list[FeatureImportanceEntry]
     top_features_rf_combined: list[FeatureImportanceEntry] | None = Field(
         default=None,
-        description="Legacy top-features key from pre-v2 baseline snapshots.",
+        description="Top-features key that banked baseline snapshots carry.",
     )
     block_contribution_ratio: dict[str, float]
     std_vs_mean: StdVsMeanResult

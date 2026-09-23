@@ -48,13 +48,7 @@ network, which is the check on whether the floor is the ceiling. Both are traine
 on the reduced coordinates the block above produces, which is what makes the two
 numbers comparable to each other and to every other ladder rung.
 
-The functions are extracted from the v3 audit suite, which stays whole in the
-frozen repository as the record of what was run when. Its import sites there —
-``vmb_s51_encoder_on_raw`` (all three donor modules), ``vmb_s51_resolver``,
-``pathsig_constant_injection``, ``pathsig_read_e1``, ``pathsig_incremental``,
-``pathsig_s51_regen`` and ``analyze_signature_richness`` — read from the donors,
-not from here: this module is the living copy, and nothing edits the record. The
-living consumer of the surface and readout blocks is
+The consumer of the surface and readout blocks is
 :mod:`anamnesis.analysis.encoder_ladder`.
 """
 

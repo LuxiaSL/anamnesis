@@ -14,10 +14,9 @@ restricted to caller-declared spans.
 CONTRAST-TIME FAMILY — NOT A SUITE MEMBER
 -----------------------------------------
 Its output is only meaningful relative to stimulus metadata (the span table),
-so it is deliberately **not** registered in ``FeaturePipelineConfig`` and does
-not belong to any suite version. Experiment drivers import and call it
-directly with their own spans. Nothing here changes the dimensionality of v1,
-v2 or v3 signatures.
+so it is deliberately **not** registered in ``FeaturePipelineConfig``.
+Experiment drivers import and call it directly with their own spans. Nothing
+here changes the dimensionality of any signature the feature pipeline computes.
 
 Aggregation discipline (the constraints this family is built to satisfy)
 ------------------------------------------------------------------------

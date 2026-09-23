@@ -93,7 +93,7 @@ def timer(label: str = "") -> Generator[dict[str, float], None, None]:
 
 
 # Default block lists — used when analysis modules don't get dynamic lists.
-# For v2 data, use get_available_blocks() to discover what's actually present.
+# For a run that carries feature families, use get_available_blocks() to discover what's present.
 ALL_BLOCKS = [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA, ATTENTION_AND_CACHE, ALL_CORE]
 KEY_BLOCKS = [ATTENTION_AND_CACHE, ALL_CORE]
 
