@@ -98,13 +98,11 @@ https?://[^\s`'"<>)\]]+
 \b[a-z]/(?:[a-z]/)*__init__\.py
 \bmod\.py
 
-# The named external trees. `anamnesis-pl` is the frozen record and
-# `anamnesis-phase0` the archived origin — both linked from the README, both
-# named deliberately when a historical citation has to resolve somewhere.
-# `phase_0` is the legacy data tree the ANAMNESIS_LEGACY_DATA hatch points at,
-# which is documented as external and is supposed to be.
+# The named external trees. `anamnesis-pl` is the frozen record, linked from the
+# README and named deliberately when a historical citation of a script path has to
+# resolve somewhere. `phase_0` is the legacy data tree the ANAMNESIS_LEGACY_DATA
+# hatch points at, which is documented as external and is supposed to be.
 \banamnesis-pl\b
-\banamnesis-phase0\b
 \bphase_0\b
 
 # Turn labels in a chat transcript: `U1` is the first user turn and `A1` the first

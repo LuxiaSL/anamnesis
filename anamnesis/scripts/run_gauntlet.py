@@ -12,8 +12,9 @@ narrows the corpus to a mode subset and writes beside the full result rather tha
 over it, because a pass over five modes and a pass over eight are different
 measurements.
 
-This command was ``run_unified_analysis`` in the extraction repository, and there is
-no alias: the port map is the bridge for a reader holding the old name.
+This command is named for what it runs, and carries no alias for any other spelling: a
+reader holding an older script name finds the command by what it does, which is the
+eleven analyses this module is the only entry point to.
 
     python -m anamnesis.scripts.run_gauntlet --run 8b_v2
     python -m anamnesis.scripts.run_gauntlet --run 8b_v2 --resume --skip 8 9

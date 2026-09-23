@@ -54,10 +54,6 @@ absence rather than failing the import.
 - [`anamnesis-pl`](https://github.com/LuxiaSL/anamnesis-pl) — the frozen record: the
   instrument exactly as used for the battery era. Every historical citation of a script path
   resolves there, forever.
-- [`anamnesis-phase0`](https://github.com/LuxiaSL/anamnesis-phase0) — the archived origin
-  (Phase 0, early 2026), superseded; see its banner before reading anything into it.
-- [`PORT-MAP.md`](PORT-MAP.md) — where a name from the frozen record lives here, and which
-  names stayed there.
 - Operational documentation and ratified claims will live in the systema wiki (link to come).
 
 ## License

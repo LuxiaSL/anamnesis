@@ -236,8 +236,8 @@ def load_baseline(path: Path) -> dict[str, object]:
 def load_parity(path: Path) -> tuple[Path, dict[str, str]]:
     """Read a parity map: `{"old_root": <path>, "pairs": {new: old}}`.
 
-    The pairs mirror PORT-MAP.md rows — a ported file beside its donor's path
-    relative to `old_root` (a checkout of the frozen record)."""
+    A pair is a ported file in this tree beside its donor's path relative to
+    `old_root` (a checkout of the frozen record, linked from `README.md`)."""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:

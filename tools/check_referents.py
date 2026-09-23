@@ -26,8 +26,9 @@ How a line is read
    home-relative path, an absolute path that does not resolve inside this
    repository, or a bare planning-document name (a run of capitalised
    hyphen-joined words, a title whose head is shouted and whose tail is not, or a
-   `-memo` suffix). A planning-style name that *is* a file here passes, which is
-   how `PORT-MAP.md` survives the same pattern.
+   `-memo` suffix). A planning-style name that *is* a file in this tree passes,
+   because the rule asks for reachability and a file here is reachable — the shape
+   of the name is only evidence.
 3. **Path-like tokens** are resolved against an index of the tree. A token counts
    as path-like when it carries a known file extension, or starts at a top-level
    entry of the repository; a placeholder or a glob is a schema and never a
