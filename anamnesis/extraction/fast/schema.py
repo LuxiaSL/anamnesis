@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig
-from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
+from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data
 from anamnesis.extraction.state_extractor import RawGenerationData
 
 
@@ -73,7 +73,7 @@ def resolve_gpu_schema(
     else:
         components = np.zeros((pca_components.shape[0], 1), dtype=np.float32)
         means = np.zeros(1, dtype=np.float32)
-    result = compute_features_v2_from_data(raw, extraction, families, components, means)
+    result = compute_features_with_families_from_data(raw, extraction, families, components, means)
     if len(result.feature_names) != len(set(result.feature_names)):
         raise ValueError("canonical schema contains duplicate names")
     return GpuFeatureSchema(tuple(result.feature_names), dict(result.block_slices))

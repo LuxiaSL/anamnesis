@@ -1,7 +1,7 @@
-"""Offline regression: the full v2 feature pipeline runs on DeepSeek-V2-Lite (MLA+MoE) shapes.
+"""Offline regression: the full family pipeline runs on DeepSeek-V2-Lite (MLA+MoE) shapes.
 
 Catches the class of dim-mismatch / None-surface crashes that the GPU onboard-smoke misses
-(it exercises only the baseline extractor, not the v2 families). The original miss: the dense
+(it exercises only the baseline extractor, not the feature families). The original miss: the dense
 L0 gate (intermediate_size 10944) vs MoE shared_experts gate (moe_intermediate*n_shared 2816)
 broke gate_features' cross-layer cosine, so capture gates the MoE shared branch only.
 
@@ -23,7 +23,7 @@ import numpy as np
 from anamnesis.feature_map import FeatureMap, Method, Source
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, resolve_preset
 from anamnesis.extraction.feature_families.expert_routing import N_FEATURES_PER_LAYER
-from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
+from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data
 from anamnesis.extraction.state_extractor import ExtractionResult, RawGenerationData
 
 
@@ -46,11 +46,11 @@ def _synthetic_dsv2_raw(T: int = 24) -> tuple[RawGenerationData, list[int], list
         return (e / e.sum()).astype(np.float32)
 
     rdist = {l: [_dist() for _ in range(T)] for l in moe}
-    # v2.1: branch norms carry a 3rd column = per-token cos(shared_out, routed_out) ∈ [-1, 1]
+    # Branch norms carry a 3rd column = per-token cos(shared_out, routed_out) ∈ [-1, 1]
     rnorms = {l: [np.array([abs(rng.normal(1, .2)), abs(rng.normal(2, .3)),
                             float(np.clip(rng.normal(0, .4), -1, 1))], dtype=np.float32)
                   for _ in range(T)] for l in moe}
-    # v2.1: per-token ‖router_logits‖ (pre-softmax), one scalar per generated token
+    # Per-token ‖router_logits‖ (pre-softmax), one scalar per generated token
     rlogit = {l: [np.float32(abs(rng.normal(5, 1))) for _ in range(T)] for l in moe}
     data = RawGenerationData(
         hidden_states=hs, attentions=att,
@@ -61,7 +61,7 @@ def _synthetic_dsv2_raw(T: int = 24) -> tuple[RawGenerationData, list[int], list
     return data, sl, moe
 
 
-def _run_full_v2_pipeline() -> tuple[ExtractionResult, list[int]]:
+def _run_full_family_pipeline() -> tuple[ExtractionResult, list[int]]:
     """The pipeline under test, and the MoE layers its arity is checked against."""
     data, sl, moe = _synthetic_dsv2_raw()
     p = resolve_preset("dsv2-lite")
@@ -75,11 +75,11 @@ def _run_full_v2_pipeline() -> tuple[ExtractionResult, list[int]]:
         enable_qk_geometry=True, enable_kv_cka=True, enable_expert_routing=True,
         trajectory_layers=p.trajectory_layers, contrastive_layers=p.contrastive_layers)
 
-    return compute_features_v2_from_data(data, ec, fc, pca_components=None, pca_mean=None), moe
+    return compute_features_with_families_from_data(data, ec, fc, pca_components=None, pca_mean=None), moe
 
 
-def test_dsv2_full_v2_pipeline_runs_clean() -> None:
-    res, moe = _run_full_v2_pipeline()
+def test_dsv2_full_family_pipeline_runs_clean() -> None:
+    res, moe = _run_full_family_pipeline()
 
     assert len(res.features) > 0
     assert np.isfinite(res.features).all(), "non-finite features"
@@ -122,9 +122,9 @@ def test_no_router_stamp_is_promised_that_nothing_writes() -> None:
 
 
 if __name__ == "__main__":
-    test_dsv2_full_v2_pipeline_runs_clean()
+    test_dsv2_full_family_pipeline_runs_clean()
     test_no_router_stamp_is_promised_that_nothing_writes()
-    r, _ = _run_full_v2_pipeline()
+    r, _ = _run_full_family_pipeline()
     xn = sum(1 for n in r.feature_names if n.startswith("xrt_"))
-    print(f"PASS — {len(r.features)} features, {xn} xrt (v2.1), all finite, 0 unclassified, "
+    print(f"PASS — {len(r.features)} features, {xn} xrt, all finite, 0 unclassified, "
           f"all 4 method rungs present")

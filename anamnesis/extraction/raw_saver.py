@@ -222,7 +222,7 @@ def save_raw_tensors(
     return npz_path
 
 
-def save_raw_tensors_v3(
+def save_raw_tensors_all_layer(
     raw_data: RawGenerationData,
     gen_id: int,
     output_dir: Path,
@@ -231,9 +231,9 @@ def save_raw_tensors_v3(
     hidden_dtype: str = "float16",
     input_ids: NDArray | list[int] | None = None,
 ) -> Path:
-    """Save the v3 replay-extract capture surface (compressed npz).
+    """Save the all-layer replay-extract capture surface (compressed npz).
 
-    Differences from save_raw_tensors (the v2 generate-path saver):
+    Differences from save_raw_tensors (the sampled-layer generate-path saver):
       - hidden_states + attentions banked for **all layers** (not sampled∪pca / sampled)
       - pre_rope_keys + **v_proj_values** banked for all layers
       - **queries** (pre-RoPE) banked for whatever layers raw_data.queries holds
@@ -245,7 +245,9 @@ def save_raw_tensors_v3(
         gens; lives once in the run's calibration dir, injected at feature-compute time)
 
     Per-surface layer-index arrays are stored so load_raw_tensors can reconstruct
-    the full [num_layers(+1)] tensors. Tagged extraction_version=3.
+    the full [num_layers(+1)] tensors. Tagged ``extraction_version=3``, the same value
+    :data:`anamnesis.extraction.replay.cell.EXTRACTION_VERSION` writes into each
+    signature's metadata.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     npz_path = output_dir / f"gen_{gen_id:03d}.npz"
@@ -362,7 +364,7 @@ def save_raw_tensors_v3(
     np.savez_compressed(npz_path, **save_dict)
 
     size_mb = npz_path.stat().st_size / (1024 * 1024)
-    logger.info(f"Saved v3 raw tensors: {npz_path.name} ({size_mb:.1f} MB, T={T}, all-layer)")
+    logger.info(f"Saved raw tensors: {npz_path.name} ({size_mb:.1f} MB, T={T}, all-layer)")
     return npz_path
 
 
@@ -405,7 +407,7 @@ def load_raw_tensors(
         filled in the per-timestep attention arrays; the layer AXIS keeps its
         full [num_layers] extent (zeros elsewhere), so absolute-layer indexing
         in state_extractor and the feature families is unchanged. Layers not
-        present in the npz are ignored. For v3 all-layer banks, passing
+        present in the npz are ignored. For all-layer banks, passing
         config.sampled_layers avoids rebuilding ~25 layers nothing reads.
         None (default) fills every saved layer — the exact historical behavior.
 
@@ -530,7 +532,7 @@ def load_raw_tensors(
         for i, layer_idx in enumerate(kv_layer_indices):
             pre_rope_keys[int(layer_idx)] = [keys_stacked[t, i] for t in range(T)]
 
-    # ── Reconstruct v_proj values + pre-RoPE queries (v3 surface; absent in v2 npz) ──
+    # ── Reconstruct v_proj values + pre-RoPE queries (all-layer surface; absent in a sampled-layer npz) ──
     v_proj_values: dict[int, list[F32]] | None = None
     if "values" in want and "v_proj_values" in data and data["v_proj_values"].size > 0:
         values_stacked = data["v_proj_values"].astype(np.float32)
