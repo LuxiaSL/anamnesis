@@ -318,7 +318,7 @@ def compute_stochastic_floors(
         corpus=str(sig_dir), law=law, cells=fcells,
         notes=[
             "bare floors (no system prompt) — planning estimates; arm-time within-condition "
-            "variance >~1.5x these floors triggers a flag + n top-up (addendum item 2)",
+            "variance >~1.5x these floors triggers a flag + n top-up",
         ],
     )
 
@@ -385,6 +385,6 @@ def compute_faithfulness_floors(
             n_gens=len(gen_ids), n_pairs_total=n_pairs,
             corpus=str(sig_dir), law=law, cells=fcells,
             notes=["arm-time floor-ruling uses the component matching how that cell's "
-                   "pairs were actually scheduled (addendum item 3)"],
+                   "pairs were actually scheduled"],
         ))
     return reports
