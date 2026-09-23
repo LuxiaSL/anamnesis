@@ -36,7 +36,7 @@ between them they cover the instrument.
 |---|---|
 | `anamnesis/__init__.py` | the definition, and what each top-level module is for |
 | `anamnesis/extraction/__init__.py` | the write side: what a forward pass is read into |
-| `anamnesis/modes/__init__.py` | the processing-mode prompts a run's labels refer to, and the confound test that travels with them |
+| `anamnesis/modes/__init__.py` | the processing-mode prompts a run's labels refer to, the registry they are rows of, and the confound test that travels with them |
 | `anamnesis/analysis/gauntlet/__init__.py` | the read side: the eleven standing analyses and the section registry that dispatches them |
 | `anamnesis/scripts/__init__.py` | the command inventory, grouped by the order a run moves through it |
 
@@ -76,10 +76,11 @@ Three capture facts are load-bearing, and each is stated where it is enforced:
 - **Keys, values and queries are captured pre-RoPE, from the projection modules rather
   than from the cache.** A post-RoPE key has its position baked in, so geometric features
   computed over one would be reading position.
-- **Query heads and key/value heads are separate facts about a model.** A preset in
-  `anamnesis/config/models.py` carries both and refuses a row whose grouped-query group
-  size is not exact, because under grouped-query attention the two counts differ and a
-  per-head reading has to say which of them it is counting.
+- **Query heads and key/value heads are separate facts about a model.** Every model's row
+  in `anamnesis/config/models.json` carries both, and the validator in
+  `anamnesis/config/models.py` refuses a row whose grouped-query group size is not exact,
+  because under grouped-query attention the two counts differ and a per-head reading has to
+  say which of them it is counting.
 
 ## The replay gateway
 
@@ -246,7 +247,12 @@ environment and from nowhere else.
 
 - **`anamnesis/config/`** — per-model presets, one pass's settings, and the run registry,
   in three modules behind one import surface. Nothing here imports torch, so a run is
-  describable on a machine with no GPU.
+  describable on a machine with no GPU. The presets and the runs are data — `models.json`
+  and `runs.json` beside the modules that read them — and `ANAMNESIS_MODELS` names further
+  model files, so a checkpoint this package never shipped is addressable by name without a
+  code change. A model's layer count is written in its row and nowhere else: the depth bands
+  in `anamnesis/feature_map.py` and the battery's per-model metadata read it from there, so
+  three copies cannot drift apart.
 - **`anamnesis/feature_map.py`** — the executable `source × method × depth` taxonomy: what
   a feature name *means*, read by extraction and analysis alike. The contiguous blocks a
   vector is stored in are addresses into the vector and nothing more; three of the four span

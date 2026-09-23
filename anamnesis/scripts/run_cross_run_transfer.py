@@ -1,8 +1,10 @@
 """Transfer a learned projection between two runs' mode vocabularies.
 
 Train the contrastive projection on one run, embed the other, and ask which of the
-training run's modes each test mode lands nearest — scored against the pre-registered
-pairing, in both directions, over several seeds. The LDA direction test runs beside it
+training run's modes each test mode lands nearest — scored against the pairing a mode
+mapping declares, in both directions, over several seeds. ``--mapping`` names that row
+of ``anamnesis/modes/mode_sets.json``, so another pair of vocabularies is compared by
+adding a row rather than by editing code. The LDA direction test runs beside it
 and asks the same question linearly, which is what makes the
 directions-versus-manifolds dissociation visible when it is there.
 
@@ -21,6 +23,8 @@ import argparse
 import json
 import logging
 from pathlib import Path
+
+from anamnesis.modes import DEFAULT_MODE_MAPPING
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,10 @@ def parser() -> argparse.ArgumentParser:
         help="Subdirectory of the analysis outputs root the result is written to",
     )
     p.add_argument("--outputs-base", type=Path, default=None, help="Outputs root, overriding the configured one")
+    p.add_argument(
+        "--mapping", default=DEFAULT_MODE_MAPPING,
+        help="The mode mapping whose predicted pairs the transfer is scored against",
+    )
     p.add_argument("--n-seeds", type=int, default=10)
     p.add_argument("--bottleneck-dim", type=int, default=32)
     p.add_argument("--n-epochs", type=int, default=200)
@@ -68,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         train_run=args.train_run,
         test_run=args.test_run,
         feature_key=args.feature_key,
+        mapping=args.mapping,
         n_seeds=args.n_seeds,
         bottleneck_dim=args.bottleneck_dim,
         n_epochs=args.n_epochs,

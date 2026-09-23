@@ -10,9 +10,9 @@ one, an interactive-explanation mode on the socratic one, and so on.
 
 Both vocabularies, the pairs and the comparison they are read beside are rows of
 :data:`anamnesis.modes.MODE_SETS_FILE`, reached by the name
-:data:`DEFAULT_MAPPING`. So every label this module reports is one a reader can look
-up — including the five process modes, whose prompts are not in this package and
-whose glosses are therefore what the registry can say about them. A second pair of
+:data:`anamnesis.modes.DEFAULT_MODE_MAPPING`. So every label this module reports is
+one a reader can look up — including the five process modes, whose prompts are not in
+this package and whose glosses are therefore what the registry can say about them. A second pair of
 corpora is compared by adding a mapping row, not by editing this module.
 
 Three readouts, and they disagree on purpose:
@@ -58,14 +58,16 @@ from anamnesis.analysis.contrastive_mlp import (
     train_embedding,
 )
 from anamnesis.config import outputs_root
-from anamnesis.modes import ModeMapping, mapping_wildcards, mode_mapping
+from anamnesis.modes import (
+    DEFAULT_MODE_MAPPING,
+    ModeMapping,
+    mapping_wildcards,
+    mode_mapping,
+)
 
 logger = logging.getLogger(__name__)
 
 F32 = NDArray[np.float32]
-
-DEFAULT_MAPPING = "process_to_format"
-"""The registry mapping this reads when a caller names none."""
 
 N_SEEDS = 10
 SEED_STRIDE = 7
@@ -458,7 +460,7 @@ def cross_run_transfer(
     train_run: str,
     test_run: str,
     feature_key: str = "features",
-    mapping: str | ModeMapping = DEFAULT_MAPPING,
+    mapping: str | ModeMapping = DEFAULT_MODE_MAPPING,
     n_seeds: int = N_SEEDS,
     bottleneck_dim: int = BOTTLENECK_DIM,
     n_epochs: int = ANALYSIS_EPOCHS,
@@ -585,7 +587,6 @@ def headline(results: dict[str, Any]) -> list[str]:
 
 
 __all__ = [
-    "DEFAULT_MAPPING",
     "MappingScore",
     "N_SEEDS",
     "build_layer_indices",

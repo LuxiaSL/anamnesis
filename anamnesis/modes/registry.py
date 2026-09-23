@@ -62,6 +62,9 @@ CORE_MODE_SET = "run4"
 EXTENDED_MODE_SET = "mixed"
 """The five plus the three format-controlled additions."""
 
+DEFAULT_MODE_MAPPING = "process_to_format"
+"""The mapping a cross-vocabulary readout reads when its caller names none."""
+
 
 class ModeRegistryError(RuntimeError):
     """A registry file is missing, unreadable, or not what this module expects."""

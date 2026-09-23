@@ -68,8 +68,9 @@ reviewer reads for.
 
 **Metrology, and onboarding a model.**
 
-* `onboard_model.py` — whether a new preset row is true of its checkpoint. Run it
-  before spending anything else.
+* `onboard_model.py` — whether a new registry row is true of its checkpoint. Run it
+  before spending anything else, on a row added here or in a file named by
+  `ANAMNESIS_MODELS`.
 * `stage0_floors.py` — the faithfulness replays, then the floors and the n-min law
   they imply.
 * `census.py` — which rows the internals see that the cheap readers miss.

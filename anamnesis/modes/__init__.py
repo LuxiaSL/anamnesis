@@ -34,6 +34,7 @@ from anamnesis.modes.prompt_swap import (
 )
 from anamnesis.modes.registry import (
     CORE_MODE_SET,
+    DEFAULT_MODE_MAPPING,
     EXTENDED_MODE_SET,
     MODE_SETS_ENV,
     MODE_SETS_FILE,
@@ -63,6 +64,7 @@ from anamnesis.modes.registry import (
 
 __all__ = [
     "CORE_MODE_SET",
+    "DEFAULT_MODE_MAPPING",
     "DEFAULT_USER_TEMPLATE",
     "EXTENDED_MODE_SET",
     "MODE_SETS_ENV",
