@@ -36,6 +36,8 @@ A union label names a membership, and a banked run may report a union whose memb
 differ from any union a current run builds. Reading maps such a union onto a legacy
 label (:data:`anamnesis.analysis.gauntlet.schemas.compat.LEGACY_UNION_LABELS`), so a
 reading that sets two runs side by side meets two labels where the memberships differ.
+Where it asks for one and a run carries only the other, it reports the pair as not
+comparable and leaves the numbers apart.
 """
 
 from __future__ import annotations
@@ -57,6 +59,7 @@ from anamnesis.analysis.gauntlet.schemas.compat import (
     LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES,
     LEGACY_EVERYTHING,
     LEGACY_FAMILY_UNION,
+    union_counterpart,
 )
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
@@ -269,7 +272,13 @@ def analyze_consistency(
     pairs: Sequence[tuple[str, str, str]] = CONSISTENCY_PAIRS,
     blocks: Sequence[str] = CORE_BLOCK_ORDER,
 ) -> dict[str, Any]:
-    """The same block across two corpora, with the divergent ones flagged."""
+    """The same block across two corpora, with the divergent ones flagged.
+
+    A union asked for by a label one run carries while the other run carries only its
+    counterpart (:func:`anamnesis.analysis.gauntlet.schemas.compat.union_counterpart`)
+    is listed under ``not_comparable`` with the label each side holds, and no
+    difference is taken: the two numbers are accuracies over different blocks.
+    """
     comparisons: list[dict[str, Any]] = []
     for run_a, run_b, label in pairs:
         left, right = results.get(run_a), results.get(run_b)
@@ -277,10 +286,19 @@ def analyze_consistency(
             logger.info(f"  {label}: skipped (missing {run_a if not left else run_b})")
             continue
         a_blocks, b_blocks = _by_block(left), _by_block(right)
-        entry: dict[str, Any] = {"label": label, "blocks": {}}
+        entry: dict[str, Any] = {"label": label, "blocks": {}, "not_comparable": {}}
         for block in blocks:
             acc_a, acc_b = _accuracy(a_blocks, block), _accuracy(b_blocks, block)
             if acc_a is None or acc_b is None:
+                mismatch = _membership_mismatch(a_blocks, b_blocks, block)
+                if mismatch is not None:
+                    entry["not_comparable"][block] = mismatch
+                    logger.warning(
+                        f"  {label}: {block} not compared — {run_a} carries "
+                        f"{mismatch['run_a_label']}, {run_b} carries "
+                        f"{mismatch['run_b_label']}, and the two unions hold "
+                        "different blocks"
+                    )
                 continue
             difference = acc_b - acc_a
             entry["blocks"][block] = {
@@ -291,6 +309,24 @@ def analyze_consistency(
             }
         comparisons.append(entry)
     return {"comparisons": comparisons}
+
+
+def _membership_mismatch(
+    a_blocks: Mapping[str, Any], b_blocks: Mapping[str, Any], block: str
+) -> dict[str, str] | None:
+    """The labels two runs hold for ``block`` when one has it and the other its counterpart.
+
+    None when there is no counterpart, when both runs hold ``block``, or when a side holds
+    neither — an absent union is absence, not a mismatch.
+    """
+    counterpart = union_counterpart(block)
+    if counterpart is None:
+        return None
+    a_label = block if block in a_blocks else counterpart if counterpart in a_blocks else None
+    b_label = block if block in b_blocks else counterpart if counterpart in b_blocks else None
+    if a_label is None or b_label is None or a_label == b_label:
+        return None
+    return {"run_a_label": a_label, "run_b_label": b_label}
 
 
 def analyze_resolution(

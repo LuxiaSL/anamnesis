@@ -17,7 +17,8 @@ check the readings by value:
     the frozen record could not produce, because it looked for a field that does not exist;
   * value-add is a delta against the baseline composites, and a missing baseline is reported
     as ``None`` rather than as a zero delta;
-  * a banked union is reported under its legacy label, never under a current one.
+  * a union whose membership differs between two runs is reported as not comparable rather
+    than differenced, and a banked union is reported under its legacy label.
 
 CPU only; no classifier runs here at all.
 """
@@ -223,6 +224,34 @@ def test_consistency_flags_the_blocks_that_moved(tmp_path: Path) -> None:
     assert blocks[ATTENTION_AND_DELTAS]["divergent"] is True
     assert blocks[ATTENTION_AND_DELTAS]["diff"] == pytest.approx(0.20)
     assert abs(blocks[NORMS_AND_OUTPUT_STATS]["diff"]) < DIVERGENCE_BAR
+
+
+def test_consistency_does_not_difference_a_union_across_memberships(tmp_path: Path) -> None:
+    """A banked family union and a current one are two measurements, and stay two.
+
+    The banked run spells its union the way banked files do; reading maps it onto the
+    legacy label, so asking for the current union finds it on one side only, and the
+    comparison names both labels instead of dropping the row or taking a difference.
+    """
+    write_results(
+        tmp_path, "8b_baseline", by_block={banked_spelling(LEGACY_FAMILY_UNION): block_block(0.70)}
+    )
+    write_results(tmp_path, "8b_v2_5way", by_block={ALL_FAMILIES: block_block(0.90)})
+    results = load_report_inputs(tmp_path)
+    for asked in (ALL_FAMILIES, LEGACY_FAMILY_UNION):
+        entry = analyze_consistency(results, blocks=(asked,))["comparisons"][0]
+        assert entry["blocks"] == {}, "no difference is taken across memberships"
+        assert entry["not_comparable"] == {
+            asked: {"run_a_label": LEGACY_FAMILY_UNION, "run_b_label": ALL_FAMILIES}
+        }
+
+    # Both sides on the current membership: an ordinary comparison, nothing refused.
+    write_results(tmp_path, "8b_baseline", by_block={ALL_FAMILIES: block_block(0.70)})
+    entry = analyze_consistency(load_report_inputs(tmp_path), blocks=(ALL_FAMILIES,))[
+        "comparisons"
+    ][0]
+    assert entry["not_comparable"] == {}
+    assert entry["blocks"][ALL_FAMILIES]["diff"] == pytest.approx(0.20)
 
 
 def test_resolution_keeps_the_difficulty_buckets_apart(tmp_path: Path) -> None:
