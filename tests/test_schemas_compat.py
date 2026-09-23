@@ -35,16 +35,26 @@ from anamnesis.analysis.gauntlet.schemas.compat import (
     COMPOUND_LABEL_FIELDS,
     FIELD_RENAMES,
     KNOWN_LABELS,
+    LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES,
+    LEGACY_EVERYTHING,
+    LEGACY_FAMILY_UNION,
+    LEGACY_UNION_COUNTERPARTS,
+    LEGACY_UNION_LABELS,
+    LEGACY_UNION_MEMBERS,
     READ_ONLY_LABELS,
     RETIRED_LABEL_SPELLINGS,
     SECTION_RENAMES,
     migrate_banked_results,
+    union_counterpart,
 )
 from anamnesis.analysis.gauntlet.signature_io import (
+    ALL_FAMILIES,
     ALL_LABELS,
     ATTENTION_AND_CACHE,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
     ATTENTION_AND_DELTAS,
     ATTENTION_FLOW,
+    BLOCK_UNIONS,
     CACHE_AND_KEYS,
     EVERYTHING,
     NORMS_AND_OUTPUT_STATS,
@@ -99,7 +109,7 @@ def test_every_label_says_whether_it_was_renamed() -> None:
     # A read-only label is not in that table, because it was never respelled — it is a
     # label the loader addresses no block under and a banked document still carries.
     assert READ_ONLY_LABELS & set(ALL_LABELS) == set()
-    assert KNOWN_LABELS == set(ALL_LABELS) | READ_ONLY_LABELS
+    assert KNOWN_LABELS == set(ALL_LABELS) | READ_ONLY_LABELS | set(LEGACY_UNION_MEMBERS)
     # No retired spelling collides with a label in use, which would make the
     # translation ambiguous.
     assert set(BLOCK_LABEL_RENAMES) & set(ALL_LABELS) == set()
@@ -107,6 +117,111 @@ def test_every_label_says_whether_it_was_renamed() -> None:
     assert set(BLOCK_LABEL_RENAMES.values()) <= set(ALL_LABELS)
     # No two retired spellings collapse onto one label.
     assert len(set(BLOCK_LABEL_RENAMES.values())) == len(BLOCK_LABEL_RENAMES)
+
+
+def test_a_legacy_union_never_reads_as_a_current_label() -> None:
+    """A banked union with other members lands on a label no current run carries.
+
+    The legacy labels are disjoint from the live vocabulary and the read-only one, the
+    banked spellings are disjoint from both label tables' other side, and each legacy
+    label has a current counterpart that differs from it in membership — which is the
+    whole reason it is not a rename.
+    """
+    legacy = set(LEGACY_UNION_MEMBERS)
+    assert set(LEGACY_UNION_LABELS.values()) == legacy
+    assert legacy & set(ALL_LABELS) == set()
+    assert legacy & READ_ONLY_LABELS == set()
+    assert set(LEGACY_UNION_LABELS) & set(ALL_LABELS) == set()
+    assert set(LEGACY_UNION_LABELS) & set(BLOCK_LABEL_RENAMES) == set()
+    assert set(LEGACY_UNION_COUNTERPARTS) == legacy
+    for legacy_label, current in LEGACY_UNION_COUNTERPARTS.items():
+        assert current in BLOCK_UNIONS
+        assert set(LEGACY_UNION_MEMBERS[legacy_label]) != set(BLOCK_UNIONS[current])
+        assert union_counterpart(legacy_label) == current
+        assert union_counterpart(current) == legacy_label
+    assert union_counterpart(ATTENTION_AND_CACHE) is None, "an unchanged union has none"
+
+
+@pytest.mark.parametrize("banked,legacy", sorted(LEGACY_UNION_LABELS.items()))
+def test_a_banked_union_resolves_to_its_legacy_label(banked: str, legacy: str) -> None:
+    """One case per banked spelling, as a key and as a value naming a block."""
+    migrated = migrate_banked_results(
+        {"integrity": {"tier_dims": {banked: 7}}, "topology": {"tier": banked}}
+    )
+    assert migrated["integrity"]["block_dims"] == {legacy: 7}
+    assert migrated["topology"]["block"] == legacy
+
+
+BANKED_UNION_DOCUMENT: dict[str, Any] = {
+    **BASE_METADATA,
+    "n_samples": 160,
+    "integrity": {
+        "n_samples": 160, "n_modes": 8, "n_topics": 20,
+        "modes": ["linear"], "topics": ["topic"],
+        "samples_per_mode": {"linear": 20}, "samples_per_topic": {"topic": 8},
+        "balanced": True,
+        "tier_dims": {
+            "T1": 249, "T2": 249, "T2.5": 145, "T3": 1250,
+            "residual_trajectory": 215, "attention_flow": 343, "gate_features": 303,
+            "temporal_dynamics": 630, "contrastive_projection": 800,
+            "T2+T2.5": 394, "combined": 1893, "engineered": 1491, "combined_v2": 4184,
+            "T2+T2.5+engineered": 1885,
+        },
+        "total_features": 4184,
+        "nan_inf": {},
+        "all_clean": True,
+        "variance_report": {},
+        "value_ranges": {},
+    },
+    "tier_ablation": {
+        "per_tier_accuracy": {
+            "T1": 0.50625, "T2": 0.46875, "T2.5": 0.475, "T3": 0.51875,
+            "residual_trajectory": 0.33125, "attention_flow": 0.53125,
+            "gate_features": 0.3625, "temporal_dynamics": 0.4875,
+            "contrastive_projection": 1.0, "T2+T2.5": 0.51875, "combined": 0.5875,
+            "engineered": 0.5125, "combined_v2": 1.0, "T2+T2.5+engineered": 0.59375,
+        },
+        "feature_importance_composite": "combined_v2",
+        "pairwise_tier_combinations": {},
+        "leave_one_tier_out": {},
+        "tier_ranking": [{"tier": "engineered", "accuracy": 0.5125}],
+        "tier_inversion_t25_gt_t2_gt_t1": False,
+        "top_features_rf_t2t25": [],
+        "top_features_lr_t2t25": [],
+        "tier_contribution_ratio": {},
+        "std_vs_mean": {"n_std_features": 10, "n_mean_features": 10},
+        "cohens_d_per_topic": {
+            "per_topic": {}, "mean_d": None, "median_d": None, "std_d": None,
+            "min_d": None, "max_d": None, "all_positive": None, "n_topics": 0,
+        },
+    },
+}
+"""A banked eight-mode document, trimmed to the parts that carry union labels. The
+widths and accuracies are a banked 8B run's own, so the membership test below checks
+the legacy table against what was written rather than against a recollection of it."""
+
+
+def test_a_banked_document_carries_the_legacy_unions_and_validates() -> None:
+    """The fixture validates, holds each legacy union, and holds no current family union."""
+    results = AnalysisResults.model_validate(migrate_banked_results(BANKED_UNION_DOCUMENT))
+    assert results.integrity is not None and results.legacy_bin_readout is not None
+    dims = results.integrity.block_dims
+    accuracy = results.legacy_bin_readout.per_block_accuracy
+    for labels in (set(dims), set(accuracy)):
+        assert set(LEGACY_UNION_MEMBERS) <= labels
+        assert labels <= KNOWN_LABELS
+        assert labels & {ALL_FAMILIES, ATTENTION_AND_CACHE_WITH_FAMILIES, EVERYTHING} == set()
+    assert accuracy[LEGACY_FAMILY_UNION] == 0.5125
+    assert accuracy[LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES] == 0.59375
+    assert results.legacy_bin_readout.feature_importance_composite == LEGACY_EVERYTHING
+    assert results.legacy_bin_readout.block_ranking[0].block == LEGACY_FAMILY_UNION
+
+
+def test_the_legacy_membership_is_what_the_banked_widths_add_up_to() -> None:
+    """Each legacy union's recorded width is the sum of its members' recorded widths."""
+    dims = migrate_banked_results(BANKED_UNION_DOCUMENT)["integrity"]["block_dims"]
+    for legacy, members in LEGACY_UNION_MEMBERS.items():
+        assert dims[legacy] == sum(dims[member] for member in members), legacy
 
 
 @pytest.mark.parametrize("retired,current", sorted(BLOCK_LABEL_RENAMES.items()))
@@ -288,14 +403,14 @@ def test_a_written_result_carries_only_labels_in_use() -> None:
                 "per_mode_silhouette": {},
                 "per_mode_silhouette_cosine": {},
                 "per_mode_silhouette_euclidean": {},
-                "kmeans_ari": {"T2+T2.5": 0.4, "combined_v2": 0.5},
+                "kmeans_ari": {"T2+T2.5": 0.4, "combined_v2": 0.5, EVERYTHING: 0.6},
                 "embeddings": {"tsne_t2t25": {"error": "umap not installed"}},
             },
         }
     )
     written = clean_for_json(AnalysisResults.model_validate(migrated))
     text = json.dumps(written)
-    for retired in BLOCK_LABEL_RENAMES:
+    for retired in (*BLOCK_LABEL_RENAMES, *LEGACY_UNION_LABELS):
         assert f'"{retired}"' not in text, retired
     for section_renames in FIELD_RENAMES.values():
         for retired_field in section_renames:
@@ -318,11 +433,15 @@ def test_a_real_banked_run_validates_through_the_table(run: str) -> None:
     readout = results.legacy_bin_readout
     if readout is not None:
         original = document.get("tier_ablation", {}).get("per_tier_accuracy", {})
+        read_as = {**BLOCK_LABEL_RENAMES, **LEGACY_UNION_LABELS}
         assert readout.per_block_accuracy == {
-            BLOCK_LABEL_RENAMES.get(label, label): value
-            for label, value in original.items()
+            read_as.get(label, label): value for label, value in original.items()
         }
         assert set(readout.per_block_accuracy) <= KNOWN_LABELS
     if results.classification is not None:
         assert set(results.classification.by_block) <= KNOWN_LABELS
         assert ATTENTION_AND_CACHE in results.classification.by_block
+        # A banked run holds its unions under the legacy labels only: no banked number
+        # arrives under a current union whose membership differs.
+        current_unions = {ALL_FAMILIES, ATTENTION_AND_CACHE_WITH_FAMILIES, EVERYTHING}
+        assert set(results.classification.by_block) & current_unions == set()

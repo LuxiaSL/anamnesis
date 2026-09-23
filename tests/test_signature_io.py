@@ -28,9 +28,12 @@ import pytest
 
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
+    ALL_FAMILIES,
     ALL_LABELS,
     ATTENTION_AND_CACHE,
+    ATTENTION_AND_CACHE_WITH_FAMILIES,
     ATTENTION_AND_DELTAS,
+    ATTENTION_FLOW,
     AnalysisData,
     CACHE_AND_KEYS,
     CORE_BLOCKS,
@@ -40,6 +43,7 @@ from anamnesis.analysis.gauntlet.signature_io import (
     NORMS_AND_OUTPUT_STATS,
     NPZ_KEY_PREFIX,
     RESIDUAL_PCA,
+    RESIDUAL_TRAJECTORY,
     Run4Data,
     SampleMeta,
     BLOCK_STORED_NAMES,
@@ -167,6 +171,23 @@ def test_a_union_whose_members_are_all_present_is_built_at_its_full_width(
         if label in data.group_features:
             width = sum(data.block_features[m].shape[1] for m in members)
             assert data.group_features[label].shape[1] == width, label
+
+
+def test_the_family_union_is_spelled_by_the_members_it_holds() -> None:
+    """A union label is a claim about membership, so the membership is pinned here.
+
+    Adding a family to ``FAMILY_BLOCKS`` or removing one fails this until the union is
+    respelled and the membership it had is entered in the legacy table of
+    `anamnesis/analysis/gauntlet/schemas/compat.py`, so that a results file reporting
+    the old membership never reads under the new label.
+    """
+    assert FAMILY_BLOCKS == [RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES]
+    assert ALL_FAMILIES == "trajectory_flow_and_gate"
+    assert BLOCK_UNIONS[ALL_FAMILIES] == FAMILY_BLOCKS
+    assert ATTENTION_AND_CACHE_WITH_FAMILIES == f"{ATTENTION_AND_CACHE}+{ALL_FAMILIES}"
+    assert BLOCK_UNIONS[ATTENTION_AND_CACHE_WITH_FAMILIES] == [
+        *BLOCK_UNIONS[ATTENTION_AND_CACHE], *FAMILY_BLOCKS,
+    ]
 
 
 def test_npz_keys_come_from_the_stored_block_names() -> None:

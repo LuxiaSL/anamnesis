@@ -31,6 +31,13 @@ re-running.
 The block and family labels in these tables are the keys banked result files use. They
 are addresses into those files, so a label is read as "this column range" and never as a
 claim about what the columns measure.
+
+A union label names a membership, and a banked run may report a union whose members
+differ from any union a current run builds. Reading maps such a union onto a legacy
+label (:data:`anamnesis.analysis.gauntlet.schemas.compat.LEGACY_UNION_LABELS`), so a
+reading that sets two runs side by side meets two labels where the memberships differ.
+Where it asks for one and a run carries only the other, it reports the pair as not
+comparable and leaves the numbers apart.
 """
 
 from __future__ import annotations
@@ -47,6 +54,12 @@ from anamnesis.analysis.gauntlet.schemas import (
     ClassificationResult,
     LegacyBinReadoutResult,
     migrate_banked_results,
+)
+from anamnesis.analysis.gauntlet.schemas.compat import (
+    LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES,
+    LEGACY_EVERYTHING,
+    LEGACY_FAMILY_UNION,
+    union_counterpart,
 )
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
@@ -119,9 +132,14 @@ ZERO_VARIANCE = 1e-10
 BLOCK_UNION_LABELS: frozenset[str] = frozenset({
     ATTENTION_AND_CACHE, ALL_CORE, ALL_FAMILIES, EVERYTHING,
     ATTENTION_AND_CACHE_WITH_FAMILIES,
+    LEGACY_FAMILY_UNION, LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES, LEGACY_EVERYTHING,
 })
-"""Blocks that are unions of others. They belong in the correlation matrix but not in
-the per-pair table, where they would double-count their members."""
+"""Blocks that are unions of others, current and legacy. They belong in the correlation
+matrix but not in the per-pair table, where they would double-count their members."""
+
+WHOLE_VECTOR_UNIONS: frozenset[str] = frozenset({EVERYTHING, LEGACY_EVERYTHING})
+"""The union of every block a run holds, under either membership. It is left out of the
+correlation matrix, where it would correlate with each of its members by construction."""
 
 NEW_FAMILIES: tuple[str, ...] = (
     RESIDUAL_TRAJECTORY,
@@ -130,7 +148,11 @@ NEW_FAMILIES: tuple[str, ...] = (
 )
 V2_COMPOSITES: tuple[str, ...] = (
     ALL_FAMILIES, ATTENTION_AND_CACHE_WITH_FAMILIES, EVERYTHING,
+    LEGACY_FAMILY_UNION, LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES, LEGACY_EVERYTHING,
 )
+"""The composites value-add reports, each under the label its run carries: a banked run
+reports the legacy unions and a current run the current ones, so a table across both
+holds them in separate rows."""
 
 BLOCK_BY_FAMILY: dict[str, str] = {
     STORED_FAMILY_NORMS_AND_OUTPUT_STATS: NORMS_AND_OUTPUT_STATS,
@@ -250,7 +272,13 @@ def analyze_consistency(
     pairs: Sequence[tuple[str, str, str]] = CONSISTENCY_PAIRS,
     blocks: Sequence[str] = CORE_BLOCK_ORDER,
 ) -> dict[str, Any]:
-    """The same block across two corpora, with the divergent ones flagged."""
+    """The same block across two corpora, with the divergent ones flagged.
+
+    A union asked for by a label one run carries while the other run carries only its
+    counterpart (:func:`anamnesis.analysis.gauntlet.schemas.compat.union_counterpart`)
+    is listed under ``not_comparable`` with the label each side holds, and no
+    difference is taken: the two numbers are accuracies over different blocks.
+    """
     comparisons: list[dict[str, Any]] = []
     for run_a, run_b, label in pairs:
         left, right = results.get(run_a), results.get(run_b)
@@ -258,10 +286,19 @@ def analyze_consistency(
             logger.info(f"  {label}: skipped (missing {run_a if not left else run_b})")
             continue
         a_blocks, b_blocks = _by_block(left), _by_block(right)
-        entry: dict[str, Any] = {"label": label, "blocks": {}}
+        entry: dict[str, Any] = {"label": label, "blocks": {}, "not_comparable": {}}
         for block in blocks:
             acc_a, acc_b = _accuracy(a_blocks, block), _accuracy(b_blocks, block)
             if acc_a is None or acc_b is None:
+                mismatch = _membership_mismatch(a_blocks, b_blocks, block)
+                if mismatch is not None:
+                    entry["not_comparable"][block] = mismatch
+                    logger.warning(
+                        f"  {label}: {block} not compared — {run_a} carries "
+                        f"{mismatch['run_a_label']}, {run_b} carries "
+                        f"{mismatch['run_b_label']}, and the two unions hold "
+                        "different blocks"
+                    )
                 continue
             difference = acc_b - acc_a
             entry["blocks"][block] = {
@@ -272,6 +309,24 @@ def analyze_consistency(
             }
         comparisons.append(entry)
     return {"comparisons": comparisons}
+
+
+def _membership_mismatch(
+    a_blocks: Mapping[str, Any], b_blocks: Mapping[str, Any], block: str
+) -> dict[str, str] | None:
+    """The labels two runs hold for ``block`` when one has it and the other its counterpart.
+
+    None when there is no counterpart, when both runs hold ``block``, or when a side holds
+    neither — an absent union is absence, not a mismatch.
+    """
+    counterpart = union_counterpart(block)
+    if counterpart is None:
+        return None
+    a_label = block if block in a_blocks else counterpart if counterpart in a_blocks else None
+    b_label = block if block in b_blocks else counterpart if counterpart in b_blocks else None
+    if a_label is None or b_label is None or a_label == b_label:
+        return None
+    return {"run_a_label": a_label, "run_b_label": b_label}
 
 
 def analyze_resolution(
@@ -316,7 +371,10 @@ def analyze_complementarity(
         by_block = _by_block(results.get(run))
         if not by_block:
             continue
-        blocks = [t for t, v in by_block.items() if v.pairwise_binary and t != EVERYTHING]
+        blocks = [
+            t for t, v in by_block.items()
+            if v.pairwise_binary and t not in WHOLE_VECTOR_UNIONS
+        ]
         pairs = sorted({p for t in blocks for p in by_block[t].pairwise_binary})
         profile = np.full((len(blocks), len(pairs)), 0.5, dtype=np.float64)
         for i, block in enumerate(blocks):
@@ -507,7 +565,12 @@ def analyze_value_add(
         ("3b_run4", "3b_v2_5way", "3B"),
     ),
 ) -> dict[str, Any]:
-    """Engineered families and composites against the unions of the core blocks."""
+    """Engineered families and composites against the unions of the core blocks.
+
+    Each delta is taken within one pair of runs, against the baseline's core unions,
+    whose membership is fixed. A composite is reported under the label its run carries,
+    so a banked run's rows are the legacy unions and cannot be read as the current ones.
+    """
     out: dict[str, Any] = {}
     for baseline_run, engineered_run, model in pairs:
         baseline, engineered = results.get(baseline_run), results.get(engineered_run)
@@ -572,6 +635,7 @@ __all__ = [
     "REDUNDANT_BAR",
     "SUBSET_RUNS",
     "V2_COMPOSITES",
+    "WHOLE_VECTOR_UNIONS",
     "analyze_complementarity",
     "analyze_confusion",
     "analyze_consistency",

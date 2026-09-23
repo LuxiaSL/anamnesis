@@ -16,7 +16,9 @@ check the readings by value:
   * the hardest confusion is read off the matrix that carries its own labels — the reading
     the frozen record could not produce, because it looked for a field that does not exist;
   * value-add is a delta against the baseline composites, and a missing baseline is reported
-    as ``None`` rather than as a zero delta.
+    as ``None`` rather than as a zero delta;
+  * a union whose membership differs between two runs is reported as not comparable rather
+    than differenced, and a banked union is reported under its legacy label.
 
 CPU only; no classifier runs here at all.
 """
@@ -47,10 +49,16 @@ from anamnesis.analysis.complementarity import (
     pair_difficulty,
     pair_name,
 )
-from anamnesis.analysis.gauntlet.schemas.compat import READ_ONLY_LABELS
+from anamnesis.analysis.gauntlet.schemas.compat import (
+    LEGACY_EVERYTHING,
+    LEGACY_FAMILY_UNION,
+    LEGACY_UNION_LABELS,
+    READ_ONLY_LABELS,
+)
 from anamnesis.analysis.subfamily import classify_signal
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
+    ALL_FAMILIES,
     ATTENTION_AND_CACHE,
     ATTENTION_AND_DELTAS,
     ATTENTION_FLOW,
@@ -69,6 +77,15 @@ from anamnesis.feature_map import (
 )
 
 LABELS = ["analogical", "contrastive", "dialectical", "linear", "socratic"]
+
+
+def banked_spelling(legacy: str) -> str:
+    """The spelling a banked results file carries for a legacy union.
+
+    Taken from the compat table rather than written here, so the banked vocabulary has
+    one home and a fixture spelled with it is spelled the way the reader expects.
+    """
+    return next(banked for banked, label in LEGACY_UNION_LABELS.items() if label == legacy)
 
 
 def block_block(
@@ -207,6 +224,34 @@ def test_consistency_flags_the_blocks_that_moved(tmp_path: Path) -> None:
     assert blocks[ATTENTION_AND_DELTAS]["divergent"] is True
     assert blocks[ATTENTION_AND_DELTAS]["diff"] == pytest.approx(0.20)
     assert abs(blocks[NORMS_AND_OUTPUT_STATS]["diff"]) < DIVERGENCE_BAR
+
+
+def test_consistency_does_not_difference_a_union_across_memberships(tmp_path: Path) -> None:
+    """A banked family union and a current one are two measurements, and stay two.
+
+    The banked run spells its union the way banked files do; reading maps it onto the
+    legacy label, so asking for the current union finds it on one side only, and the
+    comparison names both labels instead of dropping the row or taking a difference.
+    """
+    write_results(
+        tmp_path, "8b_baseline", by_block={banked_spelling(LEGACY_FAMILY_UNION): block_block(0.70)}
+    )
+    write_results(tmp_path, "8b_v2_5way", by_block={ALL_FAMILIES: block_block(0.90)})
+    results = load_report_inputs(tmp_path)
+    for asked in (ALL_FAMILIES, LEGACY_FAMILY_UNION):
+        entry = analyze_consistency(results, blocks=(asked,))["comparisons"][0]
+        assert entry["blocks"] == {}, "no difference is taken across memberships"
+        assert entry["not_comparable"] == {
+            asked: {"run_a_label": LEGACY_FAMILY_UNION, "run_b_label": ALL_FAMILIES}
+        }
+
+    # Both sides on the current membership: an ordinary comparison, nothing refused.
+    write_results(tmp_path, "8b_baseline", by_block={ALL_FAMILIES: block_block(0.70)})
+    entry = analyze_consistency(load_report_inputs(tmp_path), blocks=(ALL_FAMILIES,))[
+        "comparisons"
+    ][0]
+    assert entry["not_comparable"] == {}
+    assert entry["blocks"][ALL_FAMILIES]["diff"] == pytest.approx(0.20)
 
 
 def test_resolution_keeps_the_difficulty_buckets_apart(tmp_path: Path) -> None:
@@ -457,18 +502,53 @@ def test_value_add_is_a_delta_and_a_missing_baseline_is_not_a_zero(tmp_path: Pat
         "8b_v2_5way",
         by_block={
             "attention_flow": block_block(0.66),
-            "engineered": block_block(0.75),
+            ALL_FAMILIES: block_block(0.75),
         },
     )
     out = analyze_value_add(load_report_inputs(tmp_path))["8B"]
     assert out["families"]["attention_flow"]["delta_vs_baseline_attention_and_cache"] == pytest.approx(0.06)
-    assert out["composites"]["engineered"]["delta_vs_baseline_combined"] == pytest.approx(0.05)
+    assert out["composites"][ALL_FAMILIES]["delta_vs_baseline_combined"] == pytest.approx(0.05)
 
     write_results(tmp_path, "3b_run4", by_block={NORMS_AND_OUTPUT_STATS: block_block(0.3)})
     write_results(tmp_path, "3b_v2_5way", by_block={"attention_flow": block_block(0.5)})
     out_3b = analyze_value_add(load_report_inputs(tmp_path))["3B"]
     assert out_3b["baseline_attention_and_cache"] is None
     assert out_3b["families"]["attention_flow"]["delta_vs_baseline_attention_and_cache"] is None
+
+
+def test_value_add_reports_a_banked_union_under_its_legacy_label(tmp_path: Path) -> None:
+    """The banked spellings arrive as the legacy unions, never as the current ones."""
+    write_results(tmp_path, "8b_baseline", by_block={ALL_CORE: block_block(0.70)})
+    write_results(
+        tmp_path,
+        "8b_v2_5way",
+        by_block={
+            banked_spelling(LEGACY_FAMILY_UNION): block_block(0.75),
+            banked_spelling(LEGACY_EVERYTHING): block_block(0.80),
+        },
+    )
+    composites = analyze_value_add(load_report_inputs(tmp_path))["8B"]["composites"]
+    assert set(composites) == {LEGACY_FAMILY_UNION, LEGACY_EVERYTHING}
+    assert composites[LEGACY_FAMILY_UNION]["delta_vs_baseline_combined"] == pytest.approx(0.05)
+
+
+def test_the_complementarity_matrix_leaves_out_the_whole_vector_under_either_membership(
+    tmp_path: Path,
+) -> None:
+    """The every-block union correlates with its members by construction, banked or not."""
+    pairwise_a = hard_pairs({("linear", "socratic"): 0.6, ("linear", "dialectical"): 0.8})
+    pairwise_b = hard_pairs({("linear", "socratic"): 0.9, ("linear", "dialectical"): 0.5})
+    write_results(
+        tmp_path,
+        "8b_v2",
+        by_block={
+            ATTENTION_AND_DELTAS: block_block(0.5, pairwise=pairwise_a),
+            CACHE_AND_KEYS: block_block(0.5, pairwise=pairwise_b),
+            banked_spelling(LEGACY_EVERYTHING): block_block(0.9, pairwise=pairwise_a),
+        },
+    )
+    out = analyze_complementarity(load_report_inputs(tmp_path))["8b_v2"]
+    assert set(out["blocks"]) == {ATTENTION_AND_DELTAS, CACHE_AND_KEYS}
 
 
 def test_the_report_carries_all_seven_readings(tmp_path: Path) -> None:
