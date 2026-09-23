@@ -43,7 +43,7 @@ import torch
 from transformers import LlamaConfig, LlamaForCausalLM
 
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, ModelConfig
-from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
+from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data
 from anamnesis.extraction.fast.features import GpuFeatureLane
 from anamnesis.extraction.fast.schema import resolve_gpu_schema
 from anamnesis.extraction.model_loader import (
@@ -173,7 +173,7 @@ def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
         )
 
     raw = reference_raw()
-    ref = compute_features_v2_from_data(raw, extraction, families, components, mean)
+    ref = compute_features_with_families_from_data(raw, extraction, families, components, mean)
     schema = resolve_gpu_schema(3, continuation - 1, extraction, families, components)
     assert schema.feature_names == tuple(ref.feature_names)
     assert schema.family_slices == ref.block_slices
@@ -213,7 +213,7 @@ def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
         tuple(module.self_attn._forward_hooks) for module in loaded.model.model.layers
     ] == original_hooks
     raw_after = reference_raw()
-    ref_after = compute_features_v2_from_data(
+    ref_after = compute_features_with_families_from_data(
         raw_after, extraction, families, components, mean
     )
     assert ref_after.features.tobytes() == ref.features.tobytes()

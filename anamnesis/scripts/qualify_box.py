@@ -48,6 +48,8 @@ import numpy as np
 
 from anamnesis.config import preset_names, resolve_preset
 from anamnesis.extraction.equivalence.fidelity import (
+    AGREEMENT,
+    REPEATABLE,
     FidelityError,
     ReplayBatch,
     Ruler,
@@ -127,7 +129,7 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
     arithmetic is required here first so that a machine missing it is refused before
     a manifest is even opened.
     """
-    from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
+    from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data
     from anamnesis.extraction.replay.extract import replay_extract
 
     require_lane_arithmetic()
@@ -158,7 +160,7 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
         i, tokens, start, end = span.gen_id, span.input_ids, span.prompt_length, span.end
         key = ("qualify", str(i), "full", 0, f"{start}:{end}")
         raw = replay_extract(loaded, tokens, start, positional_means)
-        reference = compute_features_v2_from_data(
+        reference = compute_features_with_families_from_data(
             raw, extraction, runtime.families, runtime.pca_components, runtime.pca_mean
         )
         if tuple(reference.feature_names) != feature_names:
@@ -240,8 +242,8 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
     )
     vectors = verify_vectors(anchor_batch, candidate_batch, repeat_batch, ruler)
     return dict(
-        repeatable=vectors["G0"],
-        agreement=vectors["G1"],
+        repeatable=vectors[REPEATABLE],
+        agreement=vectors[AGREEMENT],
         lane_id=lane.lane_id,
         device=args.device,
         model=args.model,

@@ -3,6 +3,25 @@
 Thresholds are fixed module constants, not caller tuning knobs. The caller supplies
 immutable cohort/calibration/baseline receipts. This module never fits a ruler,
 chooses a condition comparator, or certifies absent coverage.
+
+Each check renders one or more named verdicts, and a receipt carries each verdict
+under its name:
+
+``repeatable``
+    The candidate lane reproduces its own vectors byte for byte (:func:`verify_vectors`).
+``agreement``
+    The candidate is within tolerance of the reference, row by row (:func:`verify_vectors`).
+``single_lane``
+    Every row of a batch carries one lane id (:func:`verify_vectors`).
+``downstream_preserved``
+    A pinned downstream statistic moves by less than its tolerance (:func:`verify_downstream`).
+``covered``
+    Every required row and regime is present (the ``verify_*coverage`` functions).
+``within_memory``
+    Peak memory stays under the cap and the matched baseline (:func:`verify_memory`).
+
+:func:`verify_within_tol` combines them. Receipts banked before these names read
+forward through :data:`BANKED_GATE_KEYS`.
 """
 
 from __future__ import annotations
@@ -34,6 +53,27 @@ REQUIRED_REGIMES = frozenset(
 )
 
 
+REPEATABLE = "repeatable"
+AGREEMENT = "agreement"
+SINGLE_LANE = "single_lane"
+DOWNSTREAM_PRESERVED = "downstream_preserved"
+COVERED = "covered"
+WITHIN_MEMORY = "within_memory"
+
+BANKED_GATE_KEYS: dict[str, str] = {
+    "G0": REPEATABLE,
+    "G1": AGREEMENT,
+    "G2": DOWNSTREAM_PRESERVED,
+    "G3": COVERED,
+    "G4": SINGLE_LANE,
+    "G5": WITHIN_MEMORY,
+}
+"""The key each verdict is stored under in a banked receipt, mapped to its name here.
+
+Receipts already on disk carry these spellings, so :func:`read_gate_receipt` reads
+them forward. A receipt is written under the current names only."""
+
+
 class FidelityError(ValueError):
     """Missing, inconsistent, or inadmissible evidence (not a numeric pass)."""
 
@@ -41,6 +81,25 @@ class FidelityError(ValueError):
 def _require(ok: bool, message: str) -> None:
     if not ok:
         raise FidelityError(message)
+
+
+def read_gate_receipt(receipt: Mapping[str, object]) -> dict[str, object]:
+    """A receipt with each banked verdict key read forward onto its current name.
+
+    Keys outside :data:`BANKED_GATE_KEYS` pass through untouched, so a receipt
+    already on the current names comes back equal to itself. A receipt that carries
+    one verdict under both spellings with different values is refused: which of the
+    two is the verdict is not something this function can know.
+    """
+    out: dict[str, object] = {}
+    for key, value in receipt.items():
+        name = BANKED_GATE_KEYS.get(key, key)
+        if name in out and out[name] != value:
+            raise FidelityError(
+                f"{name}: receipt carries two different verdicts under {key!r} and {name!r}"
+            )
+        out[name] = value
+    return out
 
 
 def _digest(value: str, name: str) -> None:
@@ -80,13 +139,13 @@ class ReplayBatch:
         )
         _require(
             len(set(self.lane_ids)) == 1 and bool(self.lane_ids[0]),
-            "G4: mixed or absent lane IDs",
+            "single lane: mixed or absent lane IDs",
         )
         _require(
             len(set(self.replay_ids)) == n and all(self.replay_ids),
             "reused/empty replay ID",
         )
-        _require(self.fresh_cache, "G0: replay did not construct fresh caches")
+        _require(self.fresh_cache, "repeatable: replay did not construct fresh caches")
         _require(
             self.channel == "probe-free", "adapter/excess channel is not certified"
         )
@@ -214,10 +273,12 @@ def _aligned(batch: ReplayBatch, keys: tuple[RowKey, ...]) -> F32:
 def verify_vectors(
     cpu: ReplayBatch, gpu: ReplayBatch, repeat: ReplayBatch, ruler: Ruler
 ) -> dict:
-    """G0/G1/G4. Full-reference rows required, never an intersection join.
+    """The ``repeatable``, ``agreement`` and ``single_lane`` verdicts.
 
-    A G0 failure prevents G1 evaluation. No default condition comparator exists:
-    in particular anchor A is not silently assigned an invented nonzero delta.
+    Full-reference rows required, never an intersection join. A candidate that is
+    not repeatable leaves ``agreement`` unevaluated (``None``). No default condition
+    comparator exists: in particular anchor A is not silently assigned an invented
+    nonzero delta.
     """
     for batch in (cpu, gpu, repeat):
         batch.validate()
@@ -228,10 +289,10 @@ def verify_vectors(
             batch.calibration_sha256 == ruler.calibration_sha256, "calibration mismatch"
         )
         _require(batch.schema_sha256 == ruler.schema_sha256, "schema mismatch")
-    _require(gpu.stack_sha256 == repeat.stack_sha256, "G0: repeat stack differs")
-    _require(gpu.lane_ids[0] == repeat.lane_ids[0], "G0: repeat lane differs")
+    _require(gpu.stack_sha256 == repeat.stack_sha256, "repeatable: repeat stack differs")
+    _require(gpu.lane_ids[0] == repeat.lane_ids[0], "repeatable: repeat lane differs")
     _require(
-        not (set(gpu.replay_ids) & set(repeat.replay_ids)), "G0: same replay reused"
+        not (set(gpu.replay_ids) & set(repeat.replay_ids)), "repeatable: same replay reused"
     )
     keys = ruler.reference_keys
     ref, candidate, again = [_aligned(b, keys) for b in (cpu, gpu, repeat)]
@@ -261,14 +322,14 @@ def verify_vectors(
     _require(inputs[0] == inputs[1] == inputs[2], "input/cache/model identity mismatch")
     exact = np.all(candidate.view(np.uint32) == again.view(np.uint32), axis=1)
     result: dict = {
-        "G0": bool(exact.all()),
-        "G4": True,
-        "G1": None,
+        REPEATABLE: bool(exact.all()),
+        SINGLE_LANE: True,
+        AGREEMENT: None,
         "repeat_failures": [
             list(k) for k, ok in zip(keys, exact, strict=True) if not ok
         ],
     }
-    if not result["G0"]:
+    if not result[REPEATABLE]:
         return result
     for key in ruler.identical_input_zero_pairs:
         pair = ruler.condition_pair[key]
@@ -336,7 +397,7 @@ def verify_vectors(
             )
         )
     result.update(
-        G1=verdict(np.ones(len(keys), dtype=bool)),
+        {AGREEMENT: verdict(np.ones(len(keys), dtype=bool))},
         max_feature_sigma_error=float(feature_error.max()),
         prefix_cutpoints=cuts.tolist(),
         terciles=groups,
@@ -394,9 +455,10 @@ def verify_downstream(
     *,
     flag_se_sampling_scale: bool = False,
 ) -> dict:
-    """G2 via the pinned owner's statistic, with exact matched-n/cohort checks.
+    """The ``downstream_preserved`` verdict, via the pinned owner's statistic, with
+    exact matched-n/cohort checks.
 
-    `statistic` is genpair.jackknife_coherence_ratio, not a refitted substitute.
+    `statistic` is the owner's pinned estimator itself, not a refitted substitute.
     CPU reproduction is a prerequisite; a stale headline cannot be used as a ruler.
     """
     _digest(anchor.artifact_sha256, "anchor artifact")
@@ -407,39 +469,39 @@ def verify_downstream(
     )
     _require(
         tuple(documents) == anchor.documents and tuple(clusters) == anchor.clusters,
-        "G2: document/cluster cohort mismatch (matched-n required)",
+        "downstream: document/cluster cohort mismatch (matched-n required)",
     )
-    _require(len(set(documents)) == len(documents), "G2: duplicate document")
+    _require(len(set(documents)) == len(documents), "downstream: duplicate document")
     _require(
         cpu_deltas.shape == gpu_deltas.shape and cpu_deltas.ndim == 2,
-        "G2: delta shape mismatch",
+        "downstream: delta shape mismatch",
     )
-    _require(cpu_deltas.shape[0] == len(documents), "G2: member-count mismatch")
+    _require(cpu_deltas.shape[0] == len(documents), "downstream: member-count mismatch")
     _require(
         bool(np.isfinite(cpu_deltas).all() and np.isfinite(gpu_deltas).all()),
-        "G2: nonfinite deltas",
+        "downstream: nonfinite deltas",
     )
     _require(
         np.isfinite(anchor.point) and np.isfinite(anchor.se) and anchor.se > 0,
-        "G2: degenerate anchor",
+        "downstream: degenerate anchor",
     )
     reference = statistic(cpu_deltas, clusters)
     candidate = statistic(gpu_deltas, clusters)
     _require(
         np.isclose(reference.point, anchor.point, rtol=1e-10, atol=1e-12)
         and np.isclose(reference.se, anchor.se, rtol=1e-10, atol=1e-12),
-        "G2: CPU does not reproduce pinned anchor",
+        "downstream: CPU does not reproduce pinned anchor",
     )
     _require(
         np.isfinite(candidate.point) and np.isfinite(candidate.se),
-        "G2: degenerate candidate",
+        "downstream: degenerate candidate",
     )
     point_change = abs(candidate.point - reference.point) / anchor.se
     se_change = abs(candidate.se - reference.se) / anchor.se
     n_clusters = len(set(clusters))
     se_warning_scale = 1 / np.sqrt(2 * (n_clusters - 1)) if n_clusters > 1 else None
     return dict(
-        G2=bool(max(point_change, se_change) <= SE_FRACTION),
+        **{DOWNSTREAM_PRESERVED: bool(max(point_change, se_change) <= SE_FRACTION)},
         point_change_in_reference_se=float(point_change),
         se_change_in_reference_se=float(se_change),
         cpu_point=float(reference.point),
@@ -463,10 +525,10 @@ def verify_coverage(
     required_keys: Sequence[RowKey],
     regime_rows: Mapping[str, Sequence[RowKey]],
 ) -> dict:
-    """G3: all predeclared rows AND each named regime must actually be present."""
+    """The ``covered`` verdict: all predeclared rows AND each named regime present."""
     actual.validate()
-    _require(set(actual.keys) == set(required_keys), "G3: reference set incomplete")
-    _require(bool(regime_rows), "G3: no regime manifest")
+    _require(set(actual.keys) == set(required_keys), "coverage: reference set incomplete")
+    _require(bool(regime_rows), "coverage: no regime manifest")
     missing = {
         name: [list(k) for k in keys if k not in actual.keys]
         for name, keys in regime_rows.items()
@@ -474,7 +536,7 @@ def verify_coverage(
     empty = [name for name, keys in regime_rows.items() if not keys]
     absent = sorted(REQUIRED_REGIMES - set(regime_rows))
     return dict(
-        G3=not empty and not absent and not any(missing.values()),
+        **{COVERED: not empty and not absent and not any(missing.values())},
         channel=actual.channel,
         missing=missing,
         unpopulated_regimes=empty,
@@ -489,13 +551,14 @@ def verify_sweep_coverage(
     regime_rows: Mapping[str, Sequence[RowKey]],
     sweep: dict,
 ) -> dict:
-    """G3 for a 70B lane, by cache-length sweep; no automatic calibrated-scope extension.
+    """The ``covered`` verdict for a 70B lane, by cache-length sweep; no automatic
+    calibrated-scope extension.
 
     The caller must supply a sweep recomputed from its pinned arrays, not an
     unchecked saved pass flag. This checks its composition with bank coverage.
     """
     actual.validate()
-    _require(set(actual.keys) == set(required_keys), "G3: reference set incomplete")
+    _require(set(actual.keys) == set(required_keys), "coverage: reference set incomplete")
     required = {
         "near-floor-B-E",
         "near-floor-F-E",
@@ -504,20 +567,20 @@ def verify_sweep_coverage(
         "null-fork-1",
         "null-fork-2",
     }
-    _require(required <= set(regime_rows), "G3: missing bank regime")
+    _require(required <= set(regime_rows), "coverage: missing bank regime")
     for name in required:
-        _require(bool(regime_rows[name]), f"G3: empty regime {name}")
+        _require(bool(regime_rows[name]), f"coverage: empty regime {name}")
         _require(
-            set(regime_rows[name]) <= set(actual.keys), f"G3: unknown rows in {name}"
+            set(regime_rows[name]) <= set(actual.keys), f"coverage: unknown rows in {name}"
         )
-    _require(sweep["lane_id"] == actual.lane_ids[0], "G3: sweep lane differs from bank")
+    _require(sweep["lane_id"] == actual.lane_ids[0], "coverage: sweep lane differs from bank")
     lengths = sweep["lengths"]
     _require(
         len(lengths) == 6 and len({r["cache_length"] for r in lengths}) == 6,
-        "G3: six distinct lengths required",
+        "coverage: six distinct lengths required",
     )
-    _require(all(r["n"] >= 5 for r in lengths), "G3: five spans per length required")
-    _require(max(r["cache_length"] for r in lengths) > 299, "G3: no length extension")
+    _require(all(r["n"] >= 5 for r in lengths), "coverage: five spans per length required")
+    _require(max(r["cache_length"] for r in lengths) > 299, "coverage: no length extension")
     passed = (
         sweep["coverage_complete"] is True
         and sweep["independent_repeats_exact"] is True
@@ -525,7 +588,7 @@ def verify_sweep_coverage(
         and all(r["delta_self"] == 0 for r in lengths)
     )
     return dict(
-        G3=passed,
+        **{COVERED: passed},
         replacement="70B instrument cache-length sweep",
         bank_regime_counts={k: len(regime_rows[k]) for k in sorted(required)},
         lengths=lengths,
@@ -542,7 +605,7 @@ def verify_bank_scope_coverage(
     span_bounds: Mapping[RowKey, tuple[int, int]],
     ruling_sha256: str,
 ) -> dict:
-    """G3 over the bank scope only, pinned by the scope decision's digest.
+    """The ``covered`` verdict over the bank scope only, pinned by the scope decision's digest.
 
     ``ruling_sha256`` is the SHA-256 of the caller's record fixing that scope. This
     does not certify the sweep envelope.
@@ -550,13 +613,13 @@ def verify_bank_scope_coverage(
     _digest(ruling_sha256, "bank-scope ruling")
     actual.validate()
     keys = set(required_keys)
-    _require(set(actual.keys) == keys == set(span_bounds), "G3: incomplete bank scope")
+    _require(set(actual.keys) == keys == set(span_bounds), "coverage: incomplete bank scope")
     _require(
         all(
             263 <= start <= 299 and end - start == 128
             for start, end in span_bounds.values()
         ),
-        "G3: outside the bank geometry (cache 263-299, continuation 128)",
+        "coverage: outside the bank geometry (cache 263-299, continuation 128)",
     )
     required = {
         "near-floor-B-E",
@@ -566,14 +629,14 @@ def verify_bank_scope_coverage(
         "null-fork-1",
         "null-fork-2",
     }
-    _require(required <= set(regime_rows), "G3: missing bank regime")
+    _require(required <= set(regime_rows), "coverage: missing bank regime")
     for name in required:
         _require(
             bool(regime_rows[name]) and set(regime_rows[name]) <= keys,
-            f"G3: empty/unknown regime {name}",
+            f"coverage: empty/unknown regime {name}",
         )
     return dict(
-        G3=True,
+        **{COVERED: True},
         scope="bank cache263–299 / continuation128 only",
         ruling_sha256=ruling_sha256,
         bank_regime_counts={k: len(regime_rows[k]) for k in sorted(required)},
@@ -590,7 +653,8 @@ def verify_memory(
     metric: str,
     baseline_sha256: str,
 ) -> dict:
-    """G5 on a named measurement metric and identical phases/device counts.
+    """The ``within_memory`` verdict on a named measurement metric and identical
+    phases/device counts.
 
     The 135.3 historical cap needs a pinned unit/metric receipt; the caller must
     supply its byte conversion rather than equating allocated/reserved/process.
@@ -600,22 +664,22 @@ def verify_memory(
     _require(metric in ("allocated", "reserved", "process"), "unknown VRAM metric")
     _require(
         cap_bytes > 0 and bool(baseline) and candidate.keys() == baseline.keys(),
-        "G5: missing/mismatched phase measurements",
+        "memory: missing/mismatched phase measurements",
     )
     phases = {}
     for phase, values in candidate.items():
         ref = baseline[phase]
-        _require(len(values) == len(ref) > 0, "G5: device-count mismatch")
+        _require(len(values) == len(ref) > 0, "memory: device-count mismatch")
         _require(
             all(isinstance(v, int) and v >= 0 for v in (*values, *ref)),
-            "G5: invalid peak bytes",
+            "memory: invalid peak bytes",
         )
         # Compare each device to both the recorded cap and its matched baseline.
         phases[phase] = all(
             v <= min(b, cap_bytes) for v, b in zip(values, ref, strict=True)
         )
     return dict(
-        G5=all(phases.values()),
+        **{WITHIN_MEMORY: all(phases.values())},
         metric=metric,
         phases=phases,
         cap_bytes=cap_bytes,
@@ -626,14 +690,21 @@ def verify_memory(
 def verify_within_tol(
     vectors: dict, downstream: dict, coverage: dict, memory: dict
 ) -> dict:
-    """Combine receipts; an unexecuted gate can never look like a pass."""
+    """Combine receipts; an unexecuted gate can never look like a pass.
+
+    Each receipt is read through :func:`read_gate_receipt`, so a banked receipt
+    combines with a fresh one.
+    """
+    vectors, downstream, coverage, memory = (
+        read_gate_receipt(block) for block in (vectors, downstream, coverage, memory)
+    )
     gates = {
         name: block.get(name)
         for block, names in (
-            (vectors, ("G0", "G1", "G4")),
-            (downstream, ("G2",)),
-            (coverage, ("G3",)),
-            (memory, ("G5",)),
+            (vectors, (REPEATABLE, AGREEMENT, SINGLE_LANE)),
+            (downstream, (DOWNSTREAM_PRESERVED,)),
+            (coverage, (COVERED,)),
+            (memory, (WITHIN_MEMORY,)),
         )
         for name in names
     }

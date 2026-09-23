@@ -247,8 +247,8 @@ def replay_cell(
         the message its exception carried. A caller turns that into a refusal
         through :func:`cell_shortfall`; nothing here decides the pass's fate.
     """
-    from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data, save_features
-    from anamnesis.extraction.raw_saver import save_raw_tensors_v3
+    from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data, save_features
+    from anamnesis.extraction.raw_saver import save_raw_tensors_all_layer
     from anamnesis.extraction.replay.extract import replay_extract
 
     positional_means, pca_components, pca_mean = calibration
@@ -296,7 +296,7 @@ def replay_cell(
                     write_handle, len(input_ids) - prompt_length, f"gen_{gen_id:03d}"
                 )
             if save_raw:
-                save_raw_tensors_v3(
+                save_raw_tensors_all_layer(
                     raw_data,
                     gen_id,
                     raw_target,
@@ -304,7 +304,7 @@ def replay_cell(
                     input_ids=input_ids,
                     top_k_logits=logits_top_k,
                 )
-            result = compute_features_v2_from_data(
+            result = compute_features_with_families_from_data(
                 raw_data, surface.extraction, surface.families, pca_components, pca_mean
             )
             metadata = dict(src_meta.get(gen_id, {"generation_id": gen_id}))

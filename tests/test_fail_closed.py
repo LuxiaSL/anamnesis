@@ -665,11 +665,11 @@ RECOMPUTE_PROMPT = 4
 def write_raw_tensors(raw_dir: Path, gen_id: int) -> None:
     """One generation's raw capture, written through the real saver.
 
-    Going through `anamnesis.extraction.raw_saver.save_raw_tensors_v3` rather than
+    Going through `anamnesis.extraction.raw_saver.save_raw_tensors_all_layer` rather than
     hand-writing an npz is what makes the recompute under test the real one: the
     loop reads these files back with the loader the instrument uses.
     """
-    from anamnesis.extraction.raw_saver import save_raw_tensors_v3
+    from anamnesis.extraction.raw_saver import save_raw_tensors_all_layer
 
     rng = np.random.default_rng(gen_id)
     hidden = [
@@ -702,7 +702,7 @@ def write_raw_tensors(raw_dir: Path, gen_id: int) -> None:
         },
     )
     raw_dir.mkdir(parents=True, exist_ok=True)
-    save_raw_tensors_v3(
+    save_raw_tensors_all_layer(
         raw, gen_id, raw_dir,
         prompt_length=RECOMPUTE_PROMPT,
         input_ids=list(range(RECOMPUTE_PROMPT + RECOMPUTE_STEPS)),

@@ -42,7 +42,7 @@ from anamnesis.extraction.fast.batch_layout import ReplaySpan
 from anamnesis.extraction.fast.features import GpuFeatureLane
 from anamnesis.extraction.fast.schema import resolve_gpu_schema
 from anamnesis.extraction.replay.cached import replay_extract_cached
-from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
+from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data
 
 
 @pytest.mark.parametrize(
@@ -142,7 +142,7 @@ def test_batch_feature_parity_repeat_and_cleanup(
             span.start,
             pm,
         )
-        reference = compute_features_v2_from_data(
+        reference = compute_features_with_families_from_data(
             raw, extraction, families, components, mean
         )
         failures = [

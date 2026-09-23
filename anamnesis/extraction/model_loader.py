@@ -859,7 +859,7 @@ def load_model(
             (SwiGLU MLP gate) at sampled layers. Captures pre-SiLU gate
             activations for gate sparsity/diversity features.
         key_layers: Layers for k_proj (pre-RoPE key) hooks. Defaults to
-            sampled_layers. Pass all layers for the full v3 capture surface.
+            sampled_layers. Pass all layers for the full replay capture surface.
         value_layers: Layers for v_proj (value) hooks. Default None = no value
             capture. Pass all layers to bank the OV-circuit value surface.
         query_layers: Layers for q_proj (pre-RoPE query) hooks. Default None =
@@ -898,8 +898,8 @@ def load_model(
         tokenizer.pad_token = tokenizer.eos_token
 
     # ── Resolve which layers get which hooks ──
-    # Backward compatible: keys default to sampled_layers; values/queries are off
-    # unless explicitly requested (the full v3 replay surface passes all/sampled).
+    # Keys default to sampled_layers; values/queries are off unless explicitly
+    # requested (the full replay capture surface passes all/sampled).
     if key_layers is None:
         key_layers = list(sampled_layers)
 

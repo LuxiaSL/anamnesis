@@ -9,7 +9,7 @@ Usage:
     python -m anamnesis.extraction.feature_pipeline \\
         --model 8b \\
         --raw-dir outputs/runs/smoke_test/raw_tensors/ \\
-        --output-dir outputs/runs/smoke_test/signatures_v2/ \\
+        --output-dir outputs/runs/smoke_test/signatures/ \\
         --pca-model outputs/calibration/llama31_8b/pca_model.pkl
 
     # Or use programmatically:
@@ -86,13 +86,13 @@ def compute_features_from_raw(
     pca_components, pca_mean : arrays, optional
         Pre-fitted PCA model for the residual-PCA block.
     positional_means : array, optional
-        Injected only if the loaded raw_data has none (v3 deduped raw stores
+        Injected only if the loaded raw_data has none (an all-layer raw bank stores
         positional_means once in the calibration dir, not per-gen).
     surfaces, attn_layers : optional (keyword-only)
         Lean-load passthrough to load_raw_tensors. Defaults (None) load
         everything — the exact historical behavior. CAUTION: attn_entropy and
         head_agreement read ALL attention layers present, so restricting
-        attn_layers changes those features on v3 all-layer banks. Only restrict
+        attn_layers changes those features on all-layer banks. Only restrict
         when every enabled consumer reads sampled layers only.
 
     Returns
@@ -105,7 +105,7 @@ def compute_features_from_raw(
     return extract_all_features(raw_data, config, pca_components, pca_mean)
 
 
-def compute_features_v2(
+def compute_features_with_families(
     raw_dir: Path,
     gen_id: int,
     config: ExtractionConfig,
@@ -117,11 +117,12 @@ def compute_features_v2(
     surfaces: Sequence[str] | None = None,
     attn_layers: Sequence[int] | None = None,
 ) -> ExtractionResult:
-    """Load raw tensors for one generation and compute v2 features.
+    """Load raw tensors for one generation and compute the core blocks plus the families.
 
-    Thin wrapper over compute_features_v2_from_data: loads the saved raw tensors,
-    injects calibration positional_means when the npz lacks them (v3 raw is deduped —
-    pos_means lives once in the run's calibration dir, not per-gen), then computes.
+    Thin wrapper over compute_features_with_families_from_data: loads the saved raw tensors,
+    injects calibration positional_means when the npz lacks them (an all-layer raw bank
+    is deduped — pos_means lives once in the run's calibration dir, not per-gen), then
+    computes.
 
     Parameters
     ----------
@@ -130,9 +131,9 @@ def compute_features_v2(
     gen_id : int
         Generation ID to process.
     config, family_config, pca_components, pca_mean :
-        See compute_features_v2_from_data.
+        See compute_features_with_families_from_data.
     positional_means : array, optional
-        Injected only if the loaded raw_data has none (v3 deduped raw).
+        Injected only if the loaded raw_data has none (a deduped all-layer raw bank).
     surfaces, attn_layers : optional (keyword-only)
         Lean-load passthrough to load_raw_tensors (see compute_features_from_raw
         for the all-layer attention caveat). Defaults preserve exact behavior.
@@ -140,12 +141,12 @@ def compute_features_v2(
     raw_data = load_raw_tensors(gen_id, raw_dir, surfaces=surfaces, attn_layers=attn_layers)
     if raw_data.positional_means is None and positional_means is not None:
         raw_data.positional_means = positional_means
-    return compute_features_v2_from_data(
+    return compute_features_with_families_from_data(
         raw_data, config, family_config, pca_components, pca_mean,
     )
 
 
-def compute_features_v2_from_data(
+def compute_features_with_families_from_data(
     raw_data: RawGenerationData,
     config: ExtractionConfig,
     family_config: FeaturePipelineConfig,
@@ -155,7 +156,7 @@ def compute_features_v2_from_data(
     """Compute the core blocks plus the pluggable feature families from in-memory raw_data.
 
     The GPU-free feature loop: the core blocks, then the enabled families, concatenated.
-    Used by replay-extract (in-memory raw_data) and compute_features_v2 (from disk).
+    Used by replay-extract (in-memory raw_data) and compute_features_with_families (from disk).
     Caller is responsible for setting raw_data.positional_means, which the cache-and-keys
     block, the residual-PCA block and the per-head and residual families all correct with.
     """
@@ -354,7 +355,7 @@ def compute_features_v2_from_data(
     else:
         combined = np.array([], dtype=np.float32)
 
-    logger.info(f"V2 features: {len(combined)} total ({len(all_slices)} families)")
+    logger.info(f"Features: {len(combined)} total ({len(all_slices)} blocks and families)")
 
     return ExtractionResult(
         features=combined,
@@ -413,17 +414,17 @@ def _process_one_sample(args: tuple) -> tuple[int, int | None, str | None]:
     ----------
     args : tuple
         (gen_id, raw_dir, output_dir, metadata_dir, config, family_config,
-         pca_components, pca_mean, use_v2)
+         pca_components, pca_mean, with_families)
 
     Returns
     -------
     (gen_id, n_features, error_message)
     """
     (gen_id, raw_dir, output_dir, metadata_dir, config, family_config,
-     pca_components, pca_mean, use_v2, positional_means) = args
+     pca_components, pca_mean, with_families, positional_means) = args
     try:
-        if use_v2:
-            result = compute_features_v2(
+        if with_families:
+            result = compute_features_with_families(
                 raw_dir, gen_id, config, family_config,
                 pca_components, pca_mean, positional_means,
             )
@@ -502,7 +503,7 @@ def _default_n_workers() -> int:
     """Sensible parallel default for recompute_all_features.
 
     Leaves 2 cores for the OS/caller and caps at 32 (each worker holds one
-    loaded sample: ~300 MB for v2 banks, more for v3 all-layer banks).
+    loaded sample: ~300 MB for a sampled-layer bank, more for an all-layer bank).
     """
     cpus = os.cpu_count() or 1
     return max(1, min(32, cpus - 2))
@@ -558,7 +559,7 @@ def recompute_all_features(
         Directory with original metadata json files (for copying metadata).
         If None, uses the signatures dir adjacent to raw_dir.
     family_config : FeaturePipelineConfig, optional
-        When provided, uses compute_features_v2() with pluggable families.
+        When provided, uses compute_features_with_families() with pluggable families.
         When None, uses compute_features_from_raw(), which runs the core blocks alone.
     n_workers : int, optional
         Number of parallel workers. None (default) resolves to a cpu-based
@@ -597,13 +598,13 @@ def recompute_all_features(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    use_v2 = family_config is not None
-    label = "v2" if use_v2 else "v1 (core blocks only)"
+    with_families = family_config is not None
+    label = "core blocks and families" if with_families else "core blocks only"
     logger.info(f"Recomputing features ({label}) for {len(gen_ids)} generations...")
     logger.info(f"  Raw tensors: {raw_dir}")
     logger.info(f"  Output: {output_dir}")
     logger.info(f"  Workers: {n_workers}")
-    if use_v2:
+    if with_families:
         enabled = []
         if family_config.include_core_blocks:
             enabled.append("core blocks")
@@ -618,7 +619,7 @@ def recompute_all_features(
     # Build argument tuples for each sample
     work_args = [
         (gen_id, raw_dir, output_dir, metadata_dir, config, family_config,
-         pca_components, pca_mean, use_v2, positional_means)
+         pca_components, pca_mean, with_families, positional_means)
         for gen_id in gen_ids
     ]
 
@@ -759,10 +760,10 @@ def main() -> None:
         help="Directory with original metadata json files",
     )
 
-    # v2 feature family flags
+    # Feature family flags
     parser.add_argument(
-        "--v2", action="store_true",
-        help="Enable v2 pipeline with pluggable feature families",
+        "--with-families", action="store_true",
+        help="Compute the pluggable feature families after the core blocks",
     )
     parser.add_argument(
         "--model", choices=list(preset_names()), required=True,
@@ -773,24 +774,24 @@ def main() -> None:
     )
     parser.add_argument(
         "--no-trajectory", action="store_true",
-        help="Disable residual stream trajectory features (v2 only)",
+        help="Disable residual stream trajectory features (with --with-families only)",
     )
     parser.add_argument(
         "--no-attention-flow", action="store_true",
-        help="Disable attention flow features (v2 only)",
+        help="Disable attention flow features (with --with-families only)",
     )
     parser.add_argument(
         "--no-gate", action="store_true",
-        help="Disable SwiGLU gate features (v2 only)",
+        help="Disable SwiGLU gate features (with --with-families only)",
     )
     parser.add_argument(
         "--no-stft", action="store_true",
-        help="Disable STFT spectral features in temporal operators (v2 only)",
+        help="Disable STFT spectral features in temporal operators (with --with-families only)",
     )
     parser.add_argument(
         "--no-core-blocks", action="store_true",
         help="Compute only the families, without the four blocks the numeric anchor "
-             "builds (v2 only, for ablation)",
+             "builds (with --with-families only, for ablation)",
     )
     parser.add_argument(
         "--workers", type=int, default=None,
@@ -818,9 +819,9 @@ def main() -> None:
         if pca_components is not None:
             logger.info(f"Loaded PCA model: {pca_components.shape}")
 
-    # Build v2 family config if requested
+    # Build the family config if requested
     family_config: FeaturePipelineConfig | None = None
-    if args.v2:
+    if args.with_families:
         family_kwargs: dict = {
             "include_core_blocks": not args.no_core_blocks,
             "enable_residual_trajectory": not args.no_trajectory,

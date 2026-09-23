@@ -7,8 +7,8 @@ exact historical behavior; lean mode must be bit-identical to full mode on
 every surface the caller requested.
 
 Covers both npz schemas:
-  - v2 (save_raw_tensors): sampled hidden/attention layers, gates, per-gen pos-means
-  - v3 (save_raw_tensors_v3): all-layer hidden/attention/keys/values, sampled queries/gates
+  - sampled-layer (save_raw_tensors): sampled hidden/attention layers, gates, per-gen pos-means
+  - all-layer (save_raw_tensors_all_layer): all-layer hidden/attention/keys/values, sampled queries/gates
 
 Usage:
     python tests/test_lean_loading.py
@@ -23,12 +23,12 @@ from pathlib import Path
 import numpy as np
 
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig
-from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
+from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data
 from anamnesis.extraction.raw_saver import (
     VALID_SURFACES,
     load_raw_tensors,
     save_raw_tensors,
-    save_raw_tensors_v3,
+    save_raw_tensors_all_layer,
 )
 from anamnesis.extraction.state_extractor import (
     RawGenerationData,
@@ -185,8 +185,8 @@ def _check_one_schema(raw_dir: Path, label: str) -> None:
         trajectory_layers=SAMPLED_LAYERS,
         contrastive_layers=SAMPLED_LAYERS,
     )
-    fam_full = compute_features_v2_from_data(full, config, fam_cfg)
-    fam_lean = compute_features_v2_from_data(lean_sub, config, fam_cfg)
+    fam_full = compute_features_with_families_from_data(full, config, fam_cfg)
+    fam_lean = compute_features_with_families_from_data(lean_sub, config, fam_cfg)
     assert fam_full.feature_names == fam_lean.feature_names
     np.testing.assert_array_equal(
         fam_full.features, fam_lean.features,
@@ -204,16 +204,16 @@ def _check_one_schema(raw_dir: Path, label: str) -> None:
           f"features identical with attn_layers={SAMPLED_LAYERS}")
 
 
-def test_lean_loading_v3() -> None:
+def test_lean_loading_all_layer() -> None:
     rng = np.random.default_rng(42)
     data = _make_synthetic_data(rng, all_layer=True)
     with tempfile.TemporaryDirectory() as td:
         raw_dir = Path(td)
-        save_raw_tensors_v3(data, 0, raw_dir, prompt_length=PROMPT_LEN, top_k_logits=20)
-        _check_one_schema(raw_dir, "v3 all-layer")
+        save_raw_tensors_all_layer(data, 0, raw_dir, prompt_length=PROMPT_LEN, top_k_logits=20)
+        _check_one_schema(raw_dir, "all-layer")
 
 
-def test_lean_loading_v2() -> None:
+def test_lean_loading_sampled_layer() -> None:
     rng = np.random.default_rng(43)
     data = _make_synthetic_data(rng, all_layer=False)
     data.v_proj_values = None
@@ -224,7 +224,7 @@ def test_lean_loading_v2() -> None:
             data, 0, raw_dir, config=_config(),
             prompt_length=PROMPT_LEN, top_k_logits=20,
         )
-        _check_one_schema(raw_dir, "v2 sampled-layer")
+        _check_one_schema(raw_dir, "sampled-layer")
 
 
 def test_empty_generation() -> None:
@@ -236,7 +236,7 @@ def test_empty_generation() -> None:
             chosen_token_ids=np.array([], dtype=np.float32),
             pre_rope_keys={}, prompt_length=0,
         )
-        save_raw_tensors_v3(empty, 0, raw_dir, prompt_length=0)
+        save_raw_tensors_all_layer(empty, 0, raw_dir, prompt_length=0)
         for kwargs in ({}, {"surfaces": ("hidden",)}, {"attn_layers": [0]}):
             out = load_raw_tensors(0, raw_dir, **kwargs)
             assert out.hidden_states == [] and out.attentions == [] and out.logits == []
@@ -245,8 +245,8 @@ def test_empty_generation() -> None:
 
 def main() -> int:
     print(f"Valid surfaces: {sorted(VALID_SURFACES)}")
-    test_lean_loading_v3()
-    test_lean_loading_v2()
+    test_lean_loading_all_layer()
+    test_lean_loading_sampled_layer()
     test_empty_generation()
     print("ALL LEAN-LOADING TESTS PASSED")
     return 0

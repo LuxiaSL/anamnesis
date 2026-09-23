@@ -146,7 +146,7 @@ NEW_FAMILIES: tuple[str, ...] = (
     ATTENTION_FLOW,
     GATE_FEATURES,
 )
-V2_COMPOSITES: tuple[str, ...] = (
+VALUE_ADD_COMPOSITES: tuple[str, ...] = (
     ALL_FAMILIES, ATTENTION_AND_CACHE_WITH_FAMILIES, EVERYTHING,
     LEGACY_FAMILY_UNION, LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES, LEGACY_EVERYTHING,
 )
@@ -602,7 +602,7 @@ def analyze_value_add(
                         else _accuracy(new_blocks, composite) - base_combined
                     ),
                 }
-                for composite in V2_COMPOSITES
+                for composite in VALUE_ADD_COMPOSITES
                 if _accuracy(new_blocks, composite) is not None
             },
         }
@@ -634,7 +634,7 @@ __all__ = [
     "NEW_FAMILIES",
     "REDUNDANT_BAR",
     "SUBSET_RUNS",
-    "V2_COMPOSITES",
+    "VALUE_ADD_COMPOSITES",
     "WHOLE_VECTOR_UNIONS",
     "analyze_complementarity",
     "analyze_confusion",

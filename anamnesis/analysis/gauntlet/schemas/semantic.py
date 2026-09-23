@@ -30,9 +30,9 @@ class SemanticClassifierBundle(BaseModel):
     """Bundle of rf + knn accuracies for a given feature set.
 
     ``dims`` is present for tfidf / sbert / combined / semantic_noise
-    (which record the feature-set dimensionality). Newer v2 runs omit
-    ``dims`` for compute_classification (it pulls from
-    per_block_semantic.classification, which never set it).
+    (which record the feature-set dimensionality). It is absent for
+    compute_classification, which pulls from per_block_semantic.classification,
+    where it is never set.
     """
 
     model_config = _FORBID
@@ -216,8 +216,8 @@ class SemanticResult(BaseModel):
     """Section 9 result.
 
     Top-level error ``{"error": "No generated text available"}`` round-trips
-    via the Optional fields. ``per_block_semantic`` is only populated by
-    v2 runs; older baseline snapshots omit it.
+    via the Optional fields. ``per_block_semantic`` is optional because
+    banked baseline snapshots do not carry it.
     """
 
     model_config = _FORBID

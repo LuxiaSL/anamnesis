@@ -5,7 +5,7 @@ handed a reference batch, a candidate batch, an independent repeat of the candid
 and a ruler; it renders the gates. Everything it can get wrong is a way of being
 accidentally generous, so almost every test here asserts a refusal.
 
-The gate order is load-bearing. Repeatability (G0) is evaluated first and, when it
+The gate order is load-bearing. Repeatability is evaluated first and, when it
 fails, the agreement gate reports `None` rather than a boolean — a candidate whose own
 repeat differs has not been measured, and `False` would misstate what is known. The
 same distinction returns at the row level: a row whose bound is a declared lower bound
@@ -34,6 +34,13 @@ import numpy as np
 import pytest
 
 from anamnesis.extraction.equivalence.fidelity import (
+    AGREEMENT,
+    BANKED_GATE_KEYS,
+    COVERED,
+    DOWNSTREAM_PRESERVED,
+    REPEATABLE,
+    SINGLE_LANE,
+    WITHIN_MEMORY,
     DownstreamAnchor,
     FidelityError,
     ReplayBatch,
@@ -45,6 +52,7 @@ from anamnesis.extraction.equivalence.fidelity import (
     verify_memory,
     verify_vectors,
     verify_within_tol,
+    read_gate_receipt,
 )
 
 
@@ -112,8 +120,8 @@ def test_identical_input_null_common_shift_still_fails_literal_condition_gate(ev
         cpu.features[0] - cpu.features[1], gpu.features[0] - gpu.features[1]
     )
     result = verify_vectors(cpu, gpu, repeat, ruler)
-    assert result["G0"] is True
-    assert result["G1"] is False
+    assert result[REPEATABLE] is True
+    assert result[AGREEMENT] is False
     assert result["rows"][0]["bound"] == 0
     assert result["rows"][0]["floor_c"] < ruler.floor_b[cpu.keys[0]]
     assert result["max_feature_sigma_error"] < 0.1
@@ -123,7 +131,7 @@ def test_identical_input_null_common_shift_still_fails_literal_condition_gate(ev
         identical_input_zero_pairs=frozenset(cpu.keys[:2]),
         condition_manifest_sha256="a" * 64,
     )
-    assert verify_vectors(cpu, gpu, repeat, ruled)["G1"] is True
+    assert verify_vectors(cpu, gpu, repeat, ruled)[AGREEMENT] is True
     different_inputs = list(cpu.input_sha256)
     different_inputs[1] = "f" * 64
     with pytest.raises(FidelityError, match="inputs differ"):
@@ -146,7 +154,7 @@ def test_cpu_self_passes_all_vector_gates(evidence):
     cpu, _, _, ruler = evidence
     other = replace(cpu, replay_ids=tuple(f"repeat{i}" for i in range(6)))
     result = verify_vectors(cpu, cpu, other, ruler)
-    assert result["G0"] and result["G1"] and result["G4"]
+    assert result[REPEATABLE] and result[AGREEMENT] and result[SINGLE_LANE]
     assert [t["n"] for t in result["terciles"]] == [2, 2, 2]
 
 
@@ -176,18 +184,18 @@ def test_ratified_sweep_composition_is_scoped(evidence):
     result = verify_sweep_coverage(gpu, gpu.keys, regimes, sweep)
     bounds = dict.fromkeys(gpu.keys, (299, 427))
     bank = verify_bank_scope_coverage(gpu, gpu.keys, regimes, bounds, "a" * 64)
-    assert bank["G3"] and not bank["wider_scope_certified"]
+    assert bank[COVERED] and not bank["wider_scope_certified"]
     with pytest.raises(FidelityError, match="geometry"):
         verify_bank_scope_coverage(
             gpu, gpu.keys, regimes, dict.fromkeys(gpu.keys, (64, 192)), "a" * 64
         )
-    assert result["G3"] is True
+    assert result[COVERED] is True
     assert result["consumer_scope"] == "banked regime only"
     with pytest.raises(FidelityError, match="lane differs"):
         verify_sweep_coverage(gpu, gpu.keys, regimes, dict(sweep, lane_id="other"))
     assert not verify_sweep_coverage(
         gpu, gpu.keys, regimes, dict(sweep, independent_repeats_exact=False)
-    )["G3"]
+    )[COVERED]
     with pytest.raises(FidelityError, match="missing bank regime"):
         verify_sweep_coverage(gpu, gpu.keys, {"E": gpu.keys}, sweep)
 
@@ -199,7 +207,7 @@ def test_known_bad_path_distance_fails_despite_per_feature_pass(evidence):
     result = verify_vectors(
         cpu, replace(gpu, features=changed), replace(repeat, features=changed), ruler
     )
-    assert result["G0"] and not result["G1"]
+    assert result[REPEATABLE] and not result[AGREEMENT]
     assert result["max_feature_sigma_error"] < 0.1
     assert result["terciles"][2]["passed"] is False
 
@@ -212,7 +220,7 @@ def test_known_bad_coordinate_fails_even_with_large_path_bound(evidence):
     result = verify_vectors(
         cpu, replace(gpu, features=changed), replace(repeat, features=changed), ruler
     )
-    assert result["G0"] and not result["G1"]
+    assert result[REPEATABLE] and not result[AGREEMENT]
     assert result["rows"][0]["floor_c"] < result["rows"][0]["bound"]
 
 
@@ -221,7 +229,7 @@ def test_repeat_failure_stops_before_cross_gate_including_signed_zero(evidence):
     changed = repeat.features.copy()
     changed[0, 0] = -0.0
     result = verify_vectors(cpu, gpu, replace(repeat, features=changed), ruler)
-    assert result["G0"] is False and result["G1"] is None
+    assert result[REPEATABLE] is False and result[AGREEMENT] is None
 
 
 @pytest.mark.parametrize(
@@ -240,7 +248,7 @@ def test_bad_metadata_refused(evidence, change, match):
         verify_vectors(cpu, replace(gpu, **change), repeat, ruler)
 
 
-def test_same_capture_cannot_satisfy_g0(evidence):
+def test_same_capture_cannot_satisfy_repeatability(evidence):
     cpu, gpu, _, ruler = evidence
     with pytest.raises(FidelityError, match="same replay"):
         verify_vectors(cpu, gpu, gpu, ruler)
@@ -262,7 +270,7 @@ def test_reordering_rows_joins_by_full_key(evidence):
         name: getattr(gpu, name)[::-1]
         for name in ("features", "keys", "lane_ids", "input_sha256", "replay_ids")
     }
-    assert verify_vectors(cpu, replace(gpu, **fields), repeat, ruler)["G1"]
+    assert verify_vectors(cpu, replace(gpu, **fields), repeat, ruler)[AGREEMENT]
 
 
 def test_zero_condition_bound_is_not_silently_relaxed(evidence):
@@ -276,7 +284,7 @@ def test_zero_condition_bound_is_not_silently_relaxed(evidence):
     changed[0, 0] = 1e-8
     assert not verify_vectors(
         cpu, replace(gpu, features=changed), replace(repeat, features=changed), ruler
-    )["G1"]
+    )[AGREEMENT]
 
 
 def test_anchor_null_by_rule_is_explicit_and_keeps_path_bound(evidence):
@@ -300,7 +308,7 @@ def test_anchor_null_by_rule_is_explicit_and_keeps_path_bound(evidence):
     result = verify_vectors(
         cpu, replace(gpu, features=changed), replace(repeat, features=changed), ruled
     )
-    assert result["G1"]
+    assert result[AGREEMENT]
     assert result["rows"][0]["contrast_status"] == "null-by-rule"
     assert result["rows"][0]["condition_distance"] is None
     assert result["rows"][0]["bound"] == ruler.floor_b[key]
@@ -315,7 +323,7 @@ def test_lower_bound_is_labeled_and_insufficiency_is_not_failure(evidence):
         floor_proof_sha256=dict.fromkeys(ruler.reference_keys, "1" * 64),
     )
     result = verify_vectors(cpu, gpu, repeat, ruled)
-    assert result["G1"]
+    assert result[AGREEMENT]
     assert result["rows"][0]["floor_b"] is None
     assert result["rows"][0]["floor_b_lower_bound"] == 0.05
     changed = gpu.features.copy()
@@ -323,7 +331,7 @@ def test_lower_bound_is_labeled_and_insufficiency_is_not_failure(evidence):
     result = verify_vectors(
         cpu, replace(gpu, features=changed), replace(repeat, features=changed), ruled
     )
-    assert result["G1"] is None
+    assert result[AGREEMENT] is None
     assert result["rows"][0]["requires_full_floor"]
 
 
@@ -347,7 +355,7 @@ def test_null_se_warning_does_not_weaken_hard_gate():
         "b" * 64,
         flag_se_sampling_scale=True,
     )
-    assert result["G2"] and result["se_change_warning"]
+    assert result[DOWNSTREAM_PRESERVED] and result["se_change_warning"]
     assert 0.036 < result["se_sampling_scale_in_reference_se"] < 0.037
     candidate[0, 0] = 0.3
     assert not verify_downstream(
@@ -359,7 +367,7 @@ def test_null_se_warning_does_not_weaken_hard_gate():
         statistic,
         "b" * 64,
         flag_se_sampling_scale=True,
-    )["G2"]
+    )[DOWNSTREAM_PRESERVED]
 
 
 def test_coverage_and_memory_are_mandatory(evidence):
@@ -368,7 +376,7 @@ def test_coverage_and_memory_are_mandatory(evidence):
     cover = verify_coverage(
         gpu, ruler.reference_keys, {"near-floor": [gpu.keys[0]], "short": []}
     )
-    assert not cover["G3"]
+    assert not cover[COVERED]
     mem = verify_memory(
         {"replay": [101]},
         {"replay": [100]},
@@ -376,12 +384,12 @@ def test_coverage_and_memory_are_mandatory(evidence):
         metric="reserved",
         baseline_sha256="a" * 64,
     )
-    assert not mem["G5"]
-    assert not verify_within_tol(vec, {"G2": True}, cover, mem)["passed"]
-    assert not verify_within_tol(vec, {}, {"G3": True}, {"G5": True})["passed"]
+    assert not mem[WITHIN_MEMORY]
+    assert not verify_within_tol(vec, {DOWNSTREAM_PRESERVED: True}, cover, mem)["passed"]
+    assert not verify_within_tol(vec, {}, {COVERED: True}, {WITHIN_MEMORY: True})["passed"]
 
 
-def test_g2_pinned_anchor_and_matched_cohort():
+def test_downstream_pinned_anchor_and_matched_cohort():
     # Controlled statistic isolates gate behavior from the owner's tested estimator.
     def stat(d, c):
         return SimpleNamespace(point=float(d.mean()), se=float(d.std()))
@@ -392,14 +400,41 @@ def test_g2_pinned_anchor_and_matched_cohort():
     anchor = DownstreamAnchor(
         float(d.mean()), float(d.std()), docs, clusters, "a" * 64, "b" * 64
     )
-    assert verify_downstream(d, d, docs, clusters, anchor, stat, "b" * 64)["G2"]
+    assert verify_downstream(d, d, docs, clusters, anchor, stat, "b" * 64)[DOWNSTREAM_PRESERVED]
     assert not verify_downstream(
         d, d + anchor.se, docs, clusters, anchor, stat, "b" * 64
-    )["G2"]
-    assert not verify_downstream(d, d * 2, docs, clusters, anchor, stat, "b" * 64)["G2"]
+    )[DOWNSTREAM_PRESERVED]
+    assert not verify_downstream(d, d * 2, docs, clusters, anchor, stat, "b" * 64)[DOWNSTREAM_PRESERVED]
     with pytest.raises(FidelityError, match="cohort"):
         verify_downstream(d, d, docs[::-1], clusters, anchor, stat, "b" * 64)
     with pytest.raises(FidelityError, match="reproduce"):
         verify_downstream(
             d, d, docs, clusters, replace(anchor, point=99.0), stat, "b" * 64
         )
+
+
+def test_banked_gate_keys_read_forward(evidence):
+    """A receipt banked under the short gate keys combines like a fresh one."""
+    cpu, gpu, repeat, ruler = evidence
+    fresh = verify_vectors(cpu, gpu, repeat, ruler)
+    banked = {
+        {v: k for k, v in BANKED_GATE_KEYS.items()}.get(key, key): value
+        for key, value in fresh.items()
+    }
+    assert "G0" in banked and REPEATABLE not in banked
+    assert read_gate_receipt(banked) == fresh
+    assert read_gate_receipt(fresh) == fresh, "current names pass through untouched"
+    downstream = {"G2": True, "point_change_in_reference_se": 0.0}
+    coverage, memory = {"G3": True}, {"G5": True}
+    combined = verify_within_tol(banked, downstream, coverage, memory)
+    assert combined["gates"] == verify_within_tol(
+        fresh, {DOWNSTREAM_PRESERVED: True}, {COVERED: True}, {WITHIN_MEMORY: True}
+    )["gates"]
+    assert set(combined["gates"]) == set(BANKED_GATE_KEYS.values())
+    assert combined["downstream"]["point_change_in_reference_se"] == 0.0
+
+
+def test_a_verdict_under_both_spellings_must_agree():
+    assert read_gate_receipt({"G3": True, COVERED: True}) == {COVERED: True}
+    with pytest.raises(FidelityError, match="two different verdicts"):
+        read_gate_receipt({"G3": True, COVERED: False})
