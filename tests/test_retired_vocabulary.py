@@ -143,9 +143,15 @@ def test_every_exemption_is_still_earning_it() -> None:
     assert stale == [], f"exemptions with nothing left to exempt: {stale}"
 
 
-@pytest.mark.parametrize("document", ["README.md", "CONTRIBUTING.md"])
+@pytest.mark.parametrize(
+    "document", ["README.md", "CONTRIBUTING.md", "docs/ARCHITECTURE.md"]
+)
 def test_the_facing_documents_do_not_teach_the_retired_vocabulary(document: str) -> None:
-    """``PORT-MAP.md`` is deliberately absent: mapping the old names is its job."""
+    """Every document a newcomer reads first, held to the rule the code is held to.
+
+    These three are outside the G3 checkers' scope, which is python prose, so the one
+    mechanical guard on what they teach is here.
+    """
     pattern = retired_pattern()
     text = (REPO_ROOT / document).read_text(encoding="utf-8")
     offenders = [line for line in text.splitlines() if pattern.search(line)]
