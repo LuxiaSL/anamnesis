@@ -132,7 +132,9 @@ your branch and at the point it left `main`. Adding tests, adding code, or delet
 together with its tests all pass: the suite runs at about half the size of the code, so code
 removed with its own tests takes out roughly two code lines for every test line. What fails is a
 suite that shrinks while the code it covered stays. If it fails, either restore the tests or
-delete the code they covered in the same change.
+delete the code they covered in the same change. Merging duplicate tests without touching the code
+fails too, because the line counts cannot tell it apart from dropped coverage; that is a change to
+waive in writing, with the reason beside the receipt.
 
 Each G3 rule is pinned by a corpus rather than by reading: `tests/test_gate_fixtures.py` holds the
 strings each checker must catch and the legitimate prose it must stay quiet on, one case per
