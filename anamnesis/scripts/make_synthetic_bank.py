@@ -69,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     logger.info("bank: %s", bank.directory)
     logger.info("lane: %s", bank.lane_id)
+    logger.info(
+        "every block carries the same separating strength per column, so a reading of "
+        "this bank still ranks blocks — by their widths and by the seed. That ranking "
+        "is a property of the fixture and says nothing about any substrate."
+    )
     return 0
 
 

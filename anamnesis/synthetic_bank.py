@@ -23,12 +23,15 @@ that construction and both matter:
 Two more things the construction is careful about, both so that reading the demo teaches
 the instrument rather than an artefact of the fixture:
 
-* every block gets the **same separating strength per column**, normalized so that width
-  does not decide which block looks informative. A fixture where one block happened to
-  win would read as a finding about substrates — and the only finding available here is
-  about the generator. This matters more than it sounds: the claim this project had to
-  revise was a claim that one bin was load-bearing, and a demo that staged it by accident
-  would teach a reader the superseded result off the first command they ran.
+* every block gets the **same separating strength per column**: each block's slice of the
+  mode offsets is rescaled to one root-mean-square, so no block carries more signal per
+  feature than another. That is the whole of the normalization, and it is less than equal
+  accuracy. Separation accumulates over a block's columns, so at equal per-column
+  strength a wider block separates the modes better, and among blocks of one width the
+  draw decides the rest. A per-block readout over this bank consequently ranks blocks by
+  their widths and by the seed. **Read any block ordering the demo prints as a property
+  of the fixture**: the generator has no substrates for an ordering to be about, and the
+  claim this project had to revise was exactly a claim that one bin was load-bearing.
 * every block is written, so no union is short and no section has to state an absence
   it would only be stating about the fixture.
 
@@ -59,7 +62,13 @@ from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
 from anamnesis.modes import RUN4_MODE_INDEX
 
 SYNTHETIC_LANE = "synthetic-bank-v1"
-"""The lane identity a synthetic bank carries, so it is never mistaken for a measurement."""
+"""The lane identity a synthetic bank carries, so it is never mistaken for a measurement.
+
+It carries :data:`anamnesis.analysis.lane_guard.DRAWN_LANE_MARKER`, which is how a
+reader states that what it reports is about a generator: a bank of drawn vectors is
+the same shape as a measured one, and the lane is the only place the difference is
+written down.
+"""
 
 DEFAULT_BLOCK_WIDTHS: dict[str, int] = {
     NORMS_AND_OUTPUT_STATS: 16,
@@ -164,10 +173,13 @@ def _mode_offsets(
 ) -> np.ndarray:
     """Per-mode offsets whose separating strength per column is equal in every block.
 
-    Drawing one vector across the full width would let the draw decide which block
-    separates best, and a reader would take that for a statement about substrates. So
-    each block's slice is rescaled to the same root-mean-square, leaving only width —
-    a stated property of the fixture — to differ between them.
+    Each block's slice is rescaled to the same root-mean-square, so no block carries
+    more signal per feature than another. Two things survive that rescaling and both
+    are properties of the fixture rather than of any substrate: width, because
+    separation accumulates over columns and the block widths differ, and the draw
+    itself, because five offsets in a dozen-odd dimensions land differently under
+    different seeds. So a readout over a bank written here ranks blocks, and the
+    ranking is about the widths and the seed.
     """
     width = max(stop for _, stop in spans.values())
     offsets = rng.normal(size=(n_modes, width))
