@@ -15,7 +15,10 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
+      # Full history, because G2 measures the change against the commit it starts from.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -29,10 +32,14 @@ jobs:
       - name: Tests
         run: pytest tests/
 
-      - name: G2 consolidation arithmetic
+      # A pull request is measured against the tip of the branch it targets; a push
+      # to main, against the commit main pointed at before the push.
+      - name: G2 test retention
+        env:
+          G2_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           mkdir -p receipts
-          python -m tools.g2_loc_report --repo . --json receipts/g2.json
+          python -m tools.check_test_retention --base "$G2_BASE" --head HEAD --json receipts/g2.json
 
       - name: G3 documentation timelessness
         run: |
