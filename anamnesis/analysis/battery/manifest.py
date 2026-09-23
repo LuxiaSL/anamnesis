@@ -135,7 +135,10 @@ class BatteryCell(BaseModel):
     )
     law_multiplier: float = Field(
         default=2.0,
-        description="Battery n as a multiple of the Stage-0 law n_min (A2 cells: 4.0).",
+        description=(
+            "Battery n as a multiple of the Stage-0 law n_min "
+            "(A2_instruction_vs_execution cells: 4.0)."
+        ),
     )
     confirmatory_cells: Optional[list[str]] = Field(
         default=None,

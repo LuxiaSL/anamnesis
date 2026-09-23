@@ -19,7 +19,7 @@ Two modules:
 * :mod:`~anamnesis.extraction.equivalence.fidelity` — the evidence checks. Given
   a reference batch, a candidate batch, an independent repeat of the candidate,
   and a ruler the caller supplies, it renders the gate verdicts. It fits nothing:
-  a threshold is a ruled constant, an unexecuted gate never reads as a pass, and
+  a threshold is a fixed module constant, an unexecuted gate never reads as a pass, and
   an insufficient bound is reported as needing more work rather than as failure.
 * :mod:`~anamnesis.extraction.equivalence.path_floor` — cheap sufficient
   certificates for the per-row path bound. Because the L2 norm of a coordinate

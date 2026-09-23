@@ -1,6 +1,6 @@
 """Fail-closed, GPU-independent evidence checks for extraction lane equivalence.
 
-Thresholds are ruled constants, not caller tuning knobs. The caller supplies
+Thresholds are fixed module constants, not caller tuning knobs. The caller supplies
 immutable cohort/calibration/baseline receipts. This module never fits a ruler,
 chooses a condition comparator, or certifies absent coverage.
 """
@@ -139,7 +139,7 @@ class Ruler:
         )
         _require(
             bool(np.all(self.weights == self.weights[0])),
-            "nonuniform weights not ratified",
+            "nonuniform weights: the ruler weights every feature equally",
         )
         for name in (
             "standardizer_sha256",
@@ -489,7 +489,7 @@ def verify_sweep_coverage(
     regime_rows: Mapping[str, Sequence[RowKey]],
     sweep: dict,
 ) -> dict:
-    """Ratified 70B G3 replacement; no automatic calibrated-scope extension.
+    """G3 for a 70B lane, by cache-length sweep; no automatic calibrated-scope extension.
 
     The caller must supply a sweep recomputed from its pinned arrays, not an
     unchecked saved pass flag. This checks its composition with bank coverage.
@@ -542,7 +542,11 @@ def verify_bank_scope_coverage(
     span_bounds: Mapping[RowKey, tuple[int, int]],
     ruling_sha256: str,
 ) -> dict:
-    """Explicitly ratified bank scope; does not certify the sweep envelope."""
+    """G3 over the bank scope only, pinned by the scope decision's digest.
+
+    ``ruling_sha256`` is the SHA-256 of the caller's record fixing that scope. This
+    does not certify the sweep envelope.
+    """
     _digest(ruling_sha256, "bank-scope ruling")
     actual.validate()
     keys = set(required_keys)
@@ -552,7 +556,7 @@ def verify_bank_scope_coverage(
             263 <= start <= 299 and end - start == 128
             for start, end in span_bounds.values()
         ),
-        "G3: outside ratified bank geometry",
+        "G3: outside the bank geometry (cache 263-299, continuation 128)",
     )
     required = {
         "near-floor-B-E",

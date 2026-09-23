@@ -289,8 +289,9 @@ def law_table_md(reports: Sequence[FloorReport], model: str) -> str:
     lines = [
         f"# Stage-0 law table — {model}",
         "",
-        "Battery n per cell = 2 x n_min (A2 cells 4x; ratified). alpha_test at arm-prereg",
-        "time = 0.05 / m with m = that arm's pre-registered confirmatory cell count.",
+        "Battery n per cell = 2 x n_min (4x for A2_instruction_vs_execution cells).",
+        "alpha_test = 0.05 / m, with m = the confirmatory cell count declared for that arm",
+        "before it runs.",
         "Shift reading: an arm sits at k=2x the floor median, so the effect it must resolve",
         "is (k-1) * median / sigma_floor. A rank test needs n / 0.955 of these.",
         "",
@@ -325,13 +326,13 @@ def law_table_md(reports: Sequence[FloorReport], model: str) -> str:
         lines.append("")
         lines.append(
             "PLAN column = max(sigma-based, MAD-based) n_min at alpha=0.05 — conservative "
-            "under heavy tails; battery n = 2x PLAN (A2 4x)."
+            "under heavy tails; battery n = 2x PLAN (4x for A2_instruction_vs_execution)."
         )
         lines.append("")
         lines.append(
             "*EXACT = the floor distribution is bitwise ZERO on replay-deterministic "
-            "hardware (identical signature digests across devices and repeats, observed "
-            "2026-07-12). Any nonzero matched-token delta then exceeds the floor, the cell's "
+            "hardware (identical signature digests across devices and repeats). Any "
+            "nonzero matched-token delta then exceeds the floor, the cell's "
             "n is set by the effect side (dose-ladder resolution), and the matched-token "
             "prediction sharpens to literal bitwise equality."
         )
