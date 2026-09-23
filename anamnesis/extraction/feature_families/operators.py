@@ -140,8 +140,9 @@ def stft_features(
 
     # Pin nperseg to a constant so the frequency grid is identical across
     # generations of different length; zero-pad series shorter than the window.
-    # For our generations T >> nperseg, so this is a no-op in practice (and a
-    # robustness fix for short sequences, e.g. kotodama turns).
+    # Padding is inert whenever the series is longer than the window, which is the
+    # ordinary case; what it buys is that a series shorter than one window stays
+    # comparable to the others instead of being spectrally undefined.
     if nperseg < 2:
         return np.zeros(5, dtype=np.float32), feature_names
     if T < nperseg:

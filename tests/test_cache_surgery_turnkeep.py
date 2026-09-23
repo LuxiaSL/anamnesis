@@ -1,8 +1,11 @@
-"""CPU smoke for the A4b turn-keep port (P3) — cache_surgery dialogue eviction geometry.
+"""CPU smoke for the dialogue-eviction geometry in
+``anamnesis.extraction.replay.cache_surgery``.
 
-Validates the utilities ported from kv-rotation chat.py: turn_token_spans (prefix-stable span
-recovery), oldest_turns_to_evict (protections + oldest-first + unreachable-not-clipped), and
-turn_keep_indices (sinks + span removal). No model/GPU — a mock prefix-stable tokenizer.
+Covers turn_token_spans (prefix-stable span recovery), oldest_turns_to_evict
+(protections honoured, oldest first, unreachable spans not clipped) and
+turn_keep_indices (sinks plus span removal). No model and no accelerator: the
+tokenizer is a mock whose prefixes are stable, which is the only property these
+utilities need of one.
 """
 from __future__ import annotations
 

@@ -63,6 +63,14 @@ or a pointer whose substance lives somewhere the reader cannot follow. A buried 
 same failure as a stale date: it makes the reader depend on context they do not have, and it ages
 into a dead end.
 
+It also does not mean a machine, a host, an account, a scheduler, or a sibling repository. A
+reader has no login on the box that taught us something, and a comment crediting that box states
+provenance where the constraint belongs — the thread budget, the memory ceiling, the shared-core
+arithmetic. Those hold wherever the code runs, which is what made them worth a comment in the
+first place. Unlike the rules above, this one is a reviewer's catch rather than a checker's, by
+design: a public gate would have to enumerate the names, and publishing the list defeats the
+point of keeping them out.
+
 It also does not mean a **provenance citation** — a `§` section of a document that is not here, a
 named arm or milestone code, a pre-registration, an addendum or codicil, a bare item code like
 `14e`, a commit hash. The code is the receipt for what the code does, and git is the receipt for
@@ -88,6 +96,9 @@ citation nobody can open.
 
 # Bad — defers the meaning to a conversation.
 # Kept for the reason discussed when this was ruled on.
+
+# Bad — credits the machine instead of stating the budget it implies.
+# One BLAS thread per pool worker (the shared-box convention on our cluster).
 
 # Bad — cites the plan instead of stating the constraint.
 # One analysis template per arm x model (prereg §6b).

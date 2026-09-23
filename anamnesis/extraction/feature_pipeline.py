@@ -511,8 +511,10 @@ def _default_n_workers() -> int:
 def _pin_blas_single_thread() -> None:
     """Pool-worker initializer: pin BLAS to 1 thread per worker.
 
-    Unpinned pools oversubscribe cores (node1 convention: OMP/OPENBLAS/MKL
-    _NUM_THREADS=1 per worker). Env vars cover spawn-started workers;
+    Each worker's BLAS would otherwise open a thread pool of its own, so a pool of
+    n workers oversubscribes the machine by whatever that pool's width is. Pinning
+    to one thread per worker leaves the parallelism to the pool, which is the only
+    layer that knows how many workers there are. Env vars cover spawn-started workers;
     threadpoolctl (when installed) also covers fork-started workers, whose
     BLAS pools were already initialized before the fork.
     """
@@ -562,7 +564,8 @@ def recompute_all_features(
         Number of parallel workers. None (default) resolves to a cpu-based
         count (cpu_count - 2, capped at 32); pass 1 to force sequential.
         Each worker loads one sample (~280 MB), so memory ≈ n_workers × 300 MB.
-        Pool workers pin BLAS to 1 thread (node1 shared-box convention).
+        Pool workers pin BLAS to 1 thread, so the parallelism is the pool's and
+        not each worker's.
 
     Returns
     -------
