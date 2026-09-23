@@ -48,9 +48,10 @@ Everything below is orientation around those five.
 refactor this package will not accept.
 
 - **`extraction/model_loader.py`** — the checkpoint on a device, with hooks on it. Loads
-  the model and tokenizer, registers forward hooks on the `k_proj` projection modules,
-  and manages hook lifetime. It knows nothing model-specific: every architectural fact
-  comes from a `ModelConfig` preset.
+  the model and tokenizer with the eager attention kernel, registers forward hooks on the
+  projection modules a capture reads — `k_proj` for keys, and `q_proj`, `v_proj` and
+  `gate_proj` where those substrates are wanted — and manages hook lifetime. It knows
+  nothing model-specific: every architectural fact comes from a `ModelConfig` preset.
 - **`extraction/state_extractor.py`** — the numeric anchor. Raw arrays in, a named
   feature vector out, **with no torch import, no model awareness and nothing beyond numpy,
   scipy and this package's own configuration on its import line.** That is a design
@@ -127,19 +128,18 @@ lane_id = "torch-eager-reduce-v1-" + sha256(json(identity, sort_keys=True))[:20]
 
 The identity holds a SHA-256 of the bytes of each of the five lane source files —
 `features.py`, `ops.py`, `attention.py`, `families.py`, `batch_layout.py` — alongside the
-extraction and family configuration, the calibration digest, the device type, the replay
-path, the torch, transformers, numpy and CUDA-runtime versions, the CUBLAS workspace
-setting, a digest of the feature-name schema, and the deterministic-algorithms, TF32 and
-preferred-BLAS flags.
+extraction and family configuration, the calibration digest, the device type, which replay
+path the lane runs (`cached` or `full`), the torch, transformers, numpy and CUDA-runtime
+versions, the CUBLAS workspace setting, a digest of the feature-name schema, and the
+deterministic-algorithms, TF32 and preferred-BLAS flags.
 
 The consequence a contributor needs to know in advance: **a change to the bytes of any of
 those five files changes every `lane_id` the lane stamps, so every already-banked corpus
 carries an identity the changed code cannot reproduce, and re-banking is the only way to
-join the two.** Signatures banked under different lanes are not two
-measurements of the same quantity, and `anamnesis/analysis/lane_guard.py` refuses the join
-on the read side — every loader that assembles a matrix from more than one file passes its
-metadata through it first. Untagged historical banks stay readable and cannot be mixed with
-tagged ones.
+join the two.** Signatures banked under different lanes are not two measurements of the
+same quantity, and `anamnesis/analysis/lane_guard.py` refuses the join on the read side —
+every loader that assembles a matrix from more than one file passes its metadata through it
+first. Untagged historical banks stay readable and cannot be mixed with tagged ones.
 
 Whether a given machine's lane agrees with the anchor is a property of the machine, not of
 the code: floating-point reduction order differs across BLAS builds and thread counts.
@@ -275,10 +275,14 @@ Four gates guard a change, and each is a command you can run yourself. They live
 | G3 documentation — the two documentation rules, over comments, docstrings and the message a `raise` or a log says out loud | `tools/check_timelessness.py` and `tools/check_referents.py` |
 | G4 import closure — every module reachable from a command or a test; no orphans | `tools/check_import_closure.py` |
 
-`CONTRIBUTING.md` states the commands, which two run in CI and which are attached to a pull
-request as receipts, and — read this before writing any prose here — the documentation rule
-G3 enforces. `tools/surface_report.py` reports the size of the codebase in code tokens and
-documentation words; it is a trend instrument, never a gate.
+`CONTRIBUTING.md` states the command for each and — read this before writing any prose
+here — the documentation rule G3 enforces. `.github/workflows/gates.yml` is what runs on a
+pull request: the suite, G2, both halves of G3 and G4, on every supported interpreter, plus
+a wheel built and installed outside the checkout so an import that only worked from the
+source tree fails. G1 reads banked signatures, which a runner has no copy of, so it runs
+where the data is and its receipt is attached instead. `tools/surface_report.py` reports the
+size of the codebase in code tokens and documentation words; it is a trend instrument, never
+a gate.
 
 ## A first hour
 
