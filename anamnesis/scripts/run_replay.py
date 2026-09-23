@@ -44,7 +44,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names
 from anamnesis.extraction.interventions import injection_fields
 
 MODULE = "anamnesis.scripts.run_replay"
@@ -53,7 +53,7 @@ MULTICELL_POINTER = f"python -m {MODULE} --cells-json <cells.json> --gpus <devic
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument("--model-path", required=True, help="Local checkpoint directory")
     p.add_argument("--calib-dir", type=Path, required=True)
     p.add_argument("--run-dir", type=Path, default=None, help="One cell's output directory")

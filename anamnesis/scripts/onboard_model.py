@@ -22,7 +22,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from anamnesis.config import MODEL_PRESETS, resolve_preset
+from anamnesis.config import preset_names, resolve_preset
 from anamnesis.extraction.onboarding import OnboardingError, onboard_model
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="onboard_model.py", description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument(
         "--model-path", default=None,
         help="Local snapshot to load instead of the preset's identifier",

@@ -38,7 +38,7 @@ import logging
 import sys
 from pathlib import Path
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ def parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="stage", required=True)
 
     replays = sub.add_parser("replays", help="plan and run the stratified faithfulness replays")
-    replays.add_argument("--model", choices=list(MODEL_PRESETS), required=True)
+    replays.add_argument("--model", choices=list(preset_names()), required=True)
     replays.add_argument("--model-path", required=True, help="Local checkpoint directory")
     replays.add_argument(
         "--floor-run-dir", type=Path, required=True,

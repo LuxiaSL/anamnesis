@@ -24,7 +24,7 @@ import gc
 import logging
 from pathlib import Path
 
-from anamnesis.config import MODEL_PRESETS, GenerationConfig, ModelPreset, resolve_preset
+from anamnesis.config import GenerationConfig, ModelPreset, preset_names, resolve_preset
 from anamnesis.extraction import calibration_fit
 from anamnesis.extraction.calibration import PCA_MODEL_NAME, POSITIONAL_MEANS_NAME
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument("--model-path", default=None, help="Local checkpoint; default: the preset's id")
     p.add_argument(
         "--out-dir", type=Path, default=None, help="Default: the preset's calibration directory"

@@ -31,7 +31,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from anamnesis.config import MODEL_PRESETS, ExtractionConfig, FeaturePipelineConfig, resolve_preset
+from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, preset_names, resolve_preset
 
 MODULE = "anamnesis.scripts.run_recompute"
 
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument("--run-dir", type=Path, required=True, help="Run directory holding the tensors")
     p.add_argument("--calib-dir", type=Path, required=True)
     p.add_argument(

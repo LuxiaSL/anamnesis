@@ -48,7 +48,7 @@ from pathlib import Path
 
 import numpy as np
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names, resolve_preset
 from anamnesis.steering import gates, readouts, screens, vectors
 
 logger = logging.getLogger("steer_vectors")
@@ -66,7 +66,7 @@ def parser() -> argparse.ArgumentParser:
     sweep.add_argument("--out-json", type=Path, required=True)
 
     build = sub.add_parser("build", help="bank steering vectors at the chosen sites")
-    build.add_argument("--model", choices=sorted(MODEL_PRESETS), required=True)
+    build.add_argument("--model", choices=sorted(preset_names()), required=True)
     build.add_argument("--model-path", required=True)
     build.add_argument("--sites", required=True, help="comma-separated injection layer indices")
     build.add_argument("--stage", choices=("contrast", "whitened"), default="contrast")
@@ -84,7 +84,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--out-dir", type=Path, required=True)
 
     screen = sub.add_parser("screen", help="covariance screen, band mass, and a banked eigenbasis")
-    screen.add_argument("--model", choices=sorted(MODEL_PRESETS), required=True)
+    screen.add_argument("--model", choices=sorted(preset_names()), required=True)
     screen.add_argument("--model-path", required=True)
     screen.add_argument("--floor-run", type=Path, required=True)
     screen.add_argument("--vectors", type=Path, required=True, help="vector bank directory")
@@ -97,7 +97,7 @@ def parser() -> argparse.ArgumentParser:
     screen.add_argument("--out-dir", type=Path, required=True)
 
     gate = sub.add_parser("gate", help="the matched-token on-policy pilot (bar 0.85)")
-    gate.add_argument("--model", choices=sorted(MODEL_PRESETS), required=True)
+    gate.add_argument("--model", choices=sorted(preset_names()), required=True)
     gate.add_argument("--model-path", required=True)
     gate.add_argument("--floor-run", type=Path, required=True)
     gate.add_argument("--vectors", type=Path, required=True, help="vector bank directory")
@@ -136,7 +136,7 @@ def capture_model(args: argparse.Namespace) -> object:
     """The model a capture leg reads residuals out of, in its preset's dtype."""
     from anamnesis.extraction.model_loader import load_unhooked_model
 
-    return load_unhooked_model(args.model_path, MODEL_PRESETS[args.model].torch_dtype)
+    return load_unhooked_model(args.model_path, resolve_preset(args.model).torch_dtype)
 
 
 def run_sweep(args: argparse.Namespace) -> None:
@@ -160,7 +160,7 @@ def run_sweep(args: argparse.Namespace) -> None:
 
 
 def run_build(args: argparse.Namespace) -> None:
-    preset = MODEL_PRESETS[args.model]
+    preset = resolve_preset(args.model)
     sites = [int(s) for s in args.sites.split(",")]
     model = capture_model(args)
     bank: dict[str, object] = {}

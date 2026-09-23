@@ -80,7 +80,8 @@ from anamnesis.analysis.battery.gates import (
     require_stamp,
 )
 from anamnesis.analysis.battery.magnitude import decomposed_magnitude
-from anamnesis.analysis.battery.manifest import MODEL_META, ModelMeta
+from anamnesis.analysis.battery.manifest import ModelMeta, model_meta, model_meta_all
+from anamnesis.config.models import resolve_preset
 from anamnesis.analysis.battery.report import CellResult, VisibilityMap
 from anamnesis.analysis.battery.text_decode import BYTE_DEC, byte_decoder, maybe_decode
 
@@ -462,13 +463,30 @@ def test_only_pre_registered_confirmatory_cells_inflate_the_family_size() -> Non
 
 
 def test_every_onboarded_model_declares_its_layers_and_its_floor_bank() -> None:
-    assert set(MODEL_META) >= {"3b", "8b", "qwen-7b", "olmo2-7b", "gemma3-27b", "dsv2-lite"}
-    for key, meta in MODEL_META.items():
+    meta_by_label = model_meta_all()
+    assert set(meta_by_label) >= {"3b", "8b", "qwen-7b", "olmo2-7b", "gemma3-27b", "dsv2-lite"}
+    for key, meta in meta_by_label.items():
         assert isinstance(meta, ModelMeta)
         assert meta.label == key
         assert meta.n_layers > 0
         assert meta.stage0_dir.startswith("vmb_stage0_")
         assert meta.native_temperature > 0
+
+
+def test_battery_metadata_reads_the_registry_rather_than_restating_it() -> None:
+    """Depth and native temperature have one home, which is the model's row."""
+    for label, meta in model_meta_all().items():
+        row = resolve_preset(label)
+        assert meta.n_layers == row.num_layers
+        assert meta.native_temperature == row.temperature
+        assert meta.stage0_dir == row.stage0_dir
+        assert model_meta(label) == meta
+
+
+def test_a_model_with_no_banked_floors_refuses_rather_than_inventing_a_directory() -> None:
+    row = resolve_preset("8b").model_copy(update={"name": "probe", "stage0_dir": None})
+    with pytest.raises(ValueError, match="no stage0_dir"):
+        ModelMeta.from_preset(row)
 
 
 # ── Wave-1 containers ─────────────────────────────────────────────────────────

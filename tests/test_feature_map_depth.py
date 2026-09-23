@@ -18,8 +18,12 @@ from __future__ import annotations
 
 import pytest
 
+from anamnesis.config.models import (
+    layer_counts_by_run_prefix,
+    load_registry,
+    resolve_preset,
+)
 from anamnesis.feature_map import (
-    MODEL_LAYERS,
     Band,
     FeatureMap,
     UnknownDepthError,
@@ -31,8 +35,29 @@ NAMES = ["res_norm_L2_mean", "attn_entropy_L16_mean", "gate_sparsity_L30_mean"]
 
 
 def test_a_known_run_takes_its_layer_count_from_the_model_it_names():
-    assert layers_for_run("8b_fat_01") == MODEL_LAYERS["8b"]
-    assert layers_for_run("3b_v2") == MODEL_LAYERS["3b"]
+    assert layers_for_run("8b_fat_01") == resolve_preset("8b").num_layers
+    assert layers_for_run("3b_v2") == resolve_preset("3b").num_layers
+
+
+def test_a_depth_is_the_registry_row_and_is_not_restated_beside_it():
+    """The prefix map reads each row's own count, so there is nothing to disagree."""
+    registry = load_registry()
+    counts = layer_counts_by_run_prefix()
+    for key, row in registry.presets.items():
+        assert counts[key] == row.num_layers, key
+        for prefix in row.run_prefixes:
+            assert counts[prefix] == row.num_layers, prefix
+    for alias, key in registry.aliases.items():
+        assert counts[alias] == registry.presets[key].num_layers, alias
+    for prefix, count in registry.run_depths.items():
+        assert prefix not in registry.presets, prefix
+        assert counts[prefix] == count, prefix
+    assert set(counts) == (
+        set(registry.presets)
+        | set(registry.aliases)
+        | set(registry.run_depths)
+        | {p for row in registry.presets.values() for p in row.run_prefixes}
+    )
 
 
 def test_the_longest_matching_prefix_answers():
@@ -41,9 +66,9 @@ def test_the_longest_matching_prefix_answers():
     Both happen to carry 27 layers, so the assertion is on which key was used
     rather than on the number, which is what would catch the next nested pair.
     """
-    nested = [k for k in MODEL_LAYERS if k.startswith("dsv2")]
+    nested = [k for k in layer_counts_by_run_prefix() if k.startswith("dsv2")]
     assert len(nested) > 1, "the nesting this rule exists for is gone; drop the rule too"
-    assert layers_for_run("dsv2_lite_m6") == MODEL_LAYERS["dsv2_lite"]
+    assert layers_for_run("dsv2_lite_m6") == resolve_preset("dsv2_lite").num_layers
 
 
 def test_an_unnamed_model_refuses_rather_than_assuming_a_depth():

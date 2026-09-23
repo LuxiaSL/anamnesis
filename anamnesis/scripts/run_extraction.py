@@ -25,7 +25,7 @@ import argparse
 import logging
 from typing import Any
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ to finish while someone watches."""
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument(
         "--modes", choices=list(MODE_SETS), default="run4",
         help="run4: the five format-controlled modes; mixed: the eight-mode set",

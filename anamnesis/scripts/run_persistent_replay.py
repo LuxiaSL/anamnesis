@@ -29,7 +29,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names
 
 MODULE = "anamnesis.scripts.run_persistent_replay"
 REPLAY_MODULE = "anamnesis.scripts.run_replay"
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument("--model-path", required=True, help="Local checkpoint directory")
     p.add_argument("--calib-dir", type=Path, required=True)
     p.add_argument("--work-dir", type=Path, required=True, help="Queue root, on node-local disk")
