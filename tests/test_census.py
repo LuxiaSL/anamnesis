@@ -200,7 +200,9 @@ def test_the_document_states_its_bars_and_runs_the_gate(tmp_path: Path) -> None:
     assert str(MEMBER_BAR) in document["bars"] and str(BORDERLINE_BAR) in document["bars"]
     assert "internals - max(content, likelihood)" in document["definition"]
     assert len(document["rows"]) == len(rows)
-    assert document["pending_and_appendix"], "rows not yet in the census stay visible"
+    assert set(document) == {"bars", "definition", "rows", "class_object"}, (
+        "the census carries only what it computes from records; nothing hand-written rides along"
+    )
     table = census_markdown(rows)
     data_rows = [line for line in table.splitlines() if line.startswith("| A")]
     assert any("\\|" in line for line in data_rows), (

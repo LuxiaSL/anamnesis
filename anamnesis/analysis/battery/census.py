@@ -75,36 +75,6 @@ MEMBER = "MEMBER"
 BORDERLINE = "BORDERLINE"
 EXCLUDED = "EXCLUDED"
 
-PENDING_AND_APPENDIX: tuple[dict[str, str], ...] = (
-    {
-        "row": "A2:cell-ii:unexecuted-instruction-carriage",
-        "status": "PENDING",
-        "note": "embargoed behind the length-matched prefix control (Wave-2); "
-                "enters the census when the control lands",
-    },
-    {
-        "row": "A4/exp11:P3 eviction-kind vs token-KL",
-        "status": "APPENDIX(pre-battery)",
-        "note": "banked at n=12, kv-rotation exp11 (prereg p=0.0029); re-enters as a "
-                "battery row when A4 runs; likelihood-rung analog = token-KL (exempt "
-                "from judge hardening)",
-    },
-    {
-        "row": "pre-battery:Run-1 uncertain/confident",
-        "status": "APPENDIX(pre-battery)",
-        "note": "phase-0 era; pointer only — no battery-grade rungs",
-    },
-    {
-        "row": "pre-battery:wolf (subliminal)",
-        "status": "APPENDIX(pre-battery)",
-        "note": "subliminal_anamnesis repo; behavioral metric was the false negative — "
-                "the class's founding exemplar; pointer only",
-    },
-)
-"""Rows that are not census rows yet, carried so their absence is a statement
-rather than a silence: one waiting on a control, three predating the battery."""
-
-
 def classify(gap: float) -> str:
     """Member, borderline or excluded, by the declared bars."""
     if gap >= MEMBER_BAR:
@@ -305,12 +275,10 @@ def census_document(rows: Sequence[CensusRow]) -> dict[str, Any]:
     reject_blind_judge_defense(payload)
     return {
         "bars": (
-            f"MEMBER >= {MEMBER_BAR}, BORDERLINE >= {BORDERLINE_BAR} "
-            "(declared implementation ruling; changeable by addendum only)"
+            f"MEMBER >= {MEMBER_BAR}, BORDERLINE >= {BORDERLINE_BAR}"
         ),
         "definition": "gap = internals - max(content, likelihood); the three rungs of record",
         "rows": payload,
-        "pending_and_appendix": [dict(entry) for entry in PENDING_AND_APPENDIX],
         "class_object": class_object(rows),
     }
 
@@ -345,9 +313,6 @@ def census_markdown(rows: Sequence[CensusRow]) -> str:
             f"| {_escape_cell(row.row)} | {row.model} | {row.content:.3f} | {row.likelihood:.3f} | "
             f"{row.internals:.3f} | {judge} | {row.gap:+.3f} | {row.status} |"
         )
-    lines += ["", "## Pending / appendix"]
-    for entry in PENDING_AND_APPENDIX:
-        lines.append(f"- **{_escape_cell(entry['row'])}** [{entry['status']}] — {entry['note']}")
     return "\n".join(lines)
 
 
@@ -381,7 +346,6 @@ __all__ = [
     "MEMBER",
     "MEMBER_BAR",
     "MODES",
-    "PENDING_AND_APPENDIX",
     "a1_rows",
     "a3_rows",
     "census_document",
