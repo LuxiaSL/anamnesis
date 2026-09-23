@@ -19,7 +19,7 @@ These tests cover the parts that make that refusal real:
   * the channel split, which separates the fixed-token part of a deformation from
     the part that only happens because the tokens changed.
 
-Three Wave-1 modules (``decomp``, ``dissoc``, and the report rollup) are typed
+Three modules (``decomp``, ``dissoc``, and the report rollup) are typed
 containers whose compute functions raise ``NotImplementedError``; their contracts
 are tested, and the unimplemented calls are asserted to say so rather than to
 return something plausible.
@@ -489,8 +489,8 @@ def test_a_model_with_no_banked_floors_refuses_rather_than_inventing_a_directory
         ModelMeta.from_preset(row)
 
 
-# ── Wave-1 containers ─────────────────────────────────────────────────────────
-def test_the_unimplemented_wave_one_readouts_say_so() -> None:
+# ── Unimplemented containers ──────────────────────────────────────────────────
+def test_the_unimplemented_readouts_say_so() -> None:
     report = FloorReport(model="3b", floor_type=FloorType.stochastic, n_gens=8,
                          n_pairs_total=12, corpus="outputs/battery/vmb_stage0_3b",
                          law=LawParams(), cells=[])

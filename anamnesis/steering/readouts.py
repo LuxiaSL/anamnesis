@@ -608,8 +608,8 @@ def write_json(path: Path | str, payload: Mapping[str, Any]) -> Path:
 # ── The qualitative readout ───────────────────────────────────────────────────
 DOSE_LADDER: tuple[float, ...] = (0.0, 0.03, 0.1, 0.3)
 """The doses a free-generation ladder banks. It stops at 0.3, and a mode-induction
-peak sits higher (analogy markers peaked at 0.45 in the wave-1 adjudication), so the
-strongest collected cell is pre-peak: the ladder shows a trend, not a ceiling."""
+peak sits higher (analogy markers peak near 0.45), so the strongest collected cell
+is pre-peak: the ladder shows a trend, not a ceiling."""
 
 QUALITATIVE_CHARS = 600
 """Characters shown per generation. Enough to read the register and the structure,
