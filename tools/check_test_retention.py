@@ -3,22 +3,23 @@
 
 The rule, per change
 --------------------
-Count physical lines in the Python files under ``tests/`` (the suite) and under
-``anamnesis/`` (the package), once at the base the change starts from and once
-at its head. Then:
+Count physical lines in the Python files under ``tests/`` (the suite) and in
+every other Python file (the code: the package, ``tools/``, anything else the
+suite covers), once at the base the change starts from and once at its head.
+Then:
 
 - If the suite did not shrink, the change passes.
-- If the suite shrank, the package must have shrunk by **at least as many
-  lines**. Otherwise the change fails.
+- If the suite shrank, the code must have shrunk by **at least as many lines**.
+  Otherwise the change fails.
 
 So deleting a module together with its tests passes: the suite runs at roughly
-half the package's size, which means code removed with its own tests takes
-about two package lines out for every test line, and the rule leaves that
-margin in hand. What fails is removing tests while the code they covered stays,
+half the size of the code, which means code removed with its own tests takes
+about two code lines out for every test line, and the rule leaves that margin
+in hand. What fails is removing tests while the code they covered stays,
 or removing tests while adding code. If your change fails, either the tests
 still describe code that exists — restore them — or the code they covered is
 gone too, in which case delete it in the same change. Consolidating duplicate
-tests without touching the package is a legitimate change this rule cannot tell
+tests without touching the code is a legitimate change this rule cannot tell
 apart from dropping coverage; that is what a written waiver beside the receipt
 is for.
 
@@ -50,7 +51,6 @@ from pathlib import Path
 from typing import Sequence, TextIO
 
 TESTS_ROOT = "tests"
-PACKAGE_ROOT = "anamnesis"
 SKIP_PARTS = frozenset({"__pycache__"})
 
 
@@ -64,11 +64,11 @@ class Snapshot:
 
     revision: str
     test_loc: int
-    package_loc: int
+    code_loc: int
 
     @property
     def ratio(self) -> float | None:
-        return None if self.package_loc == 0 else self.test_loc / self.package_loc
+        return None if self.code_loc == 0 else self.test_loc / self.code_loc
 
 
 @dataclass(frozen=True)
@@ -84,32 +84,34 @@ class RetentionReport:
         return self.head.test_loc - self.base.test_loc
 
     @property
-    def package_delta(self) -> int:
-        return self.head.package_loc - self.base.package_loc
+    def code_delta(self) -> int:
+        return self.head.code_loc - self.base.code_loc
 
     @property
     def passed(self) -> bool:
         if self.test_delta >= 0:
             return True
-        return -self.package_delta >= -self.test_delta
+        return -self.code_delta >= -self.test_delta
 
     def reason(self) -> str:
         """One sentence a contributor can act on."""
         if self.test_delta >= 0:
             return "the suite did not shrink"
         removed_tests = -self.test_delta
-        removed_package = -self.package_delta
+        removed_code = -self.code_delta
         if self.passed:
             return (
-                f"the suite shrank by {removed_tests} lines and the package by "
-                f"{removed_package}, at least as many"
+                f"the suite shrank by {removed_tests} lines and the code by "
+                f"{removed_code}, at least as many"
             )
-        if removed_package <= 0:
-            package_phrase = f"the package grew by {-removed_package} lines"
+        if removed_code < 0:
+            code_phrase = f"the code grew by {-removed_code} lines"
+        elif removed_code == 0:
+            code_phrase = "the code did not shrink"
         else:
-            package_phrase = f"the package shrank by only {removed_package}"
+            code_phrase = f"the code shrank by only {removed_code}"
         return (
-            f"the suite shrank by {removed_tests} lines while {package_phrase}; "
+            f"the suite shrank by {removed_tests} lines while {code_phrase}; "
             "restore the tests, or delete the code they covered in the same change"
         )
 
@@ -118,8 +120,8 @@ class RetentionReport:
             return {
                 "revision": snapshot.revision,
                 "test_loc": snapshot.test_loc,
-                "package_loc": snapshot.package_loc,
-                "test_to_package_ratio": snapshot.ratio,
+                "code_loc": snapshot.code_loc,
+                "test_to_code_ratio": snapshot.ratio,
             }
 
         return {
@@ -127,11 +129,10 @@ class RetentionReport:
             "check": "test retention",
             "repo": self.repo,
             "tests_root": TESTS_ROOT,
-            "package_root": PACKAGE_ROOT,
             "base": side(self.base),
             "head": side(self.head),
             "test_delta": self.test_delta,
-            "package_delta": self.package_delta,
+            "code_delta": self.code_delta,
             "reason": self.reason(),
             "passed": self.passed,
         }
@@ -168,10 +169,11 @@ def merge_base(repo: Path, base: str, head: str) -> str:
     return _git(repo, "merge-base", base, head).decode().strip()
 
 
-def python_blobs(repo: Path, commit: str, root: str) -> list[str]:
-    """Object ids of the `.py` files under `root` at `commit`."""
-    listing = _git(repo, "ls-tree", "-r", "-z", commit, "--", root)
-    blobs: list[str] = []
+def python_blobs(repo: Path, commit: str) -> tuple[list[str], list[str]]:
+    """Object ids of the `.py` files at `commit`: those under the suite, and the rest."""
+    listing = _git(repo, "ls-tree", "-r", "-z", commit)
+    tests: list[str] = []
+    code: list[str] = []
     for entry in listing.split(b"\0"):
         if not entry:
             continue
@@ -183,8 +185,8 @@ def python_blobs(repo: Path, commit: str, root: str) -> list[str]:
         parts = path.split("/")
         if not path.endswith(".py") or SKIP_PARTS.intersection(parts):
             continue
-        blobs.append(fields[2].decode())
-    return blobs
+        (tests if parts[0] == TESTS_ROOT else code).append(fields[2].decode())
+    return tests, code
 
 
 def count_blob_lines(repo: Path, blobs: Sequence[str]) -> int:
@@ -207,10 +209,11 @@ def count_blob_lines(repo: Path, blobs: Sequence[str]) -> int:
 
 
 def snapshot(repo: Path, commit: str) -> Snapshot:
+    tests, code = python_blobs(repo, commit)
     return Snapshot(
         revision=commit,
-        test_loc=count_blob_lines(repo, python_blobs(repo, commit, TESTS_ROOT)),
-        package_loc=count_blob_lines(repo, python_blobs(repo, commit, PACKAGE_ROOT)),
+        test_loc=count_blob_lines(repo, tests),
+        code_loc=count_blob_lines(repo, code),
     )
 
 
@@ -239,9 +242,9 @@ def print_report(report: RetentionReport, stream: TextIO | None = None) -> None:
     for label, snap in (("base", report.base), ("head", report.head)):
         out.write(
             f"  {label}: {snap.revision[:12]}  tests {snap.test_loc} LOC, "
-            f"package {snap.package_loc} LOC, ratio {ratio(snap)}\n"
+            f"code {snap.code_loc} LOC, ratio {ratio(snap)}\n"
         )
-    out.write(f"  change: tests {report.test_delta:+d}, package {report.package_delta:+d}\n")
+    out.write(f"  change: tests {report.test_delta:+d}, code {report.code_delta:+d}\n")
     out.write(f"  {report.reason()}\n")
     out.write(f"  verdict: {'PASS' if report.passed else 'FAIL'}\n")
 
@@ -250,7 +253,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="check_test_retention",
         description=(
-            "G2: a change that shrinks the test suite must shrink the package by at "
+            "G2: a change that shrinks the test suite must shrink the code by at "
             "least as many lines."
         ),
     )

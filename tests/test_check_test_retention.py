@@ -40,7 +40,7 @@ def commit(repo: Path, message: str) -> str:
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A package of 600 lines and a suite of 300: the shape of the real ratio."""
+    """Code of 600 lines and a suite of 300: the shape of the real ratio."""
     root = tmp_path / "repo"
     root.mkdir()
     git(root, "init", "-q", "-b", "main")
@@ -63,9 +63,9 @@ def branch(repo: Path) -> None:
     git(repo, "checkout", "-q", "-b", "change")
 
 
-def test_counts_python_lines_under_both_roots(repo: Path) -> None:
+def test_counts_suite_lines_and_code_lines(repo: Path) -> None:
     result = report(repo)
-    assert (result.base.test_loc, result.base.package_loc) == (300, 600)
+    assert (result.base.test_loc, result.base.code_loc) == (300, 600)
     assert result.head == result.base
     assert result.passed
 
@@ -76,7 +76,20 @@ def test_deleting_code_with_its_tests_passes(repo: Path) -> None:
     (repo / "tests" / "test_dead.py").unlink()
     commit(repo, "delete dead code with its tests")
     result = report(repo)
-    assert (result.test_delta, result.package_delta) == (-166, -330)
+    assert (result.test_delta, result.code_delta) == (-166, -330)
+    assert result.passed
+
+
+def test_code_outside_the_package_counts_as_code(repo: Path) -> None:
+    write_lines(repo / "tools" / "checker.py", 200)
+    write_lines(repo / "tests" / "test_checker.py", 100)
+    commit(repo, "a tool and its tests")
+    branch(repo)
+    (repo / "tools" / "checker.py").unlink()
+    (repo / "tests" / "test_checker.py").unlink()
+    commit(repo, "retire the tool with its tests")
+    result = report(repo)
+    assert (result.test_delta, result.code_delta) == (-100, -200)
     assert result.passed
 
 
@@ -85,9 +98,9 @@ def test_deleting_tests_while_the_code_stays_fails(repo: Path) -> None:
     (repo / "tests" / "test_dead.py").unlink()
     commit(repo, "delete tests only")
     result = report(repo)
-    assert (result.test_delta, result.package_delta) == (-166, 0)
+    assert (result.test_delta, result.code_delta) == (-166, 0)
     assert not result.passed
-    assert "restore the tests" in result.reason()
+    assert "the code did not shrink; restore the tests" in result.reason()
 
 
 def test_deleting_tests_while_adding_code_fails(repo: Path) -> None:
@@ -100,13 +113,13 @@ def test_deleting_tests_while_adding_code_fails(repo: Path) -> None:
     assert "grew by 50" in result.reason()
 
 
-def test_suite_shrinking_more_than_the_package_fails(repo: Path) -> None:
+def test_suite_shrinking_more_than_the_code_fails(repo: Path) -> None:
     branch(repo)
     write_lines(repo / "anamnesis" / "dead.py", 300)
     write_lines(repo / "tests" / "test_dead.py", 130)
     commit(repo, "trim")
     result = report(repo)
-    assert (result.test_delta, result.package_delta) == (-36, -30)
+    assert (result.test_delta, result.code_delta) == (-36, -30)
     assert not result.passed
 
 
@@ -116,7 +129,7 @@ def test_equal_shrinkage_is_the_boundary_and_passes(repo: Path) -> None:
     write_lines(repo / "tests" / "test_dead.py", 130)
     commit(repo, "trim evenly")
     result = report(repo)
-    assert (result.test_delta, result.package_delta) == (-36, -36)
+    assert (result.test_delta, result.code_delta) == (-36, -36)
     assert result.passed
 
 
@@ -155,7 +168,7 @@ def test_base_is_the_merge_base_so_a_stale_branch_answers_only_for_itself(repo: 
     git(repo, "checkout", "-q", "change")
     result = report(repo)
     assert result.base.test_loc == 300
-    assert (result.test_delta, result.package_delta) == (10, 0)
+    assert (result.test_delta, result.code_delta) == (10, 0)
     assert result.passed
 
 
@@ -169,8 +182,8 @@ def test_missing_repo_is_refused(tmp_path: Path) -> None:
         build_report(tmp_path / "absent", "main")
 
 
-def test_ratio_is_undefined_for_an_empty_package() -> None:
-    assert Snapshot(revision="x", test_loc=5, package_loc=0).ratio is None
+def test_ratio_is_undefined_without_code() -> None:
+    assert Snapshot(revision="x", test_loc=5, code_loc=0).ratio is None
 
 
 def test_cli_exit_codes_and_receipt(repo: Path, tmp_path: Path) -> None:
@@ -183,7 +196,7 @@ def test_cli_exit_codes_and_receipt(repo: Path, tmp_path: Path) -> None:
     assert main(argv) == 1
     payload = json.loads(receipt.read_text(encoding="utf-8"))
     assert payload["gate"] == "G2"
-    assert (payload["test_delta"], payload["package_delta"], payload["passed"]) == (-166, 0, False)
+    assert (payload["test_delta"], payload["code_delta"], payload["passed"]) == (-166, 0, False)
 
     (repo / "anamnesis" / "dead.py").unlink()
     commit(repo, "and the code they covered")

@@ -125,14 +125,14 @@ A pull request merges when these pass. Each is a command you can run.
 | G3 documentation | the two rules above | `python -m tools.check_timelessness --root anamnesis tools tests` and `python -m tools.check_referents --root anamnesis tools tests` |
 | G4 import closure | every module reachable from a command or a test; no orphans | `python -m tools.check_import_closure --package anamnesis --roots anamnesis/scripts tests` |
 | G1 data compatibility | banked artifacts in, identical features out | `python -m tools.g1_hash_manifest` — see its own help; needs banked data |
-| G2 test retention | a change that shrinks the suite shrinks the package by at least as many lines | `python -m tools.check_test_retention --base main` |
+| G2 test retention | a change that shrinks the suite shrinks the code by at least as many lines | `python -m tools.check_test_retention --base main` |
 
-G2 counts physical lines of Python under `tests/` and under `anamnesis/`, at your branch and at
-the point it left `main`. Adding tests, adding code, or deleting a module together with its tests
-all pass: the suite runs at about half the package's size, so code removed with its own tests
-takes out roughly two package lines for every test line. What fails is a suite that shrinks while
-the code it covered stays. If it fails, either restore the tests or delete the code they covered
-in the same change.
+G2 counts physical lines of Python under `tests/` (the suite) and everywhere else (the code), at
+your branch and at the point it left `main`. Adding tests, adding code, or deleting a module
+together with its tests all pass: the suite runs at about half the size of the code, so code
+removed with its own tests takes out roughly two code lines for every test line. What fails is a
+suite that shrinks while the code it covered stays. If it fails, either restore the tests or
+delete the code they covered in the same change.
 
 Each G3 rule is pinned by a corpus rather than by reading: `tests/test_gate_fixtures.py` holds the
 strings each checker must catch and the legitimate prose it must stay quiet on, one case per
