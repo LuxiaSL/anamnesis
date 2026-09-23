@@ -48,6 +48,7 @@ from anamnesis.analysis.complementarity import (
     pair_name,
 )
 from anamnesis.analysis.gauntlet.schemas.compat import READ_ONLY_LABELS
+from anamnesis.analysis.subfamily import classify_signal
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
     ATTENTION_AND_CACHE,
@@ -282,7 +283,7 @@ def test_feature_names_are_grouped_by_family_and_sub_family() -> None:
     assert feature_subfamily("cp_L16_t3_d07") == "cp_t3"
     assert feature_subfamily("td_L16_key_drift_w0") == "td_key_drift"
     assert feature_subfamily("af_L8_sysprompt_decay_rate") == "af_sysprompt_decay"
-    assert feature_subfamily("af_L8_region_early_gen") == "af_region_early"
+    assert feature_subfamily("af_L8_region_early_gen") == "af_region_early_gen"
     assert feature_subfamily("gf_L16_sparsity_mean") == "gf_sparsity"
     assert feature_subfamily("rt_L24_velocity_norm") == "rt_velocity"
     assert feature_subfamily("something_else").startswith("other(")
@@ -339,6 +340,49 @@ def test_one_classifier_answers_the_family_question() -> None:
     assert {named_family(name) for name in CLASSIFIED_SPELLINGS} == set(FAMILY_LABELS), (
         "every family needs a spelling here, or the translation is untested for it"
     )
+
+
+def test_one_classifier_answers_the_sub_family_question_too() -> None:
+    """This module holds no naming rules of its own on either question.
+
+    The sub-family table is printed beside the family one, so a second reading of the
+    same conventions would key two tables two ways. It is also how a classifier goes
+    stale unnoticed: the one nobody calls from a decomposition keeps its old spellings,
+    misses the whole ranked list it is pointed at, and reports a bucket per feature.
+    """
+    assert feature_subfamily is not classify_signal, "the delegation is a named local step"
+    for name in CLASSIFIED_SPELLINGS:
+        assert feature_subfamily(name) == classify_signal(name)
+
+
+def test_the_top_of_a_ranked_list_groups_into_signals_not_into_names() -> None:
+    """The call site's population: bare core-block names, which carry no family prefix.
+
+    Every one of them is a miss for a classifier that knows only the engineered prefixes,
+    and the table it feeds then has one row per feature.
+    """
+    ranked = (
+        "activation_norm_mean_L0",
+        "activation_norm_std_L16",
+        "attn_entropy_mean_L8",
+        "head_agreement_mean_L8",
+        "cache_recency_bias_L8",
+        "cache_recency_traj0_L8",
+        "kv_key_novelty_mean_L16",
+        "kv_key_novelty_std_L16",
+        "pca_L8_t0_c0",
+        "pca_L8_t0_c1",
+    )
+    grouped = {feature_subfamily(name) for name in ranked}
+    assert not any(signal.startswith("other(") for signal in grouped)
+    assert grouped == {
+        "activation_norm",
+        "attn_entropy",
+        "head_agreement",
+        "cache_recency",
+        "kv_key_novelty",
+        "pca_t0",
+    }
 
 
 def test_importance_is_summed_per_family_and_per_sub_family(tmp_path: Path) -> None:

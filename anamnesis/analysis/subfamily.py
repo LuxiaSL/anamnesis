@@ -15,6 +15,13 @@ A sub-family's accuracy beside the full family's is the readout: a part that
 matches the whole says the rest is redundant, and a part far below it says the
 signal is distributed rather than located.
 
+Two callers need the naming rules and they need them differently, so both are here
+rather than in two modules. A decomposition holds a block and cuts its names with that
+block's classifier; a reader of a ranked importance list holds a bare name from any
+family and calls :func:`classify_signal`, which dispatches on the spelling. One set of
+rules answers both, because a sub-family label keyed two ways is two vocabularies in
+tables printed side by side.
+
 Feature names come from the loader rather than from a second read of the bank. A
 block's names are the slice of the vector's name list its own metadata assigns to
 it, and a decomposition whose names and columns disagree is silently mapping
@@ -54,72 +61,216 @@ SEED = 42
 UNKNOWN = "unknown"
 
 
-_AF_SIGNALS: tuple[tuple[str, str], ...] = (
-    ("sysprompt_mass", "af_sysprompt_mass"),
-    ("sysprompt_decay", "af_sysprompt_decay"),
-    ("recency_bias", "af_recency_bias"),
-    ("region_sysprompt", "af_region_sysprompt"),
-    ("region_early", "af_region_early_gen"),
-    ("region_mid", "af_region_mid_gen"),
-    ("region_recent", "af_region_recent"),
-    ("head_diversity_recency", "af_head_diversity_recency"),
-    ("head_diversity_sysprompt", "af_head_diversity_sysprompt"),
-)
+class SignalRule(BaseModel):
+    """One naming rule: the sub-family a feature belongs to when a mark is in its name.
 
-_AF_NAME_RE = re.compile(
-    r"attn_flow_L\d+_(.+?)_"
-    r"(mean|std|w\d+_|dominant_|spectral_|bandwidth|low_|mid_|high_|decay)"
+    A mark is a substring rather than a prefix, because a signal's name sits between a
+    layer marker and an operator suffix and neither is in a fixed place: one bank writes
+    ``attn_flow_L16_recency_bias_mean`` and another ``af_recency_bias_L16``. The marks
+    are the signal's own words, so a match on one is a match on the signal wherever the
+    layer went.
+
+    A rule may carry two marks for one signal, which is how a family renamed between
+    banks stays one sub-family. Rules are tried in order and the first match wins, so a
+    mark contained in another rule's mark comes first.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    subfamily: str
+    marks: tuple[str, ...]
+
+    def matches(self, name: str) -> bool:
+        return any(mark in name for mark in self.marks)
+
+
+def _first_match(name: str, rules: tuple[SignalRule, ...], unplaced: str) -> str:
+    for rule in rules:
+        if rule.matches(name):
+            return rule.subfamily
+    return unplaced
+
+
+_AF_RULES: tuple[SignalRule, ...] = (
+    SignalRule(subfamily="af_sysprompt_decay", marks=("sysprompt_decay", "prompt_decay")),
+    SignalRule(subfamily="af_head_diversity_recency", marks=("head_diversity_recency",)),
+    SignalRule(
+        subfamily="af_head_diversity_sysprompt",
+        marks=("head_diversity_sysprompt", "head_diversity_prompt"),
+    ),
+    SignalRule(subfamily="af_region_sysprompt", marks=("region_sysprompt", "region_prompt")),
+    SignalRule(subfamily="af_region_early_gen", marks=("region_early",)),
+    SignalRule(subfamily="af_region_mid_gen", marks=("region_mid",)),
+    SignalRule(subfamily="af_region_recent", marks=("region_recent",)),
+    SignalRule(subfamily="af_recency_bias", marks=("recency_bias",)),
+    SignalRule(subfamily="af_sysprompt_mass", marks=("sysprompt_mass", "prompt_mass")),
 )
+"""The nine allocation statistics, under both spellings the banks carry: the region a
+name calls ``sysprompt`` a later one calls ``prompt``, and it is one signal either way."""
 
 
 def classify_attention_flow(name: str) -> str:
-    """An ``attention_flow`` feature by which allocation statistic it is.
-
-    Names run ``attn_flow_L<layer>_<signal>_<operator>``. The signal is read out of
-    the name where the operator suffix makes the boundary unambiguous, and by
-    substring otherwise — the substrings are the same nine signals either way, so
-    the two paths agree and the second exists for names the pattern does not span.
-    """
-    match = _AF_NAME_RE.match(name)
-    haystack = match.group(1) if match else name
-    for needle, subfamily in _AF_SIGNALS:
-        if needle in haystack:
-            return subfamily
-    return "af_unknown"
+    """An ``attention_flow`` feature by which allocation statistic it is."""
+    return _first_match(name, _AF_RULES, "af_unknown")
 
 
-_GF_NAME_RE = re.compile(r"gate_L\d+_(\w+?)_")
+_GF_RULES: tuple[SignalRule, ...] = (
+    # First, because a cross-layer feature has no single layer to belong to and one of
+    # its marks contains a signal name that would otherwise file it under a layer's.
+    SignalRule(
+        subfamily="gf_cross_layer",
+        marks=("cross_layer", "layer_agreement", "layer_sparsity_diversity"),
+    ),
+    SignalRule(subfamily="gf_sparsity", marks=("sparsity",)),
+    SignalRule(subfamily="gf_drift", marks=("drift",)),
+    SignalRule(subfamily="gf_eff_dim", marks=("eff_dim",)),
+    SignalRule(subfamily="gf_topk_overlap", marks=("topk",)),
+)
 
 
 def classify_gate_features(name: str) -> str:
-    """A ``gate_features`` feature by its signal, with cross-layer features apart.
+    """A ``gate_features`` feature by its signal, with cross-layer features apart."""
+    return _first_match(name, _GF_RULES, "gf_unknown")
 
-    A cross-layer feature has no single layer to belong to, so it is its own
-    sub-family rather than being filed under whichever layer it mentions first.
+
+_RT_RULES: tuple[SignalRule, ...] = (
+    SignalRule(subfamily="rt_acceleration", marks=("acceleration",)),
+    SignalRule(subfamily="rt_direction_change", marks=("direction_change",)),
+    SignalRule(subfamily="rt_directness", marks=("directness",)),
+    SignalRule(subfamily="rt_velocity", marks=("velocity",)),
+)
+
+
+def classify_residual_trajectory(name: str) -> str:
+    """A residual-trajectory feature by which property of the path it reads."""
+    return _first_match(name, _RT_RULES, "rt_unknown")
+
+
+_TD_RULES: tuple[SignalRule, ...] = (
+    SignalRule(subfamily="td_attn_entropy", marks=("attn_entropy",)),
+    SignalRule(subfamily="td_head_agreement", marks=("head_agreement",)),
+    SignalRule(subfamily="td_key_drift", marks=("key_drift",)),
+    SignalRule(subfamily="td_key_novelty", marks=("key_novelty",)),
+    SignalRule(subfamily="td_lookback_ratio", marks=("lookback_ratio",)),
+)
+
+
+def classify_temporal_dynamics(name: str) -> str:
+    """A windowed feature by the signal the window is taken over.
+
+    The windows and the frequency-band reads of one signal are one sub-family: they are
+    operators over the same series, and an importance summed over one window of one
+    signal is a number over three features.
     """
-    if "cross_layer" in name or "layer_agreement" in name or "layer_sparsity_diversity" in name:
-        return "gf_cross_layer"
-    match = _GF_NAME_RE.match(name)
-    if match:
-        return f"gf_{match.group(1)}"
-    for needle, subfamily in (
-        ("sparsity", "gf_sparsity"),
-        ("drift", "gf_drift"),
-        ("eff_dim", "gf_eff_dim"),
-        ("topk", "gf_topk_overlap"),
-    ):
-        if needle in name:
-            return subfamily
-    return "gf_unknown"
+    return _first_match(name, _TD_RULES, "td_unknown")
+
+
+_PH_RULES: tuple[SignalRule, ...] = (
+    SignalRule(subfamily="ph_head_entropy", marks=("head_entropy",)),
+    SignalRule(subfamily="ph_head_role", marks=("head_role",)),
+    SignalRule(subfamily="ph_key_spread", marks=("key_spread",)),
+    SignalRule(subfamily="ph_sink_head", marks=("sink_head",)),
+)
+
+
+def classify_per_head(name: str) -> str:
+    """A per-head feature by which head statistic it spreads over the heads."""
+    return _first_match(name, _PH_RULES, "ph_unknown")
+
+
+_BASE_RULES: tuple[SignalRule, ...] = (
+    SignalRule(subfamily="activation_norm", marks=("activation_norm",)),
+    SignalRule(subfamily="attn_entropy", marks=("attn_entropy",)),
+    SignalRule(subfamily="head_agreement", marks=("head_agreement",)),
+    SignalRule(subfamily="delta_cosine", marks=("delta_cosine",)),
+    SignalRule(subfamily="delta_norm", marks=("delta_norm",)),
+    SignalRule(subfamily="cache_anchor_strength", marks=("anchor_strength",)),
+    SignalRule(subfamily="cache_attn_decay_rate", marks=("attn_decay",)),
+    SignalRule(subfamily="cache_coverage", marks=("cache_coverage",)),
+    SignalRule(subfamily="cache_lookback_ratio", marks=("lookback_ratio",)),
+    SignalRule(subfamily="cache_recency", marks=("cache_recency",)),
+    SignalRule(subfamily="cache_sink_mass", marks=("sink_mass",)),
+    SignalRule(subfamily="kv_key_drift", marks=("key_drift",)),
+    SignalRule(subfamily="kv_key_eff_dim", marks=("key_eff_dim",)),
+    SignalRule(subfamily="kv_key_novelty", marks=("key_novelty",)),
+    SignalRule(subfamily="kv_key_spread", marks=("key_spread",)),
+    SignalRule(subfamily="epoch_max_transition", marks=("max_transition",)),
+    SignalRule(subfamily="epoch_n_transitions", marks=("n_transitions",)),
+    SignalRule(subfamily="epoch_regularity", marks=("epoch_regularity",)),
+    SignalRule(subfamily="spectral_fiedler", marks=("fiedler",)),
+    SignalRule(subfamily="spectral_hfer", marks=("hfer",)),
+    SignalRule(subfamily="spectral_smoothness", marks=("smoothness",)),
+    SignalRule(subfamily="spectral_entropy", marks=("spectral_entropy",)),
+    SignalRule(subfamily="cross_layer_keys", marks=("cross_layer",)),
+    SignalRule(subfamily="logit_entropy", marks=("logit_entropy",)),
+    SignalRule(subfamily="top1_prob", marks=("top1_prob",)),
+    SignalRule(subfamily="top5_mass", marks=("top5_mass",)),
+    SignalRule(subfamily="chosen_rank", marks=("chosen_rank",)),
+    # Before the bare surprise rule, which its name contains.
+    SignalRule(subfamily="surprise_boundary", marks=("surprise_boundary",)),
+    SignalRule(subfamily="surprise", marks=("surprise",)),
+)
+"""The signals of the four core blocks, whose names carry no family prefix. A mean and a
+standard deviation of one signal are one sub-family, and so are its five trajectory
+samples: the grain is the signal, and the operator over it is what a sub-family reading
+sums across."""
+
+_TEMPORAL_SAMPLE = re.compile(r"_t(\d+)(_|$)")
+
+
+def _by_temporal_sample(prefix: str, name: str) -> str:
+    """A projection family's sub-family: the generation-time sample it was taken at.
+
+    A coordinate index in a fitted or learned basis means nothing on its own, and there
+    are fifty of them per sample, so the sample is the only grouping in these names that
+    a summed importance is a number over.
+    """
+    match = _TEMPORAL_SAMPLE.search(name)
+    return f"{prefix}_t{match.group(1)}" if match else f"{prefix}_unknown"
+
+
+_BY_PREFIX: tuple[tuple[tuple[str, ...], Callable[[str], str]], ...] = (
+    (("attn_flow_", "af_"), classify_attention_flow),
+    (("gate_", "gf_"), classify_gate_features),
+    (("res_traj", "rt_"), classify_residual_trajectory),
+    (("td_",), classify_temporal_dynamics),
+    (("ph_",), classify_per_head),
+    (("cp_",), lambda name: _by_temporal_sample("cp", name)),
+    (("pca_",), lambda name: _by_temporal_sample("pca", name)),
+)
+"""Which classifier reads which spelling, tried before the prefix-free core names. A
+family with two spellings maps both to one classifier, so the two banks produce one set
+of sub-family labels rather than two."""
+
+
+def classify_signal(name: str) -> str:
+    """The signal one banked feature name reads, with the layer dropped.
+
+    This is the classifier of record for the question "which part of a family", and the
+    grain a ranked importance list supports: a layer is dropped, because an importance
+    summed over one layer of one signal is a number over two or three features. The
+    other question — which substrate a feature reads — is
+    :mod:`anamnesis.feature_map`'s, at the grain of the whole family, and the two are
+    not substitutes.
+
+    A name no rule places is returned as ``other(<name>)``: the bucket is the honest
+    answer, and naming the feature in it is what lets a reader find the column. Many of
+    them together say the naming convention has moved and these rules have not.
+    """
+    for prefixes, classifier in _BY_PREFIX:
+        if name.startswith(prefixes):
+            return classifier(name)
+    return _first_match(name, _BASE_RULES, f"other({name})")
 
 
 SUBFAMILY_CLASSIFIERS: dict[str, Callable[[str], str]] = {
     ATTENTION_FLOW: classify_attention_flow,
     GATE_FEATURES: classify_gate_features,
 }
-"""Which classifier reads which family's names. A family absent from this table has
-no sub-family convention to read, which is a fact about its naming rather than a
-gap here."""
+"""Which classifier a whole-family decomposition reads a block's names with. A block
+here is cut into sub-families and each part scored; a family absent from this table has
+no such cut, which is a fact about its naming rather than a gap here.
+:func:`classify_signal` answers for a bare name from any family, which is the other
+caller — it has a name and no block, so it dispatches on the spelling instead."""
 
 FULL_FAMILY = "_full_family"
 """The row every decomposition carries: the whole family, as the comparison every
@@ -276,10 +427,15 @@ def default_output_path(analysis_dir: Path, *, mode_filter: Sequence[str] | None
 __all__ = [
     "FULL_FAMILY",
     "SUBFAMILY_CLASSIFIERS",
+    "SignalRule",
     "SubsetAccuracy",
     "accuracy_on_subset",
     "classify_attention_flow",
     "classify_gate_features",
+    "classify_per_head",
+    "classify_residual_trajectory",
+    "classify_signal",
+    "classify_temporal_dynamics",
     "decompose_family",
     "decompose_run",
     "decomposition_document",

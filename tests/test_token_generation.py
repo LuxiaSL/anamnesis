@@ -58,6 +58,22 @@ def test_an_unset_temperature_is_the_rows_own() -> None:
 
 
 @pytest.mark.parametrize("model", ["3b", "8b", "gemma3-27b", "dsv2-lite"])
+def test_every_unset_sampling_value_is_the_rows_own(model: str) -> None:
+    """The rows disagree on nucleus mass, so a default filled in anywhere else is wrong.
+
+    Resolving them here is what lets a launcher pass the operator's flags through
+    unset and still sample the way the checkpoint does.
+    """
+    preset = resolve_preset(model)
+    policy = DecodePolicy.from_preset(preset)
+    assert policy.top_p == preset.top_p
+    assert policy.max_new_tokens == preset.max_new_tokens
+    assert policy.temperature == preset.temperature
+    given = DecodePolicy.from_preset(preset, top_p=0.5, max_new_tokens=8)
+    assert (given.top_p, given.max_new_tokens) == (0.5, 8)
+
+
+@pytest.mark.parametrize("model", ["3b", "8b", "gemma3-27b", "dsv2-lite"])
 def test_a_policy_over_any_row_carries_that_rows_stop_tokens(model: str) -> None:
     preset = resolve_preset(model)
     policy = DecodePolicy.from_preset(preset, top_p=preset.top_p, max_new_tokens=64)

@@ -62,6 +62,70 @@ def test_replay_refuses_a_jobs_file_alongside_a_cell() -> None:
         ])
 
 
+ROSTER_ROW: dict[str, object] = {
+    "run_dir": "/runs/a",
+    "manifest": "/runs/a/replay_manifest.json",
+    "sig_subdir": "signatures_side_by_side",
+    "no_resume": True,
+}
+"""One roster row that names its own destination, which is the case the two routes
+have to agree on."""
+
+
+def _replay_args(*flags: str) -> object:
+    return run_replay.parser().parse_args(
+        ["--model", MODEL, "--model-path", "/models/x", "--calib-dir", "/calib", *flags]
+    )
+
+
+def test_both_routes_put_one_rosters_signatures_in_the_same_place() -> None:
+    """A roster dispatched two ways has one destination, or the bank has a hole in it.
+
+    A roster can be walked in one process from a jobs file or served to a resident
+    worker through the queue, and the two read the same two field names. A route that
+    read the command line instead would write the same cell's signatures somewhere else
+    and raise nothing: the files land, and the pass that reads the directory the roster
+    asked for finds some of them missing.
+    """
+    from anamnesis.orchestration.workers import ReplayJob
+
+    queued = ReplayJob.model_validate(ROSTER_ROW)
+    walked = run_replay.signature_placement(_replay_args(), ROSTER_ROW)
+    assert walked.subdir == queued.sig_subdir
+    assert walked.recompute == queued.no_resume
+    assert {"sig_subdir", "no_resume"} <= set(ReplayJob.model_fields), (
+        "the two routes agree by reading one pair of field names; a rename breaks that"
+    )
+
+
+def test_a_row_that_names_no_destination_takes_the_flags_and_the_two_still_agree() -> None:
+    """The flags are a roster's floor, not an override of it.
+
+    The queue's job model has its own default for a row that names nothing, so the two
+    routes agree on such a row only while the flag's default is that same value.
+    """
+    from anamnesis.extraction.replay.cell import DEFAULT_SIGNATURES_SUBDIR
+    from anamnesis.orchestration.workers import ReplayJob
+
+    bare = {"run_dir": "/runs/a", "manifest": "/runs/a/replay_manifest.json"}
+    queued = ReplayJob.model_validate(bare)
+    assert run_replay.signature_placement(_replay_args(), bare) == (
+        queued.sig_subdir,
+        queued.no_resume,
+    )
+    assert _replay_args().sig_subdir == DEFAULT_SIGNATURES_SUBDIR
+
+
+def test_a_flag_is_overridden_by_the_row_that_names_the_field() -> None:
+    """Both directions, because a roster banking two capture surfaces needs both."""
+    elsewhere = _replay_args("--sig-subdir", "signatures_elsewhere", "--no-resume")
+    assert run_replay.signature_placement(elsewhere).subdir == "signatures_elsewhere"
+    assert run_replay.signature_placement(elsewhere).recompute is True
+    placed = run_replay.signature_placement(elsewhere, ROSTER_ROW)
+    assert placed.subdir == "signatures_side_by_side"
+    assert run_replay.signature_placement(elsewhere, {"no_resume": False}).recompute is False
+
+
 def test_generation_refuses_a_roster_without_devices() -> None:
     with pytest.raises(SystemExit, match="roster to fan out"):
         run_gen_tokens.main([
@@ -88,6 +152,34 @@ def test_generation_policy_comes_from_the_preset_row() -> None:
     preset = resolve_preset(MODEL)
     assert policy.temperature == preset.temperature
     assert tuple(policy.eos_token_ids) == tuple(preset.eos_token_ids)
+
+
+@pytest.mark.parametrize("model", ["gemma3-27b", "dsv2-lite"])
+def test_an_absent_sampling_flag_takes_the_rows_value_not_a_launcher_constant(model: str) -> None:
+    """These rows sample at a nucleus mass of 0.95, which no flag default may overrule.
+
+    A constant in the parser is indistinguishable, from the corpus afterwards, from a
+    value the operator chose: the pass reports success and the records carry settings
+    the model does not decode under.
+    """
+    preset = resolve_preset(model)
+    assert preset.top_p == 0.95, "this case is only a test while the row disagrees with 0.9"
+    absent = run_gen_tokens.decode_policy(
+        run_gen_tokens.parser().parse_args(["--model", model, "--model-path", "/models/x"])
+    )
+    assert absent.top_p == preset.top_p
+    assert absent.max_new_tokens == preset.max_new_tokens
+
+
+@pytest.mark.parametrize("model", ["8b", "gemma3-27b"])
+def test_a_sampling_flag_given_explicitly_wins_over_the_row(model: str) -> None:
+    given = run_gen_tokens.decode_policy(
+        run_gen_tokens.parser().parse_args([
+            "--model", model, "--model-path", "/models/x",
+            "--top-p", "0.5", "--max-new-tokens", "64", "--temperature", "0.11",
+        ])
+    )
+    assert (given.top_p, given.max_new_tokens, given.temperature) == (0.5, 64, 0.11)
 
 
 def test_a_neutral_repetition_penalty_is_withheld_from_the_sampler() -> None:

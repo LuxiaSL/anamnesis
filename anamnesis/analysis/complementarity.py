@@ -63,6 +63,7 @@ from anamnesis.analysis.gauntlet.signature_io import (
     RESIDUAL_TRAJECTORY,
 )
 from anamnesis.analysis.gauntlet.utils import error_stub_reason, is_error_stub
+from anamnesis.analysis.subfamily import classify_signal
 from anamnesis.feature_map import (
     FAMILY_ATTENTION_FLOW,
     FAMILY_GATE,
@@ -381,54 +382,12 @@ def feature_family(name: str) -> str:
 def feature_subfamily(name: str) -> str:
     """Which sub-family a banked feature name belongs to, at importance resolution.
 
-    This reads the same naming conventions
-    :mod:`anamnesis.analysis.subfamily` cuts a family by, at the coarser grain a
-    ranked importance list supports: a layer is dropped, because importance summed
-    over one layer of one signal is a number over two or three features.
+    The classification is :func:`anamnesis.analysis.subfamily.classify_signal`'s. This
+    module classifies no feature name itself, on this question or the family one: a
+    second reading of the same naming conventions is a second vocabulary, and the two
+    tables are printed beside each other.
     """
-    parts = name.split("_")
-    head = parts[0]
-    if head == "cp":
-        return f"cp_{parts[2]}" if len(parts) >= 3 else "cp_unknown"
-    if head == "td":
-        if len(parts) < 3:
-            return "td_unknown"
-        signal = parts[2]
-        if signal == "attn":
-            return "td_attn_entropy"
-        if signal == "head":
-            return "td_head_agreement"
-        if signal == "key":
-            return f"td_key_{parts[3]}" if len(parts) >= 4 else "td_key"
-        if signal == "lookback":
-            return "td_lookback_ratio"
-        return "td_unknown"
-    if head == "af":
-        if len(parts) < 3:
-            return "af_unknown"
-        signal = parts[2]
-        if signal == "sysprompt":
-            return (
-                "af_sysprompt_decay"
-                if len(parts) >= 4 and parts[3] == "decay"
-                else "af_sysprompt_mass"
-            )
-        if signal == "recency":
-            return "af_recency_bias"
-        if signal == "region":
-            return f"af_region_{parts[3]}" if len(parts) >= 4 else "af_region"
-        if signal == "head":
-            return "af_head_diversity"
-        return "af_unknown"
-    if head == "rt":
-        return f"rt_{parts[2]}" if len(parts) >= 3 else "rt_unknown"
-    if head == "gf":
-        if len(parts) < 2:
-            return "gf_unknown"
-        if parts[1].startswith("L"):
-            return f"gf_{parts[2]}" if len(parts) >= 3 else "gf_unknown"
-        return f"gf_{parts[1]}"
-    return f"other({name[:20]})"
+    return classify_signal(name)
 
 
 def _sum_importance(features: Sequence[Any], key: Any) -> dict[str, float]:

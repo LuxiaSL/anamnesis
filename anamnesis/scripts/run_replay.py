@@ -40,8 +40,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from anamnesis.config import MODEL_PRESETS
 from anamnesis.extraction.interventions import injection_fields
@@ -216,6 +217,36 @@ def fan_out_replay(args: argparse.Namespace) -> None:
     result.raise_on_failure()
 
 
+class SignaturePlacement(NamedTuple):
+    """Where one cell's signatures land, and whether one already there is recomputed."""
+
+    subdir: str
+    recompute: bool
+
+
+def signature_placement(
+    args: argparse.Namespace, job: Mapping[str, Any] | None = None
+) -> SignaturePlacement:
+    """Resolve one cell's signature destination: the job's own value, else the flag.
+
+    A roster row carries these per cell, because one roster can bank two capture
+    surfaces beside each other in the same run directories. Every route a roster can
+    take resolves them here — the queue's ``anamnesis.orchestration.workers.ReplayJob``
+    reads the same two field names — so the same roster cannot write to two different
+    directories depending on which route dispatched it. That failure raises nothing: the
+    signatures land, in the wrong place, and the next pass reads a directory that is
+    missing some of them.
+
+    A row that names neither field takes the command line's, which is what makes the
+    flags the floor of a roster rather than an override of it.
+    """
+    row = job or {}
+    return SignaturePlacement(
+        subdir=str(row.get("sig_subdir", args.sig_subdir)),
+        recompute=bool(row.get("no_resume", args.no_resume)),
+    )
+
+
 def _manifest_ids(cell: dict[str, Any]) -> list[int]:
     """A cell's replayable generation ids, narrowed to its own slice if it names one."""
     entries = json.loads(Path(cell["manifest"]).read_text())["entries"]
@@ -255,6 +286,7 @@ def replay(args: argparse.Namespace) -> None:
         fields: dict[str, Any],
         from_metadata: bool,
         perturb: dict[str, Any] | None,
+        placement: SignaturePlacement,
         label: str,
     ) -> Shortfall:
         injection = resolve_injection(run_dir, from_metadata=from_metadata, fields=fields)
@@ -265,11 +297,11 @@ def replay(args: argparse.Namespace) -> None:
             result = replay_cell(
                 surface, calibration, run_dir, manifest,
                 gen_ids=gen_ids,
-                signatures_subdir=args.sig_subdir,
+                signatures_subdir=placement.subdir,
                 raw_dir=args.raw_dir,
                 raw_subdir=args.raw_subdir,
                 save_raw=not args.no_raw,
-                resume=not args.no_resume,
+                resume=not placement.recompute,
                 logits_top_k=args.logits_top_k,
                 write_handle=handle,
                 injection=injection,
@@ -285,6 +317,7 @@ def replay(args: argparse.Namespace) -> None:
                 {k: v for k, v in job.items() if k.startswith("inject_")},
                 bool(job.get("inject_from_metadata", False)),
                 job.get("perturb"),
+                signature_placement(args, job),
                 f"{args.label}c{index}",
             )
             for index, job in enumerate(jobs)
@@ -300,7 +333,7 @@ def replay(args: argparse.Namespace) -> None:
                 args.inject_npz, args.inject_key, args.inject_layer,
                 args.inject_alpha, args.inject_alpha_frac,
             ),
-            args.inject_from_metadata, None, args.label,
+            args.inject_from_metadata, None, signature_placement(args), args.label,
         )],
         allow_partial=args.allow_partial,
     )
