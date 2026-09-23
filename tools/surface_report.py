@@ -157,8 +157,15 @@ def iter_files(root: Path) -> list[Path]:
 
 
 def group_name(root: Path, path: Path) -> str:
-    """Top-level directory under `root`, or the root's own name for direct children."""
+    """Top-level directory under `root`, or the root's own name for direct children.
+
+    A `root` that names one file measures that file alone, and `relative_to` then
+    yields `.`, which has no parts at all. Such a measurement is grouped under the
+    file's own parent, since one file admits no grouping below itself.
+    """
     rel = path.relative_to(root)
+    if not rel.parts:
+        return f"{root.parent.name}/"
     if len(rel.parts) == 1:
         return f"{root.name}/"
     return f"{root.name}/{rel.parts[0]}/"
