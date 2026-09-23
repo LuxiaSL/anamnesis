@@ -8,21 +8,47 @@ dynamics, key geometry, residual trajectories), classifying *how* a span was pro
 orthogonally to *what* it says, replaying banked generations bitwise-deterministically, and
 building gated steering vectors from the same substrate the readouts measure.
 
-This repository is being refounded from the research codebase; the structure and code are
-landing in reviewed increments. [`CONTRIBUTING.md`](CONTRIBUTING.md) states how code and claims
-arrive, the documentation rule both are held to, and the gates a change passes.
+The instrument is the whole of it: extraction, the replay gateway, the eleven standing
+analyses, the steering side and the judging channel, with a test suite and four gates over
+them. [`CONTRIBUTING.md`](CONTRIBUTING.md) states how code and claims arrive, the
+documentation rule both are held to, and the gates a change passes.
+
+## Start here
+
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is the map: what a signature is, the three
+extraction layers and why they stay apart, the replay gateway, the arithmetic-lane identity
+every signature carries, the fail-closed doctrine, and which file to open next. Ten minutes.
+
+The four package docstrings it routes you to are worth reading in their own right:
+
+- [`anamnesis/__init__.py`](anamnesis/__init__.py) — the definition, and what each
+  top-level module is for.
+- [`anamnesis/extraction/__init__.py`](anamnesis/extraction/__init__.py) — the write side:
+  what a forward pass is read into, and the code that reads it.
+- [`anamnesis/modes/__init__.py`](anamnesis/modes/__init__.py) — the processing-mode
+  prompts a run's labels refer to, and the confound test that travels with them.
+- [`anamnesis/analysis/gauntlet/__init__.py`](anamnesis/analysis/gauntlet/__init__.py) —
+  the read side: the eleven analyses and the registry that dispatches them.
+
+[`anamnesis/scripts/__init__.py`](anamnesis/scripts/__init__.py) is the command inventory,
+grouped by the order a run moves through the pipeline.
 
 ## Quickstart
 
 ```bash
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"      # or: pip install -e ".[dev]"
 
 # A corpus, drawn from a seed. No model, no accelerator, no network.
 python -m anamnesis.scripts.make_synthetic_bank
 
-# Read it: the eleven standing analyses over that corpus.
+# Read it: the eleven standing analyses over that corpus. Budget ~15 minutes.
 python -m anamnesis.scripts.run_gauntlet --run synthetic_demo
 ```
+
+The gauntlet over the synthetic corpus takes about fifteen minutes of CPU, roughly
+two-thirds of it inside the classification section. It prints each section as it starts and
+its elapsed time as it finishes, so the pass is legible while it runs — but a command that
+sits for ten minutes on one line is working, not hung.
 
 All eleven sections run. The command then **exits 3, not 0**, and that is the instrument
 working: the sections needing the `geometry` extra cannot measure intrinsic dimension
@@ -54,10 +80,6 @@ absence rather than failing the import.
 - [`anamnesis-pl`](https://github.com/LuxiaSL/anamnesis-pl) — the frozen record: the
   instrument exactly as used for the battery era. Every historical citation of a script path
   resolves there, forever.
-- [`anamnesis-phase0`](https://github.com/LuxiaSL/anamnesis-phase0) — the archived origin
-  (Phase 0, early 2026), superseded; see its banner before reading anything into it.
-- [`PORT-MAP.md`](PORT-MAP.md) — where a name from the frozen record lives here, and which
-  names stayed there.
 - Operational documentation and ratified claims will live in the systema wiki (link to come).
 
 ## License

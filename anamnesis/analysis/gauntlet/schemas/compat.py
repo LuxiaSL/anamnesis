@@ -28,8 +28,8 @@ compatibility. A table spends nothing: the mapping is enumerable in one read, it
 applied to the payload, and what comes out then goes through the unmodified strict
 schema. The strictness that catches drift still runs, over renamed keys.
 
-The tables are also the only place a reader has to look to follow a citation from an
-older file to the field that now holds it, which is what ``PORT-MAP.md`` points at.
+The tables are also the only place a reader has to look to follow a name in an older
+banked file to the field that now holds it.
 
 Scope
 -----

@@ -37,7 +37,8 @@ sources:
    a principle: see its own docstring.
 
 What this test does not check is duplication under two different names. Nothing
-mechanical catches that; the port map is where it is recorded when it is found.
+mechanical catches that: rule 4 sees a shared name, and two spellings of one function
+are a reviewer's catch.
 """
 
 from __future__ import annotations
