@@ -16,6 +16,7 @@ other. One partitioner means they cannot disagree about what a fold is.
 
 from __future__ import annotations
 
+import textwrap
 import time
 from contextlib import contextmanager
 from typing import Any, Generator, TypeVar
@@ -95,6 +96,36 @@ def timer(label: str = "") -> Generator[dict[str, float], None, None]:
 # For v2 data, use get_available_blocks() to discover what's actually present.
 ALL_BLOCKS = [NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA, ATTENTION_AND_CACHE, ALL_CORE]
 KEY_BLOCKS = [ATTENTION_AND_CACHE, ALL_CORE]
+
+BLOCK_READOUT_LIMIT = (
+    "Most of these blocks span more than one substrate, so a block's accuracy — and "
+    "any ordering of blocks by accuracy — localizes nothing: it makes no substrate "
+    "load-bearing. The decomposition of record cuts by family and sub-family: "
+    "anamnesis/scripts/run_subfamily_decomp.py, over anamnesis/analysis/subfamily.py, "
+    "with the taxonomy in anamnesis/feature_map.py."
+)
+"""The limit on every reading taken per block, in one place.
+
+Three surfaces state it — the per-block readout's own output, the scorecard row that
+orders three blocks, and the summary printer — and a reader who meets any of them
+without it reads a block ordering as a claim about substrates. One string, because a
+limit stated in three wordings is a limit a reader can believe was three different
+limits.
+"""
+
+CAVEAT_WIDTH = 88
+"""Line width a printed caveat wraps to, wide enough that a limit stays a paragraph."""
+
+
+def print_caveat(text: str, *, indent: str = "  ") -> None:
+    """Print a limit beside the numbers it constrains, wrapped and indented.
+
+    A caveat is carried as one string so that the result file and the terminal say
+    the same thing; printing it needs the wrapping this applies, because an
+    unwrapped paragraph in a column of numbers is a paragraph a reader skips.
+    """
+    for line in textwrap.wrap(text, width=CAVEAT_WIDTH - len(indent)):
+        print(f"{indent}{line}")
 
 
 def absence_reason(data: object, *blocks: str) -> str | None:

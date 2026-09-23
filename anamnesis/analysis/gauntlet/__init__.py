@@ -10,14 +10,14 @@ another beside a length-only baseline that reaches the same number.
 The eleven sections:
   1. Data integrity & descriptive statistics
   2. Classification (5-way mode discrimination)
-  3. The readout over the stored blocks, & feature importance
+  3. The readout per stored block, & feature importance
   4. Intrinsic dimension profiling
   5. CCGP (cross-condition generalization)
   6. Topology & hyperbolicity
   7. Silhouette & clustering
-  8. Contrastive projection (optional, requires torch)
+  8. Nonlinear embedding probe (optional, requires torch)
   9. Semantic independence (optional, requires sentence-transformers)
-  10. Prediction scorecard
+  10. Prediction scorecard: the standing expectations, scored
   11. Manifold geometry (curvature, geodesic, anisotropy)
 
 Sections are declared in the ``SECTIONS`` registry below and dispatched by a
@@ -83,7 +83,14 @@ from .schemas import (
     TopologyResult,
     migrate_banked_results,
 )
-from .utils import clean_for_json, error_stub_reason, is_error_stub, section_reading
+from .utils import (
+    BLOCK_READOUT_LIMIT,
+    clean_for_json,
+    error_stub_reason,
+    is_error_stub,
+    print_caveat,
+    section_reading,
+)
 
 
 @dataclass(frozen=True)
@@ -147,7 +154,12 @@ def _run_semantic(ctx: dict[str, Any]) -> Any:
 
 
 def _run_scorecard(ctx: dict[str, Any]) -> Any:
-    return _lazy_call("scorecard", "run_scorecard", ctx["results"])
+    # The lane travels with the request because a verdict has to say what corpus it
+    # is about, and the lane is where a drawn bank is distinguishable from a measured
+    # one at all.
+    return _lazy_call(
+        "scorecard", "run_scorecard", ctx["results"], lane_id=ctx["data"].run4.lane_id,
+    )
 
 
 SECTIONS: list[SectionSpec] = [
@@ -155,7 +167,7 @@ SECTIONS: list[SectionSpec] = [
                 _run_data_only("integrity", "run_integrity_checks")),
     SectionSpec(2, "Classification", "classification",
                 _run_data_only("classification", "run_classification")),
-    SectionSpec(3, "Legacy Bin Readout", "legacy_bin_readout",
+    SectionSpec(3, "Per-Block Readout", "legacy_bin_readout",
                 _run_data_only("legacy_bin_readout", "run_legacy_bin_readout")),
     SectionSpec(4, "Intrinsic Dimension", "intrinsic_dimension",
                 _run_data_only("geometry", "run_intrinsic_dimension")),
@@ -165,7 +177,7 @@ SECTIONS: list[SectionSpec] = [
                 _run_data_only("geometry", "run_topology")),
     SectionSpec(7, "Clustering", "clustering",
                 _run_data_only("clustering", "run_clustering")),
-    SectionSpec(8, "Contrastive Projection", "contrastive",
+    SectionSpec(8, "Nonlinear Embedding Probe", "contrastive",
                 _run_data_only("contrastive", "run_contrastive")),
     SectionSpec(9, "Semantic Independence", "semantic",
                 _run_semantic, requires_text=True),
@@ -491,7 +503,9 @@ def _print_summary(results: dict) -> None:
         if block_clf is not None and block_clf.permutation_test is not None:
             print(f"  Permutation p ({block}): {block_clf.permutation_test.p_value}")
 
-    # The readout over the stored blocks
+    # The readout per stored block. The ranking and the ordering flag are printed
+    # under the limit that holds them, because a ranking read without it is read as
+    # a claim about substrates.
     ablation = results.get("legacy_bin_readout")
     if isinstance(ablation, LegacyBinReadoutResult) and ablation.block_ranking:
         rank_str = " > ".join(
@@ -499,9 +513,10 @@ def _print_summary(results: dict) -> None:
         )
         print(f"\n  Block ranking: {rank_str}")
         print(
-            "  cache > attention > norms: "
-            f"{ablation.cache_beats_attention_beats_norms}"
+            f"  Ordering {CACHE_AND_KEYS} > {ATTENTION_AND_DELTAS} > "
+            f"{NORMS_AND_OUTPUT_STATS}: {ablation.cache_beats_attention_beats_norms}"
         )
+        print_caveat(BLOCK_READOUT_LIMIT, indent="    ")
 
     # ID
     id_data = results.get("intrinsic_dimension")
@@ -562,7 +577,8 @@ def _print_summary(results: dict) -> None:
             parts.append(f"sub-semantic modes={n_sub}")
             print(f"    {block_name}: {', '.join(parts)}")
 
-    # Scorecard
+    # Scorecard. Each row's own caveat is printed under its verdict rather than once
+    # at the end: a reader who stops at the row they care about has to meet it.
     sc = results.get("scorecard")
     if isinstance(sc, ScorecardResult):
         summary = sc.summary
@@ -570,8 +586,12 @@ def _print_summary(results: dict) -> None:
               f"{summary.confirmed} confirmed, "
               f"{summary.partial} partial, "
               f"{summary.wrong} wrong")
+        if sc.corpus_caveat is not None:
+            print_caveat(sc.corpus_caveat, indent="    ")
         for pred in sc.predictions:
             print(f"    {pred.prediction}: {pred.outcome}")
+            if pred.caveat is not None:
+                print_caveat(pred.caveat, indent="      ")
 
     # Section times
     times = results.get("section_times", {})

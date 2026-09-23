@@ -1,8 +1,15 @@
-"""Section 10 schemas: the pre-registered predictions, scored.
+"""Section 10 schemas: the standing expectations, scored.
 
-Each prediction with the value that decided it and a confirmed/partial/wrong
+Each expectation with the value that decided it and a confirmed/partial/wrong
 outcome, plus the tally. This section consumes other sections rather than the
 data, which is why the orchestrator reruns it every time.
+
+Two fields exist so that a verdict cannot travel without what bounds it.
+``ScorecardPrediction.caveat`` carries the limit on one row's reading, and
+``ScorecardResult.corpus_caveat`` carries what the corpus under the pass is and is
+not. Both are written into the results file and both are printed beside the
+verdict, because a limit kept in a docstring is a limit the reader of the output
+never meets.
 """
 
 from __future__ import annotations
@@ -13,7 +20,7 @@ from anamnesis.analysis.gauntlet.schemas.base import _FORBID
 
 
 class ScorecardPrediction(BaseModel):
-    """One row of the pre-registered prediction scorecard.
+    """One row of the prediction scorecard: an expectation, its threshold, its verdict.
 
     Each of the 9 predictions carries different evidence fields, so
     the per-prediction extras (values, expected_order, mean_norms_and_attention_id,
@@ -35,6 +42,12 @@ class ScorecardPrediction(BaseModel):
     # whose evidence is absent is unscored, never scored WRONG — a missing
     # measurement is not a failed one.
     unscorable_because: str | None = None
+
+    # The limit on what this row's verdict supports, when the reading it scores
+    # supports less than its own wording would suggest. It travels with the row so
+    # that the outcome and the limit reach a reader together, whether the reader is
+    # looking at the printed summary or at the results file.
+    caveat: str | None = None
 
     # Per-prediction evidence fields (at most a subset per row)
     metric: str | None = None
@@ -72,7 +85,7 @@ class ScorecardSummary(BaseModel):
 
 
 class ScorecardResult(BaseModel):
-    """Section 10 result: pre-registered 8B prediction evaluation.
+    """Section 10 result: the nine standing expectations, scored on this corpus.
 
     Every row is always present, so the scorecard is a complete answer about all
     nine predictions whatever the upstream sections managed: a row whose evidence
@@ -86,3 +99,9 @@ class ScorecardResult(BaseModel):
     predictions: list[ScorecardPrediction]
     summary: ScorecardSummary
     error: str | None = None
+
+    # What corpus the nine expectations were fixed against, and what the corpus
+    # under this pass is. A verdict describes the agreement between the two, so a
+    # pass over some other corpus states that here rather than letting a reader take
+    # CONFIRMED for a finding about their own model.
+    corpus_caveat: str | None = None

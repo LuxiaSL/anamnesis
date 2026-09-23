@@ -1,4 +1,12 @@
-"""Section 8: Contrastive projection (MLP + triplet loss).
+"""Section 8: the nonlinear rung of the probe ladder — a learned embedding, read by kNN.
+
+This section is not a feature family and adds no columns to a signature. It trains a
+small network on triplets drawn from the mode labels, so that same-mode states are
+close and different-mode states are not, and then reads the embedding it produced with
+a kNN and a silhouette on held-out topics. Beside it run LDA and NCA over the same
+folds: those are the linear rung, and the difference between the two is what the
+section is for. A linear probe answers whether modes are separable by a hyperplane;
+this answers whether they are separable at all.
 
 The network and the law it is trained under are not defined here: they live in
 :mod:`anamnesis.analysis.contrastive_mlp`, which holds both training laws this
@@ -53,6 +61,14 @@ N_TOPIC_FOLDS = 5
 capacity sweep, the ablation grid and the linear baselines are compared with each
 other and a fold count that differed between them would make them incomparable."""
 
+CAPACITIES = (64, 128, 256, 512)
+"""Network widths the capacity sweep fits, each on every fold.
+
+Named rather than inlined because the section states its own cost before paying it,
+and a count stated in prose beside a list written somewhere else is a count that goes
+stale the moment the list changes.
+"""
+
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 """Whether a trainer can run at all. Probed rather than imported: this section is
 optional, and a pass that reports its absence should not pay for loading torch to
@@ -87,13 +103,20 @@ def build_topic_folds(
 
 
 def run_contrastive(data: AnalysisData) -> ContrastiveResult:
-    """Run contrastive projection analysis."""
+    """Fit a learned embedding per fold, read it by kNN, and sit it beside two linear ones.
+
+    Returns the two unions' readings, the capacity sweep, the block ablation and the
+    linear baselines, or an error stub naming what it could not do: torch absent, a
+    block the corpus does not hold, or fewer topics than there are folds to hold out.
+    """
     if not HAS_TORCH:
-        return ContrastiveResult(error="PyTorch not installed — skipping contrastive projection")
+        return ContrastiveResult(
+            error="PyTorch not installed — the learned embedding has no trainer",
+        )
 
     absent = absence_reason(data, ATTENTION_AND_CACHE, ALL_CORE)
     if absent is not None:
-        return ContrastiveResult(error=f"contrastive projection reads {absent}")
+        return ContrastiveResult(error=f"the embedding probe reads {absent}")
 
     # Every reading below holds out topics, so a corpus with fewer topics than
     # folds is stated here rather than refused from inside the partitioner.
@@ -101,15 +124,25 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
     if n_topics < N_TOPIC_FOLDS:
         return ContrastiveResult(
             error=(
-                f"contrastive projection holds out {N_TOPIC_FOLDS} topic folds and "
+                f"the embedding probe holds out {N_TOPIC_FOLDS} topic folds and "
                 f"this corpus has {n_topics} topics"
             ),
         )
 
+    # Said before the minutes are spent, because this is the longest section of a pass
+    # and a reader watching it should know it is buying a grid of fits rather than one.
+    print(
+        f"    Every reading here fits its own embedding on each of {N_TOPIC_FOLDS} "
+        f"topic-held-out folds: two unions, {len(CAPACITIES)} network widths, every "
+        "block alone, every pair of core blocks, and two core combinations. That grid "
+        "is where the section's minutes go. LDA and NCA over the same folds are the "
+        "linear rung the nonlinear numbers are read against."
+    )
+
     block_results: dict[str, ContrastiveBlockResult] = {}
 
     for block_name in [ATTENTION_AND_CACHE, ALL_CORE]:
-        print(f"    Contrastive: {block_name}")
+        print(f"    Embedding: {block_name}")
         X = data.get_block(block_name)
         X_scaled = StandardScaler().fit_transform(X)
 
@@ -146,13 +179,12 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
         )
 
     # Capacity sweep (the attention-and-cache union only)
-    print("    Capacity sweep...")
+    print("    Capacity sweep over network width...")
     X_key = StandardScaler().fit_transform(data.get_block(ATTENTION_AND_CACHE))
     folds = build_topic_folds(data.topics, n_folds=N_TOPIC_FOLDS, seed=42)
-    capacities = [64, 128, 256, 512]
     capacity_results: dict[str, CapacitySweepEntry] = {}
 
-    for hidden_dim in capacities:
+    for hidden_dim in CAPACITIES:
         fold_accs = []
         fold_sils = []
         for train_mask, test_mask in folds:
@@ -178,12 +210,12 @@ def run_contrastive(data: AnalysisData) -> ContrastiveResult:
             silhouette=float(np.mean(fold_sils)) if fold_sils else None,
         )
 
-    # Contrastive block ablation (per-block + pairwise)
-    print("    Contrastive block ablation...")
+    # Block ablation (per-block + pairwise), one embedding per fold per feature set
+    print("    Block ablation, an embedding per block and per core pair...")
     ablation = _run_contrastive_block_ablation(data)
 
-    # Linear projection baselines (LDA / NCA) — compare to nonlinear MLP
-    print("    Linear projection baselines...")
+    # Linear projection baselines (LDA / NCA) — the rung below the learned embedding
+    print("    Linear projection baselines, the rung below...")
     baselines = _run_linear_baselines(data)
 
     return ContrastiveResult(
