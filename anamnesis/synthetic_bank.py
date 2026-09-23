@@ -23,15 +23,18 @@ that construction and both matter:
 Two more things the construction is careful about, both so that reading the demo teaches
 the instrument rather than an artefact of the fixture:
 
-* every block gets the **same separating strength per column**: each block's slice of the
-  mode offsets is rescaled to one root-mean-square, so no block carries more signal per
-  feature than another. That is the whole of the normalization, and it is less than equal
-  accuracy. Separation accumulates over a block's columns, so at equal per-column
-  strength a wider block separates the modes better, and among blocks of one width the
-  draw decides the rest. A per-block readout over this bank consequently ranks blocks by
-  their widths and by the seed. **Read any block ordering the demo prints as a property
-  of the fixture**: the generator has no substrates for an ordering to be about, and the
-  claim this project had to revise was exactly a claim that one bin was load-bearing.
+* **no block is staged as more informative than another.** Each block's slice of the mode
+  offsets is rescaled so the separation between mode centroids comes out the same in every
+  block whatever its width. That is deliberately not the same as equal strength per
+  column: separation accumulates over a block's columns, so equalizing per column would
+  hand the widest block the strongest readout, and a per-block ranking would then be a
+  statement about the widths — which are an arbitrary property of this fixture. What
+  survives is the draw, which moves the strongest block from seed to seed. The remaining
+  spread and the absence of a width trend are pinned in `tests/test_synthetic_bank.py`,
+  because a change to the widths or the noise could quietly reintroduce the bias.
+  **Read any block ordering the demo prints as a property of the fixture**: the generator
+  has no substrates for an ordering to be about, and the claim this project had to revise
+  was exactly a claim that one bin was load-bearing.
 * every block is written, so no union is short and no section has to state an absence
   it would only be stating about the fixture.
 
@@ -171,22 +174,32 @@ def _mode_offsets(
     spans: dict[str, tuple[int, int]],
     scale: float,
 ) -> np.ndarray:
-    """Per-mode offsets whose separating strength per column is equal in every block.
+    """Per-mode offsets that separate the modes equally well in every block.
 
-    Each block's slice is rescaled to the same root-mean-square, so no block carries
-    more signal per feature than another. Two things survive that rescaling and both
-    are properties of the fixture rather than of any substrate: width, because
-    separation accumulates over columns and the block widths differ, and the draw
-    itself, because five offsets in a dozen-odd dimensions land differently under
-    different seeds. So a readout over a bank written here ranks blocks, and the
-    ranking is about the widths and the seed.
+    What a classifier reads is a block's *total* separation, not its strength per
+    column: the distance between two mode centroids grows as the square root of the
+    number of columns it is measured over. So equalizing per column would hand the
+    widest block the strongest readout — and a per-block ranking would then be a
+    statement about the block widths, which are an arbitrary property of this
+    fixture.
+
+    Each block's slice is therefore rescaled so that its centroid separation is the
+    same in every block, whatever its width. The narrow blocks carry more signal per
+    column and the wide ones less, which is the trade that buys a flat readout.
+
+    The target is the separation a block of the *mean* width would have had under
+    per-column normalization, rather than a bare constant, so that equalizing does
+    not also change how strongly the bank separates overall. ``scale`` therefore
+    keeps meaning roughly what it meant, and the remaining spread across blocks is
+    the draw alone.
     """
     width = max(stop for _, stop in spans.values())
+    mean_columns = sum(stop - start for start, stop in spans.values()) / len(spans)
     offsets = rng.normal(size=(n_modes, width))
     for start, stop in spans.values():
         block = offsets[:, start:stop]
         rms = np.sqrt(np.mean(block**2))
-        offsets[:, start:stop] = block / rms * scale
+        offsets[:, start:stop] = block / rms * scale * np.sqrt(mean_columns / (stop - start))
     return offsets
 
 

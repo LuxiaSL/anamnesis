@@ -147,10 +147,19 @@ def test_mode_is_recoverable_and_topic_is_not_a_stand_in(tmp_path: Path) -> None
     data = load_run4(bank.directory, core_only=False)
     features = data.group_features[ALL_FAMILIES]
 
+    # Shrinkage is a requirement here, not a preference: this bank offers 62 features
+    # over 100 rows, so an unregularized discriminant is fitting more directions than
+    # the folds support and lands near chance whatever structure is present. Covariance
+    # shrinkage is what makes the readout a statement about the bank rather than about
+    # the estimator, and it holds across draws — an unregularized fit does not, which
+    # would make this assertion a property of the seed.
     by_mode = cross_val_score(
-        LinearDiscriminantAnalysis(), features, data.modes, cv=4
+        LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto"),
+        features,
+        data.modes,
+        cv=4,
     ).mean()
-    assert by_mode > 0.5, by_mode
+    assert by_mode > 0.7, by_mode
 
     # Every topic appears once under every mode, so the topic label carries no
     # information about the mode: the design, not the draw, is what rules the leak out.
@@ -158,14 +167,66 @@ def test_mode_is_recoverable_and_topic_is_not_a_stand_in(tmp_path: Path) -> None
     assert len(pairs) == len(set(pairs)) == len(spec.modes) * spec.topics
 
 
-def test_no_family_is_staged_as_the_load_bearing_one() -> None:
-    spans, _ = _block_layout(DEFAULT_BLOCK_WIDTHS)
-    offsets = _mode_offsets(np.random.default_rng(0), 5, spans, scale=0.4)
+def _centroid_separations(offsets: np.ndarray, spans: dict[str, tuple[int, int]]) -> dict[str, float]:
+    """Mean pairwise distance between mode centroids, per block."""
+    out: dict[str, float] = {}
+    for block, (start, stop) in spans.items():
+        slice_ = offsets[:, start:stop]
+        pairs = [
+            float(np.linalg.norm(slice_[i] - slice_[j]))
+            for i in range(len(slice_))
+            for j in range(i + 1, len(slice_))
+        ]
+        out[block] = float(np.mean(pairs))
+    return out
 
-    strengths = [
-        float(np.sqrt(np.mean(offsets[:, start:stop] ** 2))) for start, stop in spans.values()
+
+def test_no_block_is_staged_as_the_load_bearing_one() -> None:
+    """Every block separates the modes equally, averaged over the draw.
+
+    The quantity that has to match is *centroid separation*, not strength per column.
+    Separation accumulates over a block's columns, so equal per-column strength gives
+    the widest block the strongest readout — and the block widths here are arbitrary,
+    so a ranking that followed them would read as a statement about substrates. This
+    asserts the invariant the construction actually needs.
+    """
+    spans, _ = _block_layout(DEFAULT_BLOCK_WIDTHS)
+    per_seed = [
+        _centroid_separations(_mode_offsets(np.random.default_rng(seed), 5, spans, scale=0.4), spans)
+        for seed in range(30)
     ]
-    assert strengths == pytest.approx([0.4] * len(spans))
+    mean = {block: float(np.mean([s[block] for s in per_seed])) for block in spans}
+
+    widest = max(spans, key=lambda b: spans[b][1] - spans[b][0])
+    narrowest = min(spans, key=lambda b: spans[b][1] - spans[b][0])
+    spread = max(mean.values()) - min(mean.values())
+
+    # Normalizing per column instead would spread these separations by roughly 0.95 on
+    # these widths and put the narrowest block last in most draws. A tenth of that, with
+    # no ordering by width, is what separates a flat fixture from one staging a substrate.
+    assert spread < 0.15, mean
+    assert mean[narrowest] == pytest.approx(mean[widest], rel=0.05), mean
+
+
+def test_block_separation_does_not_track_width() -> None:
+    """The residual spread is the draw, so it must not correlate with width.
+
+    A width trend is the specific failure this construction exists to avoid: it is how
+    a fixture would teach a reader that one substrate carries the signal. Pearson
+    correlation over the seven blocks, averaged across draws, has no reason to be
+    large unless the normalization has regressed.
+    """
+    spans, _ = _block_layout(DEFAULT_BLOCK_WIDTHS)
+    widths = np.array([spans[b][1] - spans[b][0] for b in spans], dtype=float)
+    correlations: list[float] = []
+    for seed in range(30):
+        sep = _centroid_separations(
+            _mode_offsets(np.random.default_rng(seed), 5, spans, scale=0.4), spans
+        )
+        values = np.array([sep[b] for b in spans], dtype=float)
+        correlations.append(float(np.corrcoef(widths, values)[0, 1]))
+
+    assert abs(float(np.mean(correlations))) < 0.35, float(np.mean(correlations))
 
 
 def test_an_unknown_block_label_is_refused() -> None:
