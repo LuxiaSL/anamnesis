@@ -277,7 +277,7 @@ Four gates guard a change, and each is a command you can run yourself. They live
 | gate | checker |
 |---|---|
 | G1 data compatibility — banked artifacts in, identical features out | `tools/g1_hash_manifest.py` |
-| G2 consolidation — a consolidated module smaller than its donors, test lines not shrinking | `tools/g2_loc_report.py` |
+| G2 test retention — a change that shrinks the suite shrinks the package by at least as many lines | `tools/check_test_retention.py` |
 | G3 documentation — the two documentation rules, over comments, docstrings and the message a `raise` or a log says out loud | `tools/check_timelessness.py` and `tools/check_referents.py` |
 | G4 import closure — every module reachable from a command or a test; no orphans | `tools/check_import_closure.py` |
 
