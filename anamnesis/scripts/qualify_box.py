@@ -46,7 +46,7 @@ from typing import Any
 
 import numpy as np
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names, resolve_preset
 from anamnesis.extraction.equivalence.fidelity import (
     FidelityError,
     ReplayBatch,
@@ -67,7 +67,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="qualify_box.py", description=__doc__.splitlines()[0]
     )
-    p.add_argument("--model", choices=tuple(MODEL_PRESETS), required=True)
+    p.add_argument("--model", choices=preset_names(), required=True)
     p.add_argument("--model-path", required=True, help="Local checkpoint directory")
     p.add_argument("--calib-dir", type=Path, required=True)
     p.add_argument(
@@ -133,7 +133,7 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
     require_lane_arithmetic()
     entries, ids = select_rows(args)
     runtime = resolve_fast_lane(
-        preset=MODEL_PRESETS[args.model],
+        preset=resolve_preset(args.model),
         model_path=args.model_path,
         calib_dir=args.calib_dir,
         entries=entries,

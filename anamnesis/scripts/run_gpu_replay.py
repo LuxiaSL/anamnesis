@@ -93,7 +93,7 @@ def main():
         raise FileExistsError(args.output)
     require_lane_arithmetic()
     import torch
-    from anamnesis.config import MODEL_PRESETS
+    from anamnesis.config import resolve_preset
     from anamnesis.extraction.state_extractor import ExtractionResult
     from anamnesis.extraction.feature_pipeline import save_features
 
@@ -106,7 +106,7 @@ def main():
     if source_path is not None and any(i not in source_metadata for i in ids):
         raise ValueError("source metadata is missing selected generation IDs")
     runtime = resolve_fast_lane(
-        preset=MODEL_PRESETS[args.model],
+        preset=resolve_preset(args.model),
         model_path=args.model_path,
         calib_dir=args.calib_dir,
         entries=entries,

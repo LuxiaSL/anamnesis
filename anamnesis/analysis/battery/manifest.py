@@ -15,6 +15,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from anamnesis.config.models import ModelPreset, presets_with_floors, resolve_preset
+
 
 class Arm(str, Enum):
     """The perturbation classes (``A``-prefixed) and the nulls (``N``) read beside them.
@@ -58,6 +60,10 @@ class FloorType(str, Enum):
 class ModelMeta(BaseModel):
     """Analyzer-side metadata per onboarded model label.
 
+    Every field is read off the model's registry row rather than restated here:
+    a depth or a native temperature written down twice is two facts that can
+    disagree, and the row is the one that extraction ran under.
+
     `label` is the model's preset key, and what an arm corpus directory is named
     after (vmb_a1_{label}_{dose}). `stage0_dir` is the banked Stage-0 run name,
     which spells some labels differently (qwen7b, not qwen-7b) because those
@@ -71,21 +77,45 @@ class ModelMeta(BaseModel):
     stage0_dir: str          # outputs/battery/<stage0_dir> holds the model's floors
     native_temperature: float
 
+    @classmethod
+    def from_preset(cls, preset: ModelPreset) -> ModelMeta:
+        """One registry row as analyzer-side metadata.
 
-MODEL_META: dict[str, ModelMeta] = {
-    "3b": ModelMeta(label="3b", n_layers=28, stage0_dir="vmb_stage0_3b",
-                    native_temperature=0.7),
-    "8b": ModelMeta(label="8b", n_layers=32, stage0_dir="vmb_stage0_8b",
-                    native_temperature=0.6),
-    "qwen-7b": ModelMeta(label="qwen-7b", n_layers=28, stage0_dir="vmb_stage0_qwen7b",
-                         native_temperature=0.7),
-    "olmo2-7b": ModelMeta(label="olmo2-7b", n_layers=32,
-                          stage0_dir="vmb_stage0_olmo2_7b", native_temperature=0.7),
-    "gemma3-27b": ModelMeta(label="gemma3-27b", n_layers=62,
-                            stage0_dir="vmb_stage0_gemma3_27b", native_temperature=1.0),
-    "dsv2-lite": ModelMeta(label="dsv2-lite", n_layers=27,
-                           stage0_dir="vmb_stage0_dsv2_lite", native_temperature=0.3),
-}
+        Raises
+        ------
+        ValueError
+            When the row declares no Stage-0 directory, which means the model has
+            no floors banked and so nothing on the battery side to read.
+        """
+        if not preset.stage0_dir:
+            raise ValueError(
+                f"model {preset.name!r} declares no stage0_dir, so it has no banked floors; "
+                "add one to its registry row before reading it as a battery model"
+            )
+        return cls(
+            label=preset.name,
+            n_layers=preset.num_layers,
+            stage0_dir=preset.stage0_dir,
+            native_temperature=preset.temperature,
+        )
+
+
+def model_meta_all() -> dict[str, ModelMeta]:
+    """Every registered model that has floors banked, keyed by its label."""
+    return {key: ModelMeta.from_preset(row) for key, row in presets_with_floors().items()}
+
+
+def model_meta(label: str) -> ModelMeta:
+    """One model's analyzer-side metadata.
+
+    Raises
+    ------
+    UnknownPresetError
+        When the label names no registry row.
+    ValueError
+        When the row it names has no Stage-0 directory.
+    """
+    return ModelMeta.from_preset(resolve_preset(label))
 
 
 class BatteryCell(BaseModel):

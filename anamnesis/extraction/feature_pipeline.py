@@ -42,7 +42,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from anamnesis.config import (
-    MODEL_PRESETS,
+    preset_names,
     ExtractionConfig,
     FeaturePipelineConfig,
 )
@@ -765,7 +765,7 @@ def main() -> None:
         help="Enable v2 pipeline with pluggable feature families",
     )
     parser.add_argument(
-        "--model", choices=list(MODEL_PRESETS.keys()), required=True,
+        "--model", choices=list(preset_names()), required=True,
         help="Model preset the layer plan comes from (sampled_layers, pca_layers, "
              "trajectory_layers, contrastive_layers, depth bands). Required: a layer "
              "index means a different fraction of the network in each model, so there "

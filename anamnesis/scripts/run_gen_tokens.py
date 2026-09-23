@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names
 from anamnesis.extraction.interventions import injection_fields
 from anamnesis.orchestration.gpu import THREAD_LIMIT_ENV
 
@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument("--model-path", required=True, help="Local checkpoint directory")
     p.add_argument("--spec-file", type=Path, default=None, help="JSON list of generation specs")
     p.add_argument("--out-dir", type=Path, default=None, help="Where the records for those specs go")

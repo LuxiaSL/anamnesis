@@ -3,8 +3,8 @@
 A **preset** is everything that varies between models: the checkpoint, its
 dtype, its architecture, the layers extraction samples, its native decode
 parameters, its end-of-generation tokens, and where its calibration artifacts
-live. :data:`MODEL_PRESETS` is the registry of those facts, and it is the only
-place they are written down.
+live. The registry of those facts is :data:`MODELS_FILE`, a JSON file beside this
+module, because adding a model is adding a row and a row is not a code change.
 
 A **config** is what a caller hands to a loader or an extractor. Every config in
 this package is built from a preset by a ``from_preset`` constructor — never by
@@ -13,7 +13,26 @@ that names a model gets an architecture, a layer plan, a decode policy and a
 calibration path that agree with each other, because one function produced all
 four from one row of data.
 
-Two constraints are enforced here rather than left to a reader:
+Extending the registry
+----------------------
+
+:data:`MODELS_ENV` names further registry files, separated the way ``PATH`` is,
+and every one of them is merged over the shipped file. So a model this package
+never heard of is onboarded by writing a row:
+
+.. code-block:: json
+
+    {"presets": {"my-model": {"name": "my-model", "model_id": "...", "...": "..."}}}
+
+Merging is **additive and refuses collisions.** A row cannot redefine a shipped
+preset, alias or depth, because a banked corpus's label means the shipped row and
+silently reshaping it would change what every stored vector was produced under.
+A variant of a shipped model is a new key, and the refusal names the key and the
+two files it came from. A file named in the environment that cannot be read is an
+error rather than a fall-through: a registry that quietly ignored it would resolve
+the shipped name and run the wrong model.
+
+Three constraints are enforced here rather than left to a reader:
 
 * ``attn_implementation`` must return attention weights. Fused attention
   kernels do not, and extraction that silently loses them produces feature
@@ -23,14 +42,20 @@ Two constraints are enforced here rather than left to a reader:
   Under grouped-query attention the two differ, attention weights index by query
   head while the cache indexes by key/value head, and per-head analysis is wrong
   whenever the group size is not exact.
+* A run-name prefix resolves to one model. Prefixes come from registry keys,
+  aliases, each row's ``run_prefixes`` and the depth-only rows, and two models
+  claiming one prefix is refused — otherwise :func:`layer_counts_by_run_prefix`
+  would hand a corpus another model's depth.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from anamnesis.config.paths import DataRoot, resolve_data_path
 
@@ -45,6 +70,16 @@ ATTENTION_WITHOUT_WEIGHTS: frozenset[str] = frozenset(
 EAGER_ATTENTION = "eager"
 """The attention implementation extraction requires."""
 
+MODELS_FILE: Path = Path(__file__).resolve().parent / "models.json"
+"""The registry file this package ships."""
+
+MODELS_ENV = "ANAMNESIS_MODELS"
+"""Environment variable naming further registry files, separated like ``PATH``."""
+
+
+class ModelRegistryError(RuntimeError):
+    """A registry file is missing, unreadable, or not what this module expects."""
+
 
 class UnknownPresetError(KeyError):
     """A preset name that the registry does not hold."""
@@ -53,7 +88,7 @@ class UnknownPresetError(KeyError):
 class ModelPreset(BaseModel):
     """The per-model facts every configuration is derived from.
 
-    Layer fields are tuples because the registry is process-global: a consumer
+    Layer fields are tuples because a registry is process-global: a consumer
     that received a preset cannot reshape another consumer's layer plan.
     """
 
@@ -88,6 +123,28 @@ class ModelPreset(BaseModel):
     calibration_root: DataRoot = Field(description="Which data root the calibration directory hangs from")
     calibration_dir: str = Field(description="Calibration directory, relative to its root")
 
+    stage0_dir: str | None = Field(
+        default=None,
+        description=(
+            "Directory under the outputs root's battery tree holding this model's floors; "
+            "spelled as it exists on disk, which is not always the registry key. "
+            "None until the model has floors"
+        ),
+    )
+
+    run_prefixes: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Further spellings a run directory of this model may begin with, beyond the "
+            "registry key and the aliases pointing at it"
+        ),
+    )
+
+    notes: str = Field(
+        default="",
+        description="What a reader of this row needs to know about the checkpoint itself",
+    )
+
     attention_layer_types: dict[int, AttentionKind] | None = Field(
         default=None,
         description=(
@@ -117,6 +174,16 @@ class ModelPreset(BaseModel):
         if len(set(ids)) != len(ids):
             raise ValueError(f"eos_token_ids repeats a token: {ids}")
         return ids
+
+    @field_validator("run_prefixes")
+    @classmethod
+    def _prefixes_are_usable(cls, prefixes: tuple[str, ...]) -> tuple[str, ...]:
+        for prefix in prefixes:
+            if not prefix.strip() or prefix != prefix.strip():
+                raise ValueError(f"run_prefixes holds {prefix!r}; a prefix is non-empty and untrimmed")
+        if len(set(prefixes)) != len(prefixes):
+            raise ValueError(f"run_prefixes repeats a spelling: {prefixes}")
+        return prefixes
 
     @model_validator(mode="after")
     def _coherent(self) -> Self:
@@ -181,241 +248,279 @@ class ModelPreset(BaseModel):
         return tuple(layer for layer in self.sampled_layers if self.attention_kind(layer) == "global")
 
 
-MODEL_PRESETS: dict[str, ModelPreset] = {
-    "8b": ModelPreset(
-        name="8b",
-        model_id="meta-llama/Llama-3.1-8B-Instruct",
-        torch_dtype="bfloat16",
-        num_layers=32,
-        hidden_dim=4096,
-        num_attention_heads=32,
-        num_kv_heads=8,
-        head_dim=128,
-        # Proportional depth sampling at [0%, 25%, 50%, 63%, 75%, 88%, 97%], denser
-        # through 60-80% where mode signal concentrates.
-        sampled_layers=(0, 8, 16, 20, 24, 28, 31),
-        pca_layers=(8, 16, 20, 24, 28),
-        trajectory_layers=(8, 16, 20, 24, 28),
-        contrastive_layers=(8, 16, 20, 24, 28),
-        early_layer_cutoff=8,
-        late_layer_cutoff=24,
-        temperature=0.6,
-        top_p=0.9,
-        max_new_tokens=512,
-        # 128001 end-of-text, 128008 end-of-message, 128009 end-of-turn.
-        eos_token_ids=(128001, 128008, 128009),
-        calibration_root="outputs",
-        calibration_dir="calibration/llama31_8b",
-    ),
-    "3b": ModelPreset(
-        name="3b",
-        model_id="meta-llama/Llama-3.2-3B-Instruct",
-        torch_dtype="float16",
-        num_layers=28,
-        hidden_dim=3072,
-        num_attention_heads=24,
-        num_kv_heads=8,
-        head_dim=128,
-        sampled_layers=(0, 7, 14, 18, 21, 24, 27),
-        pca_layers=(7, 14, 18, 21, 24),
-        trajectory_layers=(7, 14, 18, 21, 24),
-        contrastive_layers=(7, 14, 18, 21, 24),
-        early_layer_cutoff=7,
-        late_layer_cutoff=21,
-        temperature=0.7,
-        top_p=0.9,
-        max_new_tokens=512,
-        # 128001 end-of-text, 128009 end-of-turn; this checkpoint has no
-        # end-of-message token.
-        eos_token_ids=(128001, 128009),
-        # The 3B corpus and its calibration live in the Phase-0 tree, reached
-        # through the legacy-data root.
-        calibration_root="legacy",
-        calibration_dir="outputs/calibration",
-    ),
-    "olmo2-7b": ModelPreset(
-        # A base checkpoint with no chat template: bare prompts only, and no
-        # system prompt. Full multi-head attention, so the grouped-query caveat
-        # about head indexing does not apply. Query and key RMSNorm sit between
-        # the projections and RoPE, so k_proj hooks capture pre-norm pre-RoPE
-        # keys: position-free holds, but the substrate is not a Llama
-        # checkpoint's post-projection keys.
-        name="olmo2-7b",
-        model_id="allenai/OLMo-2-1124-7B",
-        torch_dtype="bfloat16",
-        num_layers=32,
-        hidden_dim=4096,
-        num_attention_heads=32,
-        num_kv_heads=32,
-        head_dim=128,
-        sampled_layers=(0, 8, 16, 20, 24, 28, 31),
-        pca_layers=(8, 16, 20, 24, 28),
-        trajectory_layers=(8, 16, 20, 24, 28),
-        contrastive_layers=(8, 16, 20, 24, 28),
-        early_layer_cutoff=8,
-        late_layer_cutoff=24,
-        temperature=0.7,
-        top_p=0.9,
-        max_new_tokens=512,
-        eos_token_ids=(100257,),
-        calibration_root="outputs",
-        calibration_dir="calibration/olmo2_7b",
-    ),
-    "gemma3-27b": ModelPreset(
-        # A multimodal wrapper class, so decoder layers resolve through the
-        # loader's layer-finding helper rather than a fixed attribute path.
-        # Attention interleaves five local sliding-window layers to one global
-        # layer, global at every sixth: the sampled layers prefer global ones,
-        # with layer 0 kept local as the early-band anchor.
-        name="gemma3-27b",
-        model_id="google/gemma-3-27b-it",
-        torch_dtype="bfloat16",
-        num_layers=62,
-        hidden_dim=5376,
-        num_attention_heads=32,
-        num_kv_heads=16,
-        head_dim=128,
-        sampled_layers=(0, 11, 23, 35, 41, 53, 59),
-        pca_layers=(11, 23, 35, 41, 53),
-        trajectory_layers=(11, 23, 35, 41, 53),
-        contrastive_layers=(11, 23, 35, 41, 53),
-        early_layer_cutoff=15,
-        late_layer_cutoff=46,
-        # The model card's native sampling.
-        temperature=1.0,
-        top_p=0.95,
-        max_new_tokens=512,
-        eos_token_ids=(1, 106),
-        calibration_root="outputs",
-        calibration_dir="calibration/gemma3_27b",
-        attention_layer_types={
-            0: "local",
-            11: "global",
-            23: "global",
-            35: "global",
-            41: "global",
-            53: "global",
-            59: "global",
-        },
-    ),
-    "qwen-7b": ModelPreset(
-        name="qwen-7b",
-        model_id="Qwen/Qwen2.5-7B-Instruct",
-        torch_dtype="bfloat16",
-        num_layers=28,
-        hidden_dim=3584,
-        num_attention_heads=28,
-        num_kv_heads=4,
-        head_dim=128,
-        sampled_layers=(0, 7, 14, 18, 21, 24, 27),
-        pca_layers=(7, 14, 18, 21, 24),
-        trajectory_layers=(7, 14, 18, 21, 24),
-        contrastive_layers=(7, 14, 18, 21, 24),
-        early_layer_cutoff=7,
-        late_layer_cutoff=21,
-        temperature=0.7,
-        top_p=0.9,
-        max_new_tokens=512,
-        eos_token_ids=(151643, 151645),
-        calibration_root="outputs",
-        calibration_dir="calibration/qwen25_7b",
-    ),
-    "dsv2-lite": ModelPreset(
-        # A mixture-of-experts checkpoint: two shared and sixty-four routed
-        # experts, greedy top-6, layer 0 a dense MLP and layers 1-26 routed.
-        # Load it with trust_remote_code=False — the bundled remote code puts
-        # gate projections per expert, which the routing hooks do not target.
-        # Attention is latent: the keys source is the position-free part of the
-        # fused key/value projection, sliced in
-        # `anamnesis/extraction/model_loader.py`. With no separate key or value
-        # projection module, values and queries are not part of this
-        # checkpoint's feature surface.
-        name="dsv2-lite",
-        model_id="deepseek-ai/DeepSeek-V2-Lite-Chat",
-        torch_dtype="bfloat16",
-        num_layers=27,
-        hidden_dim=2048,
-        # The config's key/value head count, which the attention weights follow;
-        # the keys-source capture is the 512-wide latent, not these heads.
-        num_attention_heads=16,
-        num_kv_heads=16,
-        # The value head width. Query and key heads are 192 wide: 128 content
-        # dimensions and 64 positional ones.
-        head_dim=128,
-        # Proportional depth, mid-heavy. Layer 0 is dense, so it yields no
-        # expert-routing features.
-        sampled_layers=(0, 5, 11, 15, 18, 22, 26),
-        pca_layers=(5, 11, 15, 18, 22),
-        trajectory_layers=(5, 11, 15, 18, 22),
-        contrastive_layers=(5, 11, 15, 18, 22),
-        early_layer_cutoff=7,
-        late_layer_cutoff=20,
-        # The checkpoint's own generation_config.json, which is colder than
-        # every other preset here.
-        temperature=0.3,
-        top_p=0.95,
-        max_new_tokens=512,
-        # A single end-of-sentence token; this checkpoint has no separate
-        # end-of-turn token.
-        eos_token_ids=(100001,),
-        calibration_root="outputs",
-        calibration_dir="calibration/dsv2_lite",
-    ),
-}
+class ModelRegistryFile(BaseModel):
+    """The shape of one registry file: rows, alternative spellings, and depths.
 
-PRESET_ALIASES: dict[str, str] = {
-    "llama31_8b": "8b",
-    "llama32_3b": "3b",
-    "llama-3.1-8b": "8b",
-    "llama-3.2-3b": "3b",
-    "olmo2_7b": "olmo2-7b",
-    "gemma3_27b": "gemma3-27b",
-    "qwen25_7b": "qwen-7b",
-    "qwen2.5-7b": "qwen-7b",
-    "dsv2_lite": "dsv2-lite",
-}
-"""Longer spellings of registry keys, including the names calibration directories use."""
+    ``run_depths`` is the one fact a model can be in the registry for alone: a
+    run-name prefix and the layer count its depth bands are fractions of. A corpus
+    whose model this package cannot load still needs that denominator, and nothing
+    else about the model is knowable from the corpus.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(default="", description="What this file is, for a reader who opens it")
+    presets: dict[str, ModelPreset] = Field(default_factory=dict)
+    aliases: dict[str, str] = Field(
+        default_factory=dict, description="Alternative spelling to the registry key it means"
+    )
+    run_depths: dict[str, int] = Field(
+        default_factory=dict,
+        description="Run-name prefix to layer count, for models with no preset row",
+    )
+
+    @field_validator("run_depths")
+    @classmethod
+    def _depths_are_positive(cls, depths: dict[str, int]) -> dict[str, int]:
+        for prefix, count in depths.items():
+            if count <= 0:
+                raise ValueError(f"run_depths[{prefix!r}]={count}; a layer count is positive")
+        return depths
+
+
+class ModelRegistry(BaseModel):
+    """Every registry file, merged, with the prefix map the depth bands read."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    presets: dict[str, ModelPreset]
+    aliases: dict[str, str]
+    run_depths: dict[str, int]
+    sources: tuple[Path, ...] = Field(description="The files this was read from, in merge order")
+
+    def names(self) -> tuple[str, ...]:
+        """Every registry key, in merge order."""
+        return tuple(self.presets)
+
+    def resolve(self, preset: str) -> ModelPreset:
+        """The preset a name denotes.
+
+        Lookup tries the registry key, then the aliases, then a
+        punctuation-insensitive form of both, so ``dsv2-lite``, ``dsv2_lite`` and
+        ``DSV2_Lite`` all reach one row.
+
+        Raises
+        ------
+        UnknownPresetError
+            Naming every key and alias the registry holds, and the files it read.
+        """
+        if preset in self.presets:
+            return self.presets[preset]
+        if preset in self.aliases:
+            return self.presets[self.aliases[preset]]
+        wanted = _normalise(preset)
+        for key in self.presets:
+            if _normalise(key) == wanted:
+                return self.presets[key]
+        for alias, key in self.aliases.items():
+            if _normalise(alias) == wanted:
+                return self.presets[key]
+        raise UnknownPresetError(
+            f"unknown model preset {preset!r}; "
+            f"presets: {', '.join(sorted(self.presets))}; "
+            f"aliases: {', '.join(sorted(self.aliases))}; "
+            f"read from: {', '.join(str(path) for path in self.sources)}; "
+            f"add a row and name its file in {MODELS_ENV}"
+        )
+
+    def layer_counts_by_run_prefix(self) -> dict[str, int]:
+        """Every run-name prefix this registry answers for, and its layer count.
+
+        A prefix is a registry key, an alias, a row's own ``run_prefixes``, or a
+        depth-only row. Aliases are in because an alias names the same model, so a
+        run directory spelled with one has that model's depth.
+        """
+        counts: dict[str, int] = {}
+        for key, row in self.presets.items():
+            for prefix in (key, *row.run_prefixes):
+                counts[prefix] = row.num_layers
+        for alias, key in self.aliases.items():
+            counts[alias] = self.presets[key].num_layers
+        counts.update(self.run_depths)
+        return counts
+
+
+def _normalise(text: str) -> str:
+    """A spelling with case, underscores and dots removed, for tolerant lookup."""
+    return text.strip().lower().replace("_", "-").replace(".", "")
+
+
+def registry_paths() -> tuple[Path, ...]:
+    """The shipped registry file, then every file named in :data:`MODELS_ENV`.
+
+    The environment value is read at call time rather than at import, so a process
+    can point at another registry without reloading the package.
+    """
+    extra = os.environ.get(MODELS_ENV, "")
+    paths = [MODELS_FILE]
+    for entry in extra.split(os.pathsep):
+        text = entry.strip()
+        if text:
+            paths.append(Path(text).expanduser())
+    return tuple(paths)
+
+
+def _read_file(path: Path) -> ModelRegistryFile:
+    """One registry file, parsed and validated.
+
+    Raises
+    ------
+    ModelRegistryError
+        When the file is absent, is not readable as JSON, does not match the
+        registry shape, or holds a row whose ``name`` disagrees with its key.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ModelRegistryError(f"model registry unreadable: {path} ({exc})") from exc
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ModelRegistryError(f"{path}: invalid JSON at line {exc.lineno} ({exc.msg})") from exc
+    try:
+        parsed = ModelRegistryFile.model_validate(payload)
+    except ValidationError as exc:
+        raise ModelRegistryError(f"{path}: not a model registry ({exc})") from exc
+    for key, row in parsed.presets.items():
+        if row.name != key:
+            raise ModelRegistryError(
+                f"{path}: preset {key!r} carries name {row.name!r}; the key and the name are one thing"
+            )
+    return parsed
+
+
+def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
+    """Merge registry files in order, refusing any name two of them claim.
+
+    Raises
+    ------
+    ModelRegistryError
+        On a collision, naming the key and both files; on an alias pointing at a
+        key no file defines, or shadowing a key; on a prefix two models claim.
+    """
+    presets: dict[str, ModelPreset] = {}
+    aliases: dict[str, str] = {}
+    depths: dict[str, int] = {}
+    owner: dict[tuple[str, str], Path] = {}
+
+    def claim(kind: str, key: str, path: Path) -> None:
+        held = owner.get((kind, key))
+        if held is not None:
+            raise ModelRegistryError(
+                f"{path}: {kind} {key!r} is already defined in {held}; a registry file adds "
+                f"names and never redefines them, because banked data means the row already here"
+            )
+        owner[(kind, key)] = path
+
+    for path, parsed in files:
+        for key, row in parsed.presets.items():
+            claim("preset", key, path)
+            presets[key] = row
+        for alias, target in parsed.aliases.items():
+            claim("alias", alias, path)
+            aliases[alias] = target
+        for prefix, count in parsed.run_depths.items():
+            claim("run depth", prefix, path)
+            depths[prefix] = count
+
+    for alias, target in aliases.items():
+        if target not in presets:
+            raise ModelRegistryError(
+                f"alias {alias!r} points at {target!r}, which no registry file defines; "
+                f"presets: {', '.join(sorted(presets))}"
+            )
+        if alias in presets:
+            raise ModelRegistryError(
+                f"{alias!r} is both a preset key and an alias; one spelling names one thing"
+            )
+
+    prefix_owner: dict[str, str] = {}
+    for key, row in presets.items():
+        for prefix in (key, *row.run_prefixes):
+            held = prefix_owner.setdefault(prefix, key)
+            if held != key:
+                raise ModelRegistryError(
+                    f"run prefix {prefix!r} is claimed by both {held!r} and {key!r}; "
+                    "a run directory's prefix has to resolve to one model's depth"
+                )
+    for alias, target in aliases.items():
+        held = prefix_owner.setdefault(alias, target)
+        if held != target:
+            raise ModelRegistryError(
+                f"run prefix {alias!r} is claimed by both {held!r} and {target!r}; "
+                "a run directory's prefix has to resolve to one model's depth"
+            )
+    for prefix in depths:
+        if prefix in prefix_owner:
+            raise ModelRegistryError(
+                f"run depth {prefix!r} restates the layer count of preset {prefix_owner[prefix]!r}; "
+                "a model's depth has one home, which is its preset row"
+            )
+
+    return ModelRegistry(
+        presets=presets, aliases=aliases, run_depths=depths, sources=tuple(p for p, _ in files)
+    )
+
+
+_CACHE: dict[tuple[tuple[str, int, int], ...], ModelRegistry] = {}
+
+
+def load_registry(paths: tuple[Path, ...] | None = None) -> ModelRegistry:
+    """Every registry file, merged and validated.
+
+    The result is cached against each file's path, size and modification time, so
+    repeated lookups do not re-read the files while an edit to one of them is seen.
+
+    Raises
+    ------
+    ModelRegistryError
+        When a file is missing or malformed, or two files claim one name.
+    """
+    sources = registry_paths() if paths is None else tuple(paths)
+    stamps: list[tuple[str, int, int]] = []
+    for path in sources:
+        try:
+            stat = path.stat()
+        except OSError as exc:
+            raise ModelRegistryError(f"model registry unreadable: {path} ({exc})") from exc
+        stamps.append((str(path), stat.st_size, stat.st_mtime_ns))
+    key = tuple(stamps)
+    cached = _CACHE.get(key)
+    if cached is not None:
+        return cached
+    registry = _merge([(path, _read_file(path)) for path in sources])
+    _CACHE[key] = registry
+    return registry
 
 
 def preset_names() -> tuple[str, ...]:
-    """Every registry key, in registry order."""
-    return tuple(MODEL_PRESETS)
+    """Every registry key, in merge order."""
+    return load_registry().names()
 
 
 def resolve_preset(preset: str | ModelPreset) -> ModelPreset:
     """The preset a name denotes, or the preset itself when one is given.
 
-    Lookup tries the registry key, then :data:`PRESET_ALIASES`, then a
-    punctuation-insensitive form of both, so ``dsv2-lite``, ``dsv2_lite`` and
-    ``DSV2_Lite`` all reach one row.
-
     Raises
     ------
     UnknownPresetError
         Naming every key and alias the registry holds.
+    ModelRegistryError
+        When a registry file cannot be read.
     """
     if isinstance(preset, ModelPreset):
         return preset
-    if preset in MODEL_PRESETS:
-        return MODEL_PRESETS[preset]
-    if preset in PRESET_ALIASES:
-        return MODEL_PRESETS[PRESET_ALIASES[preset]]
+    return load_registry().resolve(preset)
 
-    def normalise(text: str) -> str:
-        return text.strip().lower().replace("_", "-").replace(".", "")
 
-    wanted = normalise(preset)
-    for key in MODEL_PRESETS:
-        if normalise(key) == wanted:
-            return MODEL_PRESETS[key]
-    for alias, key in PRESET_ALIASES.items():
-        if normalise(alias) == wanted:
-            return MODEL_PRESETS[key]
-    raise UnknownPresetError(
-        f"unknown model preset {preset!r}; "
-        f"presets: {', '.join(sorted(MODEL_PRESETS))}; "
-        f"aliases: {', '.join(sorted(PRESET_ALIASES))}"
-    )
+def layer_counts_by_run_prefix() -> dict[str, int]:
+    """Every run-name prefix the registry answers for, and its layer count."""
+    return load_registry().layer_counts_by_run_prefix()
+
+
+def presets_with_floors() -> dict[str, ModelPreset]:
+    """The rows that declare a ``stage0_dir``, keyed by registry key."""
+    return {key: row for key, row in load_registry().presets.items() if row.stage0_dir}
 
 
 class ModelConfig(BaseModel):

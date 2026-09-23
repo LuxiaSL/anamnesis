@@ -1,0 +1,114 @@
+{
+  "description": "The mode registry: runnable mode sets with their prompts, label vocabularies a banked corpus carries without this package being able to run them, and the mappings that predict how one vocabulary lands in another. Add a set by adding a file of the same shape and naming it in ANAMNESIS_MODE_SETS, never by editing a shipped row - a mode's index reaches the generation seed and its prompt is what every stored label means. anamnesis/modes/registry.py reads it.",
+  "mode_sets": {
+    "run4": {
+      "name": "run4",
+      "description": "The five format-controlled processing modes of the core protocol. Four of them - linear, socratic, contrastive, dialectical - produce prose a reader struggles to tell apart; analogical is the easy one, and the gap between the two calibrates any detector run over this corpus.",
+      "hard": true,
+      "format_constraint": " Write in flowing paragraphs. Do not use bullet points, numbered lists, headers, or any visual formatting structure.",
+      "modes": [
+        {
+          "name": "linear",
+          "index": 0,
+          "instruction": "Present your ideas in a clear sequence, each building on the last. Move forward without backtracking or reconsidering previous points. Lay out the topic step by step from beginning to end."
+        },
+        {
+          "name": "analogical",
+          "index": 1,
+          "instruction": "Explain this primarily through extended analogies and parallels to other domains. For each key concept, find a comparison from everyday life or another field that illuminates it. Build understanding through these connections."
+        },
+        {
+          "name": "socratic",
+          "index": 2,
+          "instruction": "Develop your exploration through a sequence of questions and provisional answers. Pose a question, offer a tentative answer, then use that answer to generate the next question. Let the chain of inquiry drive the explanation forward."
+        },
+        {
+          "name": "contrastive",
+          "index": 3,
+          "instruction": "Explore this by comparing and contrasting multiple perspectives or approaches. For each major point, present at least two different viewpoints and evaluate their relative strengths and weaknesses."
+        },
+        {
+          "name": "dialectical",
+          "index": 4,
+          "instruction": "Begin by proposing a clear position on the topic. Then challenge that position with the strongest counterarguments you can find. Work toward a revised understanding that accounts for both the original position and its critiques."
+        }
+      ]
+    },
+    "mixed": {
+      "name": "mixed",
+      "description": "The five, plus three modes that ask for ways of working which would otherwise announce themselves in layout - an outline, a dense summary, a drifting chain. Here they inherit the same format constraint, so what remains of their distinctiveness is in the computation rather than in the shape of the page, which is what makes them usable for feature engineering. They are the computationally distinctive end of the range, and a pair drawn from them is easier than a pair drawn from the five.",
+      "extends": "run4",
+      "hard": false,
+      "modes": [
+        {
+          "name": "structured",
+          "index": 5,
+          "instruction": "Organize your response as a systematic analysis. Identify the key components or dimensions of the topic, address each one methodically, and show how they relate to each other. Be thorough and organized in your coverage."
+        },
+        {
+          "name": "compressed",
+          "index": 6,
+          "instruction": "Express your ideas as densely and concisely as possible. Pack maximum information into minimum words. Every sentence should carry significant meaning — eliminate all filler, hedging, and unnecessary elaboration. Be precise and information-dense."
+        },
+        {
+          "name": "associative",
+          "index": 7,
+          "instruction": "Let your thinking flow freely through associations and connections. When one idea reminds you of another, follow that thread. Explore the topic through a stream of related concepts, tangents, and unexpected connections rather than a predetermined structure."
+        }
+      ]
+    }
+  },
+  "label_vocabularies": {
+    "process5": {
+      "name": "process5",
+      "description": "Five process-mode labels carried by a banked corpus that was generated without a format constraint. Three of the five spell the same words as modes of the eight-mode set and are not those modes: a label belongs to the vocabulary it was banked under.",
+      "runnable_note": "The instructions that produced these labels are not in this package, so a gloss says what the label names and not the prompt a generation ran under. An extraction cannot produce this vocabulary; only a corpus already banked under it carries these labels.",
+      "labels": [
+        {
+          "name": "deliberative",
+          "gloss": "Weighs a position: states it, puts the strongest objection to it, and works to a revised view."
+        },
+        {
+          "name": "pedagogical",
+          "gloss": "Explains to a learner, building the account around what a reader needs next rather than around a fixed outline."
+        },
+        {
+          "name": "associative",
+          "gloss": "Follows associations where they lead, moving from one idea to the next by resemblance rather than by plan."
+        },
+        {
+          "name": "structured",
+          "gloss": "Breaks the topic into components and addresses them in order."
+        },
+        {
+          "name": "compressed",
+          "gloss": "Says it as densely as it can, with the elaboration removed."
+        }
+      ]
+    }
+  },
+  "mode_mappings": {
+    "process_to_format": {
+      "name": "process_to_format",
+      "description": "Where each process-mode label is predicted to land among the format-controlled five. The pairing is a prediction under test, not a definition: a run that does not reproduce it is evidence about the modes rather than a fault in this row, which is why the partner is declared here and the agreement is measured downstream. The reverse direction is this mapping inverted, and each side's unpaired label is its wildcard - reported where it lands, never scored, because scoring it would mean scoring a hypothesis nobody declared.",
+      "source": "process5",
+      "target": "run4",
+      "pairs": {
+        "deliberative": "dialectical",
+        "pedagogical": "socratic",
+        "associative": "analogical",
+        "structured": "linear"
+      },
+      "reference": {
+        "model": "3b",
+        "description": "The numbers a later model's pass is read beside. They are a comparison, not a target, and they travel with the result so a second model's number is never read alone.",
+        "forward_pair": "pedagogical",
+        "forward_pair_accuracy": 0.76,
+        "reverse_pair": "dialectical",
+        "reverse_pair_accuracy": 0.85,
+        "projected_silhouette": -0.156,
+        "fitted_silhouette": 0.438
+      }
+    }
+  }
+}

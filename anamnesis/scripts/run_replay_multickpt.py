@@ -34,7 +34,7 @@ import logging
 import sys
 from pathlib import Path
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ MODULE = "anamnesis.scripts.run_replay_multickpt"
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="run_replay_multickpt.py", description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument("--model-path", required=True, help="The base checkpoint every adapter wraps")
     p.add_argument("--calib-dir", type=Path, required=True)
     p.add_argument("--manifest", type=Path, required=True, help="The fixed manifest every checkpoint replays")

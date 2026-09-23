@@ -154,9 +154,25 @@ rewritten.
   and arrives with a test. `path_signature.py` is the worked example of a large family;
   `attn_res.py` is the worked example of a family that activates only when an architecture
   supplies its substrate.
-- **A model** is a preset row in `anamnesis/config/models.py` and a validation pass:
-  `python -m anamnesis.scripts.onboard_model`. Every per-model fact lives in the row, because a
-  layer index means a different fraction of the network in each model.
+- **A model** is a row of data and a validation pass. The row goes in a JSON file of the shape
+  `anamnesis/config/models.json` has, and `ANAMNESIS_MODELS` names it — several files, separated
+  the way `PATH` is — so your own checkpoint is onboarded without editing this package. Then
+  `python -m anamnesis.scripts.onboard_model --model <your key>`, which loads it through the
+  instrument's own loader and refuses with a reason if the layer plan, the hook targets or the
+  attention kernel are wrong. Every per-model fact lives in the row, because a layer index means a
+  different fraction of the network in each model — and the row is the only place the layer count is
+  written, so the depth bands, the battery metadata and the loader cannot disagree about it. A row
+  may not redefine a shipped one: banked signatures mean the shipped row, so a variant is a new key,
+  and a collision is refused by name rather than merged.
+- **A mode set** is the same shape of change. Rows go in a file like
+  `anamnesis/modes/mode_sets.json`, named by `ANAMNESIS_MODE_SETS`, and
+  `run_extraction.py --modes <your set>` offers it as soon as it is readable. Declare each mode's
+  `index` explicitly: an index reaches the generation seed, so it is part of what a banked
+  coordinate reproduces and is never left to a dict's order. A set that `extends` another inherits
+  the parent's modes, indices and format constraint unchanged, which is how the five-mode subset
+  sits inside the eight. A vocabulary a corpus carries that this package has no prompts for is a
+  `label_vocabularies` row instead, and a prediction relating two vocabularies is a
+  `mode_mappings` row.
 - **A machine** qualifies itself: `python -m anamnesis.scripts.qualify_box`. Different hardware
   gives different numbers, which is expected rather than wrong; results from different machines
   must not be mixed inside one contrast.

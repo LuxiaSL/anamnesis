@@ -36,7 +36,7 @@ call it did make, so a tag is auditable and overridable rather than taken on tru
 
 Run as a script to validate the taxonomy + coverage on a real run:
     ANAMNESIS_RUNS=/models/anamnesis-extract/runs python -m anamnesis.feature_map 8b_fat_01
-A run whose model is not in `MODEL_LAYERS` takes its layer count as a second
+A run whose name no registered model prefixes takes its layer count as a second
 argument, because depth bands are fractions of the network and no default is right
 for an unnamed model.
 """
@@ -49,10 +49,7 @@ from typing import Optional
 import numpy as np
 from pydantic import BaseModel, ConfigDict
 
-# Model layer counts (for depth bands). Extend per model/architecture.
-MODEL_LAYERS = {"3b": 28, "8b": 32, "kotodama_3b": 28,
-                "olmo2-7b": 32, "gemma3-27b": 62, "qwen-7b": 28,
-                "dsv2": 27, "dsv2_lite": 27, "dsv2-lite": 27}  # three spellings of DeepSeek-V2-Lite
+from anamnesis.config.models import MODELS_ENV, layer_counts_by_run_prefix
 
 
 class UnknownDepthError(ValueError):
@@ -68,24 +65,29 @@ def layers_for_run(run: str) -> int:
     There is no count that is safe to assume for an unnamed model, so an unmatched
     run refuses and the caller states the depth instead.
 
-    Longest prefix rather than first match, because the keys nest: a run beginning
-    ``dsv2_lite`` also begins ``dsv2``, and a shorter key that happened to be
-    ordered first would answer for a model it does not name.
+    The prefixes and their counts come from the model registry, so a model's depth
+    is written down once, in its row, and a run directory named after it inherits
+    that number rather than restating it.
+
+    Longest prefix rather than first match, because the prefixes nest: a run
+    beginning ``dsv2_lite`` also begins ``dsv2``, and a shorter one that happened
+    to be ordered first would answer for a model it does not name.
 
     Raises
     ------
     UnknownDepthError
-        When no key of :data:`MODEL_LAYERS` prefixes ``run``. Add the model there,
+        When no registered prefix begins ``run``. Add the model to the registry,
         or pass the count.
     """
-    matches = [k for k in MODEL_LAYERS if run.startswith(k)]
+    counts = layer_counts_by_run_prefix()
+    matches = [k for k in counts if run.startswith(k)]
     if not matches:
         raise UnknownDepthError(
-            f"no layer count known for run {run!r}; add its model to MODEL_LAYERS "
-            f"in anamnesis/feature_map.py or state the layer count at the call site "
-            f"(known prefixes: {sorted(MODEL_LAYERS)})"
+            f"no layer count known for run {run!r}; add its model to the registry "
+            f"anamnesis/config/models.json, or to a file named in {MODELS_ENV}, or state "
+            f"the layer count at the call site (known prefixes: {sorted(counts)})"
         )
-    return MODEL_LAYERS[max(matches, key=len)]
+    return counts[max(matches, key=len)]
 
 
 class Source(str, Enum):

@@ -18,11 +18,10 @@ from anamnesis.config import paths
 from anamnesis.config.models import (
     ATTENTION_WITHOUT_WEIGHTS,
     EAGER_ATTENTION,
-    MODEL_PRESETS,
-    PRESET_ALIASES,
     ModelConfig,
     ModelPreset,
     UnknownPresetError,
+    load_registry,
     preset_names,
     resolve_preset,
 )
@@ -98,7 +97,7 @@ def test_from_preset_carries_every_field_a_caller_would_copy(name: str) -> None:
 
 
 def test_from_preset_accepts_a_preset_object() -> None:
-    preset = MODEL_PRESETS["8b"]
+    preset = resolve_preset("8b")
     assert ModelConfig.from_preset(preset) == ModelConfig.from_preset("8b")
 
 
@@ -120,9 +119,10 @@ def test_unknown_preset_names_every_key_and_alias() -> None:
         resolve_preset("llama-4")
     message = str(caught.value)
     assert "llama-4" in message
-    for key in MODEL_PRESETS:
+    registry = load_registry()
+    for key in registry.presets:
         assert key in message
-    for alias in PRESET_ALIASES:
+    for alias in registry.aliases:
         assert alias in message
 
 
@@ -142,19 +142,21 @@ def test_names_and_aliases_reach_one_row(spelling: str, expected: str) -> None:
 
 
 def test_every_alias_points_at_a_registered_preset() -> None:
-    for alias, key in PRESET_ALIASES.items():
-        assert key in MODEL_PRESETS, alias
+    registry = load_registry()
+    for alias, key in registry.aliases.items():
+        assert key in registry.presets, alias
 
 
 def test_registry_keys_match_the_names_inside_them() -> None:
-    assert preset_names() == tuple(MODEL_PRESETS)
-    for key, preset in MODEL_PRESETS.items():
+    registry = load_registry()
+    assert preset_names() == tuple(registry.presets)
+    for key, preset in registry.presets.items():
         assert preset.name == key
 
 
-@pytest.mark.parametrize("name", sorted(MODEL_PRESETS))
+@pytest.mark.parametrize("name", sorted(preset_names()))
 def test_every_preset_is_internally_coherent(name: str) -> None:
-    preset = MODEL_PRESETS[name]
+    preset = resolve_preset(name)
     assert preset.num_attention_heads % preset.num_kv_heads == 0
     assert preset.kv_group_size >= 1
     assert preset.is_grouped_query == (preset.kv_group_size > 1)
@@ -173,7 +175,7 @@ def test_every_preset_is_internally_coherent(name: str) -> None:
 
 def test_presets_are_immutable() -> None:
     with pytest.raises(ValidationError):
-        MODEL_PRESETS["8b"].temperature = 1.0
+        resolve_preset("8b").temperature = 1.0
 
 
 def test_calibration_directory_resolves_under_its_declared_root(

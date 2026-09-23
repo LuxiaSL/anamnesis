@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from anamnesis.feature_map import FeatureMap, Method, Source
-from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, MODEL_PRESETS
+from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, resolve_preset
 from anamnesis.extraction.feature_families.expert_routing import N_FEATURES_PER_LAYER
 from anamnesis.extraction.feature_pipeline import compute_features_v2_from_data
 from anamnesis.extraction.state_extractor import ExtractionResult, RawGenerationData
@@ -29,7 +29,7 @@ from anamnesis.extraction.state_extractor import ExtractionResult, RawGeneration
 
 def _synthetic_dsv2_raw(T: int = 24) -> tuple[RawGenerationData, list[int], list[int]]:
     rng = np.random.default_rng(0)
-    p = MODEL_PRESETS["dsv2-lite"]
+    p = resolve_preset("dsv2-lite")
     sl = p.sampled_layers                      # [0,5,11,15,18,22,26]
     moe = [l for l in sl if l != 0]            # gate/router on MoE layers only
     nl, hidden, heads = 27, 2048, 16
@@ -64,7 +64,7 @@ def _synthetic_dsv2_raw(T: int = 24) -> tuple[RawGenerationData, list[int], list
 def _run_full_v2_pipeline() -> tuple[ExtractionResult, list[int]]:
     """The pipeline under test, and the MoE layers its arity is checked against."""
     data, sl, moe = _synthetic_dsv2_raw()
-    p = MODEL_PRESETS["dsv2-lite"]
+    p = resolve_preset("dsv2-lite")
     ec = ExtractionConfig(sampled_layers=sl, pca_layers=p.pca_layers,
                           early_layer_cutoff=p.early_layer_cutoff,
                           late_layer_cutoff=p.late_layer_cutoff, enable_residual_pca=False)

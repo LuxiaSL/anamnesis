@@ -7,8 +7,12 @@ Importing this package does nothing but make its submodules addressable. Each
 one is imported for what it holds:
 
 * :mod:`anamnesis.config` — per-model presets, one pass's settings, named runs.
-* :mod:`anamnesis.modes` — the processing-mode prompt sets and the prompt-swap
-  pairs the confound test is built from.
+  The presets and the runs are registry files, and further model files are named by
+  ``ANAMNESIS_MODELS``, so a checkpoint is addressable by name without a code change.
+* :mod:`anamnesis.modes` — the processing-mode registry: sets with their prompts and
+  label indices, vocabularies a banked corpus carries that no prompt here produces,
+  and the prompt-swap pairs the confound test is built from. ``ANAMNESIS_MODE_SETS``
+  names further files, so a run over another researcher's modes needs no code either.
 * :mod:`anamnesis.feature_map` — the executable ``source × method × depth``
   taxonomy: what a feature name means, read by extraction and analysis alike.
 * :mod:`anamnesis.provenance` — the digests a bank is stamped with and read back

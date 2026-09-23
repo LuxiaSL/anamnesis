@@ -3,7 +3,7 @@
 The transfer itself trains a small network several times, so the tests split into the parts
 that can be pinned by value and one end-to-end pass at small parameters:
 
-  * **scoring** against a pre-registered map: what counts as correct, what the wildcard
+  * **scoring** against the map a mode mapping declares: what counts as correct, what the wildcard
     does (reported, never scored), and that chance is one over the training vocabulary;
   * **the assignment**, which counts test generations by nearest training centroid, and the
     similarity matrix, which is cosine and therefore scale-free;
@@ -29,9 +29,6 @@ import numpy as np
 import pytest
 
 from anamnesis.analysis.cross_run import (
-    FORWARD_MAPPING,
-    FORWARD_WILDCARD,
-    THREE_B_REFERENCE,
     build_layer_indices,
     compute_centroids,
     cross_run_transfer,
@@ -43,6 +40,7 @@ from anamnesis.analysis.cross_run import (
     score_mapping,
     similarity_matrix,
 )
+from anamnesis.modes import DEFAULT_MODE_MAPPING, mapping_wildcards, mode_mapping
 
 TRAIN_MODES = ["dialectical", "linear", "socratic"]
 TEST_MODES = ["deliberative", "pedagogical", "structured"]
@@ -233,14 +231,21 @@ def test_one_transfer_pass_runs_end_to_end_and_carries_its_comparison(tmp_path: 
     assert forward["n_seeds"] == 2
     assert len(forward["mapping_accuracy_per_seed"]) == 2
     assert forward["chance_accuracy"] == pytest.approx(1 / 3)
-    assert set(forward["per_mode_accuracy"]) == set(FORWARD_MAPPING)
-    assert FORWARD_WILDCARD not in results["test_modes"], (
+    mapping = mode_mapping(DEFAULT_MODE_MAPPING)
+    forward_wildcard, _ = mapping_wildcards(DEFAULT_MODE_MAPPING)
+    assert set(forward["per_mode_accuracy"]) == set(mapping.pairs)
+    assert forward_wildcard not in results["test_modes"], (
         "this corpus has no wildcard mode, so no wildcard row is reported"
     )
     assert "wildcard_assignments" not in forward
-    assert results["three_b_reference"] == THREE_B_REFERENCE
+    assert results["mapping"] == DEFAULT_MODE_MAPPING
+    assert results["forward_mapping"] == dict(mapping.pairs)
+    assert results["reverse_mapping"] == mapping.reverse_pairs()
+    assert mapping.reference is not None
+    assert results["reference"] == mapping.reference.model_dump()
     assert np.asarray(forward["median_similarity_matrix"]).shape == (3, 3)
 
     lines = headline(results)
     assert len(lines) == 4
-    assert all("3B" in line for line in lines), "every number travels with its comparison"
+    model = mapping.reference.model
+    assert all(model in line for line in lines), "every number travels with its comparison"

@@ -16,14 +16,14 @@ Pure configuration; no model, no device.
 
 import pytest
 
-from anamnesis.config import MODEL_PRESETS, ExtractionConfig, FeaturePipelineConfig
+from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, preset_names, resolve_preset
 from anamnesis.extraction.replay_config import native_replay_configs
 
 
-@pytest.mark.parametrize("model", list(MODEL_PRESETS))
+@pytest.mark.parametrize("model", list(preset_names()))
 @pytest.mark.parametrize("enable_pca", [False, True])
 def test_shared_native_config_matches_original_inline_contract(model, enable_pca):
-    preset = MODEL_PRESETS[model]
+    preset = resolve_preset(model)
     actual_ec, actual_fc = native_replay_configs(preset, enable_pca=enable_pca)
     expected_ec = ExtractionConfig(
         sampled_layers=preset.sampled_layers,

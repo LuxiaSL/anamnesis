@@ -71,13 +71,15 @@ from pydantic import BaseModel, ConfigDict
 from sklearn.model_selection import GroupKFold
 
 from anamnesis.analysis.lane_guard import gate_banked_signatures
+from anamnesis.modes import hard_modes
 
 F64 = NDArray[np.float64]
 
-HARD: frozenset[str] = frozenset(
-    {"linear", "socratic", "contrastive", "dialectical", "analogical"}
-)
-"""The five-way hard mode set — the classification target of record."""
+HARD: frozenset[str] = hard_modes()
+"""The five-way hard mode set — the classification target of record.
+
+Read from the mode registry, so the target and the prompts that produced it are one
+declaration rather than two that agree by luck."""
 
 #: Evenly-spaced generation positions sampled per surface vector.
 N_POS = 5

@@ -62,7 +62,7 @@ from anamnesis.analysis.gauntlet.signature_io import (
     RESIDUAL_TRAJECTORY,
 )
 from anamnesis.extraction.state_extractor import STORED_BLOCK_SLICES_KEY
-from anamnesis.modes import RUN4_MODE_INDEX
+from anamnesis.modes import CORE_MODE_SET, mode_set
 
 SYNTHETIC_LANE = "synthetic-bank-v1"
 """The lane identity a synthetic bank carries, so it is never mistaken for a measurement.
@@ -100,7 +100,7 @@ class SyntheticBankSpec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     modes: tuple[str, ...] = Field(
-        default=tuple(RUN4_MODE_INDEX),
+        default_factory=lambda: mode_set(CORE_MODE_SET).names(),
         description="Mode labels, in the instrument's own vocabulary rather than invented ones",
         min_length=2,
     )

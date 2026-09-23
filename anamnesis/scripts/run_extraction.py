@@ -5,8 +5,10 @@ loaded with its hooks, a spec list is built from a mode set and the topic sets, 
 each generation is sampled and featurised as it is produced. Resume is per
 generation: a killed run re-run under the same name continues.
 
-``--modes run4`` is the five format-controlled modes, ``--modes mixed`` the
-eight-mode set. ``--include-prompt-swap`` adds the confound condition — mode A's
+``--modes`` names a mode set from the registry: ``run4`` is the five
+format-controlled modes, ``mixed`` the eight-mode set, and a set added in a file
+named by ``ANAMNESIS_MODE_SETS`` is offered here the moment it is
+readable. ``--include-prompt-swap`` adds the confound condition — mode A's
 system prompt under a directive that forces mode B's execution — which is how a
 signature that tracked the instruction rather than the execution would be caught.
 ``--save-raw`` banks the per-token tensors beside the vectors, which is what makes
@@ -25,11 +27,12 @@ import argparse
 import logging
 from typing import Any
 
-from anamnesis.config import MODEL_PRESETS
+from anamnesis.config import preset_names
+from anamnesis.modes import CORE_MODE_SET, mode_set_names
+from anamnesis.modes import mode_prompts as registry_mode_prompts
 
 logger = logging.getLogger(__name__)
 
-MODE_SETS = ("run4", "mixed")
 SMOKE_MAX_NEW_TOKENS = 100
 """Token budget for a smoke pass — enough to exercise every hook and short enough
 to finish while someone watches."""
@@ -37,10 +40,13 @@ to finish while someone watches."""
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), required=True)
+    p.add_argument("--model", choices=list(preset_names()), required=True)
     p.add_argument(
-        "--modes", choices=list(MODE_SETS), default="run4",
-        help="run4: the five format-controlled modes; mixed: the eight-mode set",
+        "--modes", choices=list(mode_set_names()), default=CORE_MODE_SET,
+        help=(
+            "A mode set from the registry: the core five, the eight-mode set, or one "
+            "added in a file named by ANAMNESIS_MODE_SETS"
+        ),
     )
     p.add_argument("--n-samples", type=int, default=20, help="Generations per mode")
     p.add_argument("--run-name", required=True, help="Names the run directory under the outputs root")
@@ -54,20 +60,18 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
-def mode_prompts(mode_set: str) -> dict[str, str]:
-    """The system prompts one mode set names, in its own order.
+def mode_prompts(name: str) -> dict[str, str]:
+    """The system prompts one mode set names, in its own label order.
 
-    A mode label in banked data means the exact prompt text here, so the set is
-    read from the modes package rather than restated.
+    A mode label in banked data means the exact prompt text the registry holds, so
+    the set is read from there rather than restated.
+
+    Raises
+    ------
+    anamnesis.modes.UnknownModeSetError
+        Naming every set the registry holds.
     """
-    from anamnesis.modes.extended_modes import EXTENDED_MODES
-    from anamnesis.modes.run4_modes import RUN4_MODES
-
-    if mode_set == "run4":
-        return dict(RUN4_MODES)
-    if mode_set == "mixed":
-        return dict(EXTENDED_MODES)
-    raise ValueError(f"unknown mode set {mode_set!r}; choose one of {MODE_SETS}")
+    return registry_mode_prompts(name)
 
 
 def build_config(args: argparse.Namespace) -> Any:

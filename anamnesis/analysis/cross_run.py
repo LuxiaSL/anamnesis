@@ -8,6 +8,13 @@ should place the other run's modes somewhere meaningful — and the predicted
 pairs say where: a propose-challenge-revise mode should land on the dialectical
 one, an interactive-explanation mode on the socratic one, and so on.
 
+Both vocabularies, the pairs and the comparison they are read beside are rows of
+:data:`anamnesis.modes.MODE_SETS_FILE`, reached by the name
+:data:`anamnesis.modes.DEFAULT_MODE_MAPPING`. So every label this module reports is
+one a reader can look up — including the five process modes, whose prompts are not in
+this package and whose glosses are therefore what the registry can say about them. A second pair of
+corpora is compared by adding a mapping row, not by editing this module.
+
 Three readouts, and they disagree on purpose:
 
 * **Transfer** trains the contrastive projection on one run and embeds the other,
@@ -51,44 +58,16 @@ from anamnesis.analysis.contrastive_mlp import (
     train_embedding,
 )
 from anamnesis.config import outputs_root
+from anamnesis.modes import (
+    DEFAULT_MODE_MAPPING,
+    ModeMapping,
+    mapping_wildcards,
+    mode_mapping,
+)
 
 logger = logging.getLogger(__name__)
 
 F32 = NDArray[np.float32]
-
-FORWARD_MAPPING: dict[str, str] = {
-    "deliberative": "dialectical",
-    "pedagogical": "socratic",
-    "associative": "analogical",
-    "structured": "linear",
-}
-"""Process mode to its predicted format-controlled partner.
-
-The pairing is a prediction under test, not a definition. A run that does not
-reproduce it is evidence about the modes rather than a fault in this table, which
-is why the partner is named here and the agreement is measured downstream.
-"""
-
-FORWARD_WILDCARD = "compressed"
-"""The process mode with no predicted partner in the format-controlled set."""
-
-REVERSE_MAPPING: dict[str, str] = {
-    "dialectical": "deliberative",
-    "socratic": "pedagogical",
-    "analogical": "associative",
-    "linear": "structured",
-}
-REVERSE_WILDCARD = "contrastive"
-
-THREE_B_REFERENCE: dict[str, float] = {
-    "forward_pedagogical_to_socratic": 0.76,
-    "reverse_dialectical_to_deliberative": 0.85,
-    "lda_r4_sil_in_r3_lda": -0.156,
-    "lda_r3_sil_own": 0.438,
-}
-"""The 3B numbers this replicates against, as measured in the Phase-0.5 pass. They
-are a comparison, not a target, and they travel with the result so an 8B number is
-never read alone."""
 
 N_SEEDS = 10
 SEED_STRIDE = 7
@@ -481,6 +460,7 @@ def cross_run_transfer(
     train_run: str,
     test_run: str,
     feature_key: str = "features",
+    mapping: str | ModeMapping = DEFAULT_MODE_MAPPING,
     n_seeds: int = N_SEEDS,
     bottleneck_dim: int = BOTTLENECK_DIM,
     n_epochs: int = ANALYSIS_EPOCHS,
@@ -488,10 +468,17 @@ def cross_run_transfer(
 ) -> dict[str, Any]:
     """Both directions and the LDA test, as one banked document.
 
+    ``mapping`` names the registry row holding the predicted pairs, so comparing
+    another pair of corpora is a row rather than an edit here. The test run supplies
+    the mapping's source labels and the train run its target labels: the forward
+    direction trains on the target vocabulary and embeds the source one.
+
     The two runs must have the same feature width: transfer means one projection
     reading both, so a width mismatch is two different instruments and is refused
     rather than truncated to the shorter.
     """
+    row = mapping if isinstance(mapping, ModeMapping) else mode_mapping(mapping)
+    forward_wildcard, reverse_wildcard = mapping_wildcards(row.name)
     X_train, y_train, modes_train, _ = load_run_features(
         train_run, outputs_base, feature_key=feature_key
     )
@@ -514,9 +501,12 @@ def cross_run_transfer(
         "n_features": int(X_train.shape[1]),
         "train_modes": modes_train,
         "test_modes": modes_test,
-        "forward_mapping": dict(FORWARD_MAPPING),
-        "reverse_mapping": dict(REVERSE_MAPPING),
-        "three_b_reference": dict(THREE_B_REFERENCE),
+        "mapping": row.name,
+        "source_vocabulary": row.source,
+        "target_vocabulary": row.target,
+        "forward_mapping": dict(row.pairs),
+        "reverse_mapping": row.reverse_pairs(),
+        "reference": row.reference.model_dump() if row.reference is not None else None,
     }
 
     forward_scaler = StandardScaler()
@@ -525,8 +515,8 @@ def cross_run_transfer(
     results["transfer_forward"] = run_transfer(
         forward_train, y_train, modes_train,
         forward_test, y_test, modes_test,
-        predicted=FORWARD_MAPPING,
-        wildcard_mode=FORWARD_WILDCARD,
+        predicted=row.pairs,
+        wildcard_mode=forward_wildcard,
         direction_label=f"forward (train {train_run} -> embed {test_run})",
         n_seeds=n_seeds, bottleneck_dim=bottleneck_dim, n_epochs=n_epochs,
     )
@@ -537,8 +527,8 @@ def cross_run_transfer(
     results["transfer_reverse"] = run_transfer(
         reverse_test, y_test, modes_test,
         reverse_train, y_train, modes_train,
-        predicted=REVERSE_MAPPING,
-        wildcard_mode=REVERSE_WILDCARD,
+        predicted=row.reverse_pairs(),
+        wildcard_mode=reverse_wildcard,
         direction_label=f"reverse (train {test_run} -> embed {train_run})",
         n_seeds=n_seeds, bottleneck_dim=bottleneck_dim, n_epochs=n_epochs,
     )
@@ -551,34 +541,54 @@ def cross_run_transfer(
 
 
 def headline(results: dict[str, Any]) -> list[str]:
-    """The two pairs and the two silhouettes, each beside its 3B comparison."""
+    """The two pairs and the two silhouettes, each beside the mapping's comparison.
+
+    Which pair is quoted and what it is compared against come from the mapping row,
+    so the comparison travels with the number instead of being looked up separately.
+    A mapping carrying no reference reports its own numbers alone.
+    """
     forward = results["transfer_forward"]["per_mode_accuracy"]
     reverse = results["transfer_reverse"]["per_mode_accuracy"]
     lda = results["lda_direction_test"]
-    forward_pair = float(forward.get("pedagogical", {}).get("mean", float("nan")))
-    reverse_pair = float(reverse.get("dialectical", {}).get("mean", float("nan")))
+    reference = results.get("reference")
+    pairs: dict[str, str] = results["forward_mapping"]
+    reverse_pairs: dict[str, str] = results["reverse_mapping"]
+
+    if reference is None:
+        forward_label = next(iter(pairs), "")
+        reverse_label = next(iter(reverse_pairs), "")
+        forward_rate = float(forward.get(forward_label, {}).get("mean", float("nan")))
+        reverse_rate = float(reverse.get(reverse_label, {}).get("mean", float("nan")))
+        return [
+            f"forward {forward_label} -> {pairs.get(forward_label, '')}: {forward_rate:.2%}",
+            f"reverse {reverse_label} -> {reverse_pairs.get(reverse_label, '')}: "
+            f"{reverse_rate:.2%}",
+            f"projected silhouette in the fitted run's LDA space: {lda['r3_sil_in_r2_lda']:+.4f}",
+            f"fitted run's own silhouette (sanity):               {lda['r2_sil_own_lda']:+.4f}",
+        ]
+
+    model = reference["model"]
+    forward_label = reference["forward_pair"]
+    reverse_label = reference["reverse_pair"]
+    forward_rate = float(forward.get(forward_label, {}).get("mean", float("nan")))
+    reverse_rate = float(reverse.get(reverse_label, {}).get("mean", float("nan")))
+    forward_reference = float(reference["forward_pair_accuracy"])
+    reverse_reference = float(reference["reverse_pair_accuracy"])
     return [
-        f"forward pedagogical -> socratic:     {forward_pair:.2%}  "
-        f"(3B {THREE_B_REFERENCE['forward_pedagogical_to_socratic']:.2%}, "
-        f"delta {forward_pair - THREE_B_REFERENCE['forward_pedagogical_to_socratic']:+.2%})",
-        f"reverse dialectical -> deliberative: {reverse_pair:.2%}  "
-        f"(3B {THREE_B_REFERENCE['reverse_dialectical_to_deliberative']:.2%}, "
-        f"delta {reverse_pair - THREE_B_REFERENCE['reverse_dialectical_to_deliberative']:+.2%})",
+        f"forward {forward_label} -> {pairs[forward_label]}: {forward_rate:.2%}  "
+        f"({model} {forward_reference:.2%}, delta {forward_rate - forward_reference:+.2%})",
+        f"reverse {reverse_label} -> {reverse_pairs[reverse_label]}: {reverse_rate:.2%}  "
+        f"({model} {reverse_reference:.2%}, delta {reverse_rate - reverse_reference:+.2%})",
         f"projected silhouette in the fitted run's LDA space: "
-        f"{lda['r3_sil_in_r2_lda']:+.4f}  (3B {THREE_B_REFERENCE['lda_r4_sil_in_r3_lda']:+.4f})",
+        f"{lda['r3_sil_in_r2_lda']:+.4f}  ({model} {reference['projected_silhouette']:+.4f})",
         f"fitted run's own silhouette (sanity):               "
-        f"{lda['r2_sil_own_lda']:+.4f}  (3B {THREE_B_REFERENCE['lda_r3_sil_own']:+.4f})",
+        f"{lda['r2_sil_own_lda']:+.4f}  ({model} {reference['fitted_silhouette']:+.4f})",
     ]
 
 
 __all__ = [
-    "FORWARD_MAPPING",
-    "FORWARD_WILDCARD",
     "MappingScore",
     "N_SEEDS",
-    "REVERSE_MAPPING",
-    "REVERSE_WILDCARD",
-    "THREE_B_REFERENCE",
     "build_layer_indices",
     "compute_centroids",
     "cross_run_transfer",
