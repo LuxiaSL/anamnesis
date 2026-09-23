@@ -48,6 +48,8 @@ import numpy as np
 
 from anamnesis.config import preset_names, resolve_preset
 from anamnesis.extraction.equivalence.fidelity import (
+    AGREEMENT,
+    REPEATABLE,
     FidelityError,
     ReplayBatch,
     Ruler,
@@ -240,8 +242,8 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
     )
     vectors = verify_vectors(anchor_batch, candidate_batch, repeat_batch, ruler)
     return dict(
-        repeatable=vectors["G0"],
-        agreement=vectors["G1"],
+        repeatable=vectors[REPEATABLE],
+        agreement=vectors[AGREEMENT],
         lane_id=lane.lane_id,
         device=args.device,
         model=args.model,
