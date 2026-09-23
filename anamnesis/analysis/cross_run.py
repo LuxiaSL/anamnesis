@@ -4,7 +4,7 @@ Two runs describe processing with different vocabularies. One names five
 format-controlled modes; the other names five process modes with no format
 constraint. If the signature axis is about *how* a generation was produced rather
 than about which prompt produced it, then a projection learned on one run's modes
-should place the other run's modes somewhere meaningful — and the pre-registered
+should place the other run's modes somewhere meaningful — and the predicted
 pairs say where: a propose-challenge-revise mode should land on the dialectical
 one, an interactive-explanation mode on the socratic one, and so on.
 
@@ -12,7 +12,7 @@ Three readouts, and they disagree on purpose:
 
 * **Transfer** trains the contrastive projection on one run and embeds the other,
   then asks which train-mode centroid each test sample is nearest. Scored against
-  the pre-registered map, over several seeds, because one seed of a small network
+  the predicted map, over several seeds, because one seed of a small network
   is one draw.
 * **The wildcard** is the mode with no predicted partner. Where it lands is a
   finding rather than an error, so it is counted separately and never enters the
@@ -62,7 +62,12 @@ FORWARD_MAPPING: dict[str, str] = {
     "associative": "analogical",
     "structured": "linear",
 }
-"""Process mode to format-controlled mode, as pre-registered from the 3B findings."""
+"""Process mode to its predicted format-controlled partner.
+
+The pairing is a prediction under test, not a definition. A run that does not
+reproduce it is evidence about the modes rather than a fault in this table, which
+is why the partner is named here and the agreement is measured downstream.
+"""
 
 FORWARD_WILDCARD = "compressed"
 """The process mode with no predicted partner in the format-controlled set."""
@@ -244,7 +249,7 @@ def nearest_centroid_assignment(
 
 
 class MappingScore(BaseModel):
-    """One seed's scoring of an assignment against the pre-registered map."""
+    """One seed's scoring of an assignment against the predicted map."""
 
     model_config = ConfigDict(extra="forbid")
 
