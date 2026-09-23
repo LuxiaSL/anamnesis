@@ -114,8 +114,8 @@ class DecodePolicy(BaseModel):
         cls,
         preset: ModelPreset,
         *,
-        top_p: float,
-        max_new_tokens: int,
+        top_p: float | None = None,
+        max_new_tokens: int | None = None,
         temperature: float | None = None,
         repetition_penalty: float = NEUTRAL_REPETITION_PENALTY,
         date_string: str | None = None,
@@ -124,15 +124,20 @@ class DecodePolicy(BaseModel):
 
         The stop tokens come from the row and are never an argument: they are
         model-specific, and a pass that assumed the wrong ones banks generations that
-        run past their own end. ``temperature`` unset takes the row's, because the
-        temperature a corpus was banked at is a property of the model's own decode
-        policy. ``top_p`` and the token budget have no fallback here — a caller that
-        means the row's passes the row's, and nothing is filled in behind its back.
+        run past their own end.
+
+        Every sampling value is the row's unless this call names one. That is the
+        whole reason the row carries them: how a checkpoint decodes natively is a
+        per-model fact, and the rows disagree — nucleus mass is ``0.9`` for some and
+        ``0.95`` for others. A value hard-coded in a caller silently overrides the
+        rows it does not happen to match, which banks a corpus off-preset with
+        nothing reporting that it did. This constructor is the single place a
+        sampling value is resolved, so there is no second place for one to come from.
         """
         return cls(
             temperature=preset.temperature if temperature is None else temperature,
-            top_p=top_p,
-            max_new_tokens=max_new_tokens,
+            top_p=preset.top_p if top_p is None else top_p,
+            max_new_tokens=preset.max_new_tokens if max_new_tokens is None else max_new_tokens,
             eos_token_ids=tuple(preset.eos_token_ids),
             repetition_penalty=repetition_penalty,
             date_string=date_string,

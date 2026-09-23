@@ -76,8 +76,10 @@ def parser() -> argparse.ArgumentParser:
         help="Assemble this run directory's banked records into metadata plus a replay manifest",
     )
     p.add_argument("--temperature", type=float, default=None, help="Default: the preset's")
-    p.add_argument("--top-p", type=float, default=0.9)
-    p.add_argument("--max-new-tokens", type=int, default=512)
+    p.add_argument("--top-p", type=float, default=None, help="Default: the preset's nucleus mass")
+    p.add_argument(
+        "--max-new-tokens", type=int, default=None, help="Default: the preset's token budget"
+    )
     p.add_argument(
         "--repetition-penalty",
         type=float,

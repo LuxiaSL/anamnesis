@@ -90,6 +90,34 @@ def test_generation_policy_comes_from_the_preset_row() -> None:
     assert tuple(policy.eos_token_ids) == tuple(preset.eos_token_ids)
 
 
+@pytest.mark.parametrize("model", ["gemma3-27b", "dsv2-lite"])
+def test_an_absent_sampling_flag_takes_the_rows_value_not_a_launcher_constant(model: str) -> None:
+    """These rows sample at a nucleus mass of 0.95, which no flag default may overrule.
+
+    A constant in the parser is indistinguishable, from the corpus afterwards, from a
+    value the operator chose: the pass reports success and the records carry settings
+    the model does not decode under.
+    """
+    preset = resolve_preset(model)
+    assert preset.top_p == 0.95, "this case is only a test while the row disagrees with 0.9"
+    absent = run_gen_tokens.decode_policy(
+        run_gen_tokens.parser().parse_args(["--model", model, "--model-path", "/models/x"])
+    )
+    assert absent.top_p == preset.top_p
+    assert absent.max_new_tokens == preset.max_new_tokens
+
+
+@pytest.mark.parametrize("model", ["8b", "gemma3-27b"])
+def test_a_sampling_flag_given_explicitly_wins_over_the_row(model: str) -> None:
+    given = run_gen_tokens.decode_policy(
+        run_gen_tokens.parser().parse_args([
+            "--model", model, "--model-path", "/models/x",
+            "--top-p", "0.5", "--max-new-tokens", "64", "--temperature", "0.11",
+        ])
+    )
+    assert (given.top_p, given.max_new_tokens, given.temperature) == (0.5, 64, 0.11)
+
+
 def test_a_neutral_repetition_penalty_is_withheld_from_the_sampler() -> None:
     """At exactly one the argument is not passed, so the default path is the banked one."""
     args = run_gen_tokens.parser().parse_args(
