@@ -9,10 +9,10 @@ section is for. A linear probe answers whether modes are separable by a hyperpla
 this answers whether they are separable at all.
 
 The network and the law it is trained under are not defined here: they live in
-:mod:`anamnesis.analysis.contrastive_mlp`, which holds both training laws this
-instrument uses side by side and says why they differ. This section trains under
-the analysis law — :func:`anamnesis.analysis.contrastive_mlp.train_embedding` —
-because its embedding is a lens read once per fold and never banked as weights.
+:mod:`anamnesis.analysis.contrastive_mlp`, which holds the instrument's one
+training law and says what its shape buys. This section calls
+:func:`anamnesis.analysis.contrastive_mlp.train_embedding` per fold, because its
+embedding is a lens read once and never banked as weights.
 
 What this module owns is the reading built on top of that fit: topic-held-out
 folds, kNN and silhouette on the held-out topics, a capacity sweep over the
