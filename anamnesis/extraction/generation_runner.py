@@ -50,7 +50,7 @@ from anamnesis.extraction.streaming_generate import (
     StreamingOutput,
     streaming_generate,
 )
-from anamnesis.modes.run4_modes import RUN4_MODES
+from anamnesis.modes.registry import CORE_MODE_SET, mode_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -494,8 +494,8 @@ def build_generation_specs(
     config : ExperimentConfig
         Used only for `prompts_path`.
     mode_dict : dict[str, str] | None
-        Maps mode name → system prompt. Defaults to `RUN4_MODES`
-        (the canonical 5 format-controlled modes).
+        Maps mode name → system prompt. Defaults to the core mode set's
+        prompts (the five format-controlled modes).
     topics : list[str] | None
         Topic strings. Defaults to `set_a + set_b` from `prompts_path`.
         Pass a subset for alternate experiments.
@@ -511,7 +511,7 @@ def build_generation_specs(
         prompts_file = json.load(f)
 
     if mode_dict is None:
-        mode_dict = dict(RUN4_MODES)
+        mode_dict = mode_prompts(CORE_MODE_SET)
     if topics is None:
         topics = [*prompts_file["topics"]["set_a"], *prompts_file["topics"]["set_b"]]
     if num_reps is None:

@@ -50,7 +50,9 @@ from anamnesis.extraction.replay.manifest import (
 )
 from anamnesis.extraction.state_extractor import ExtractionResult
 from anamnesis.extraction.streaming_generate import StreamingOutput
-from anamnesis.modes.run4_modes import RUN4_MODES
+from anamnesis.modes import CORE_MODE_SET, mode_prompts
+
+RUN4_MODES = mode_prompts(CORE_MODE_SET)
 from synthetic_runtime import HookPlan, loaded_tiny_model
 
 N_LAYERS = 3

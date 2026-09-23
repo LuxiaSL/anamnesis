@@ -75,16 +75,17 @@ from anamnesis.feature_map import (
     STORED_FAMILY_RESIDUAL_PCA,
     named_family,
 )
+from anamnesis.modes import easy_modes, hard_modes
 
 logger = logging.getLogger(__name__)
 
-HARD_MODES: frozenset[str] = frozenset(
-    {"linear", "socratic", "contrastive", "dialectical", "analogical"}
-)
+HARD_MODES: frozenset[str] = hard_modes()
 """The format-controlled five: a pair drawn from these is a hard pair."""
 
-EASY_MODES: frozenset[str] = frozenset({"compressed", "structured", "associative"})
-"""Format-free modes, which carry a format tell and are therefore easier."""
+EASY_MODES: frozenset[str] = easy_modes()
+"""The three modes the eight-mode set adds to the five. They carry the same format
+constraint, so what makes a pair drawn from them easier is that the ways of working
+they ask for are computationally more distinctive."""
 
 CORE_RUNS: tuple[str, ...] = ("8b_baseline", "3b_run4", "8b_v2", "3b_v2")
 """Runs the report reads by default: two baselines and two engineered corpora."""

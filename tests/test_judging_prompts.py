@@ -15,6 +15,7 @@ import hashlib
 import pytest
 
 from anamnesis.judging import prompts as P
+from anamnesis.modes import CORE_MODE_SET, mode_set
 
 # ── The pins ──────────────────────────────────────────────────────────────────
 SET_DIGESTS = {
@@ -165,6 +166,20 @@ def test_the_digest_ignores_provenance_and_notices_a_word() -> None:
 def test_the_table_names_itself_on_a_miss() -> None:
     with pytest.raises(P.PromptSetError, match="the table holds"):
         P.prompt_set("register")
+
+
+def test_every_mode_table_keys_on_the_modes_the_corpus_actually_carries() -> None:
+    """The judged modes and the prompts a generation ran under are one declaration.
+
+    The description prose stays written out in the module, because a judged number
+    means the question that was asked. Which modes it describes is the mode
+    registry's answer, so a table keyed to a mode the protocol does not have fails
+    here rather than producing a rating column nothing can fill.
+    """
+    core = set(mode_set(CORE_MODE_SET).names())
+    assert P.VALID_MODES == mode_set(CORE_MODE_SET).names()
+    for table in (P.MODE_DESCRIPTIONS, P.SHIFT_MODE_DESCRIPTIONS, P.JUDGE_MODE_DESCRIPTIONS):
+        assert set(table) == core
 
 
 def test_the_likert_rubric_covers_the_five_modes_in_order() -> None:

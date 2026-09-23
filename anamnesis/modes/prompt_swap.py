@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from anamnesis.modes.run4_modes import RUN4_MODES
+from anamnesis.modes.registry import CORE_MODE_SET, mode_set
 
 DEFAULT_USER_TEMPLATE = "Write about: {topic}"
 """The user turn a non-swapped generation uses, and the base a swap prepends to."""
@@ -44,14 +44,14 @@ class PromptSwapPair:
     label: str
 
     def get_system_prompt(self) -> str:
-        """The system prompt of :attr:`system_mode`.
+        """The system prompt of :attr:`system_mode`, from the core mode set.
 
         Raises
         ------
-        KeyError
-            When the pair names a mode outside the five-mode set.
+        anamnesis.modes.registry.UnknownModeSetError
+            When the pair names a mode the core set does not hold.
         """
-        return RUN4_MODES[self.system_mode]
+        return mode_set(CORE_MODE_SET).prompt(self.system_mode)
 
     def format_user_prompt(self, topic: str, template: str = DEFAULT_USER_TEMPLATE) -> str:
         """The user turn: the override directive, then the topic as usual."""

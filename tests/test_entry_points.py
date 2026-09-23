@@ -287,13 +287,17 @@ def test_recompute_configs_match_the_records_own_construction(model: str) -> Non
 
 def test_extraction_mode_sets_are_the_modes_package_texts() -> None:
     """A mode label in banked data means the exact prompt text in the package."""
-    from anamnesis.modes.extended_modes import EXTENDED_MODES
-    from anamnesis.modes.run4_modes import RUN4_MODES
+    from anamnesis.modes import (
+        CORE_MODE_SET,
+        EXTENDED_MODE_SET,
+        UnknownModeSetError,
+        mode_prompts,
+    )
 
-    assert run_extraction.mode_prompts("run4") == dict(RUN4_MODES)
-    assert run_extraction.mode_prompts("mixed") == dict(EXTENDED_MODES)
-    with pytest.raises(ValueError, match="unknown mode set"):
-        run_extraction.mode_prompts("run3")
+    assert run_extraction.mode_prompts(CORE_MODE_SET) == mode_prompts(CORE_MODE_SET)
+    assert run_extraction.mode_prompts(EXTENDED_MODE_SET) == mode_prompts(EXTENDED_MODE_SET)
+    with pytest.raises(UnknownModeSetError, match="unknown mode set"):
+        run_extraction.mode_prompts("no-such-set")
 
 
 def test_extraction_builds_the_asked_for_count_per_mode() -> None:
@@ -306,7 +310,7 @@ def test_extraction_builds_the_asked_for_count_per_mode() -> None:
     for spec in specs:
         counts[spec.mode] = counts.get(spec.mode, 0) + 1
     assert set(counts.values()) == {4}
-    assert set(counts) == set(run_extraction.mode_prompts("run4"))
+    assert set(counts) == set(run_extraction.mode_prompts("run4"))  # the default set
 
 
 def test_extraction_adds_the_swap_condition_on_request() -> None:

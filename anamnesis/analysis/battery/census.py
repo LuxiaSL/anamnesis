@@ -44,6 +44,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from anamnesis.analysis.battery.gates import reject_blind_judge_defense
+from anamnesis.modes import CORE_MODE_SET, mode_set
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,9 @@ HARDENED_2AFC_BAR = 0.65
 """Forced-choice rate at which a judge counts as having discriminated. Above it,
 that judge's *failure* elsewhere cannot defend a row."""
 
-MODES: tuple[str, ...] = ("linear", "analogical", "socratic", "contrastive", "dialectical")
-"""The five format-controlled modes a k-way row is read per-mode over."""
+MODES: tuple[str, ...] = mode_set(CORE_MODE_SET).names()
+"""The core set's format-controlled modes, in label order, which a k-way row is
+read per-mode over."""
 
 A1_RECORD_DIRS: tuple[str, ...] = ("A1", "A1_m3m4", "A1_m5", "A1_dsv2")
 """Arm directories the temperature row is read from, in reading order."""

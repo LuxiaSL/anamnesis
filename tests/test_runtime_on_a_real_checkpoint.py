@@ -32,7 +32,9 @@ from anamnesis.extraction.generation_runner import format_prompt, run_single_gen
 from anamnesis.extraction.model_loader import load_model
 from anamnesis.extraction.replay.cache_surgery import operative_inv_freq
 from anamnesis.extraction.replay.extract import replay_extract
-from anamnesis.modes.run4_modes import RUN4_MODES
+from anamnesis.modes import CORE_MODE_SET, mode_prompts
+
+RUN4_MODES = mode_prompts(CORE_MODE_SET)
 
 CHECKPOINT = os.environ.get("ANAMNESIS_TEST_MODEL")
 PRESET = os.environ.get("ANAMNESIS_TEST_PRESET", "8b")
