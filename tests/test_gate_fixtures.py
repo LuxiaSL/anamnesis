@@ -175,7 +175,7 @@ MUST_NOT_CATCH: tuple[Case, ...] = (
         "The ANCHOR-versus-RECENCY contrast is the block-routing echo of the how-axis.",
         "comment",
     ),
-    Case("PORT-as-is items are outside the consolidation arithmetic.", "comment"),
+    Case("A PORT-as-is item keeps its name and its signature.", "comment"),
     # A turn label: the first user turn and the first assistant turn of a transcript.
     Case("oldest evictable (user U1 + assistant A1), six slots freed", "comment"),
     # Quantities that share the shape of an item code without being one.
