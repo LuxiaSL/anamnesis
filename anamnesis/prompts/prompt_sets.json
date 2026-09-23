@@ -1,10 +1,10 @@
 {
-  "description": "Phase 1 8B baseline: same 20 topics from Phase 0, 5 modes, 2 repetitions = 200 samples",
+  "description": "The topic sets mode corpora draw from. The twenty topics of set_a and set_b, crossed with five modes at num_repetitions each, give a corpus of 200 generations.",
   "user_prompt_template": "Write about: {topic}",
   "num_repetitions": 2,
 
   "vmb_stage0_strata": {
-    "description": "prereg-vmb-v1 Stage-0 floor protocol (ratified 2026-07-12): Phase-0 20 topics (set_a+set_b) x 4 task strata = 80 prompt classes; 10 seeds per class per model; NO system prompt (bare floors, addendum 2026-07-12a item 2). Stratum order is FROZEN (stratum_idx feeds make_seed). The conversational template embeds the topic mid-sentence verbatim (capitalization untouched) - consistency over elegance.",
+    "description": "The floor protocol: the twenty topics of set_a and set_b under four task strata, 80 prompt classes of seeds_per_class seeds each, sampled with no system prompt so the floor is measured bare. Stratum order is fixed: a banked floor corpus lays out its generation ids by stratum index, and the faithfulness set takes each topic's continuation from the stratum that index names (anamnesis.analysis.battery.stage0.floor_gid). The conversational template embeds the topic mid-sentence verbatim, capitalization untouched, so every topic is framed the same way.",
     "strata": [
       {"name": "expository", "template": "Write about: {topic}"},
       {"name": "explanatory", "template": "Explain to a beginner: {topic}"},

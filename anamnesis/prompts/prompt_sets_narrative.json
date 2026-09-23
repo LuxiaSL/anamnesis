@@ -1,5 +1,5 @@
 {
- "description": "D4 off-genre census (session-11, 14q item 3; Pd4=.75): the SAME frozen Phase-0 20 topics (set_a+set_b) recast into FOUR creative-narrative strata - census-matched WITHIN genre (structure mirrors the frozen 4-stratum protocol exactly: stratum_idx feeds make_seed, order FROZEN). Enactor ops choice journaled 2026-07-16; stop-and-surface fires only on census surprises in the data, never improvised post-hoc.",
+ "description": "The twenty topics of set_a and set_b recast into four creative-narrative strata, so a floor can be measured within one genre. The structure mirrors the floor protocol in prompt_sets.json exactly, including its fixed stratum order, for the same reason: a banked floor corpus lays out its generation ids by stratum index.",
  "user_prompt_template": "Write about: {topic}",
  "num_repetitions": 2,
  "topics": {
@@ -73,7 +73,7 @@
   ]
  },
  "vmb_stage0_strata": {
-  "description": "D4 creative-narrative strata (frozen at staging, before any gen): four narrative frames over the frozen 20 topics; NO system prompt (bare, matching the A5 cell convention).",
+  "description": "Four narrative frames over the twenty topics, sampled with no system prompt, as in the floor protocol.",
   "strata": [
    {
     "name": "story_third",
