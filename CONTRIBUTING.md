@@ -140,9 +140,11 @@ reason expires, the entry goes, whatever it used to protect.
 `tools/surface_report.py` reports the size of the codebase in code tokens and documentation
 words. It is a trend instrument, not a gate: it says which direction the repository is moving.
 
-G1 and G2 need artifacts and a tree state a runner does not have, so they are run per pull
-request and their output attached rather than executed in CI. A gate may be waived only in
-writing, with the reason recorded beside the receipt — the failure is recorded, never the gate
+G1 is the one gate CI cannot run: it reads banked signatures, hundreds of gigabytes of them, and
+asks whether the same inputs still produce the same features — and a different machine's
+floating-point reductions differ anyway, so it runs on the box that holds the data and its receipt
+is attached to the pull request. The other three, G2 included, run in CI. A gate may be waived only
+in writing, with the reason recorded beside the receipt — the failure is recorded, never the gate
 rewritten.
 
 ## Adding to the instrument

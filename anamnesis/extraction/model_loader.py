@@ -4,7 +4,12 @@ Architecture-agnostic — all model specifics come from ModelConfig.
 
 Responsibilities:
   - Load model + tokenizer with eager attention (required for attn weights)
-  - Register forward hooks on k_proj linear layers to capture pre-RoPE keys
+  - Register forward hooks on the attention and MLP projections whose outputs
+    the feature families read: `k_proj` and `q_proj` for pre-RoPE keys and
+    queries, `v_proj` for values, `o_proj` for the attention block's per-token
+    output, and `gate_proj` for the SwiGLU gate before its activation. Pre-RoPE
+    is the reason these are hooks rather than reads of the KV cache, whose keys
+    carry rotational position
   - Provide hook lifecycle management (register, collect, clear, remove)
   - Load a bare model for the passes that read no captured state
     (`load_unhooked_model`): token banking, and steering captures that hook
