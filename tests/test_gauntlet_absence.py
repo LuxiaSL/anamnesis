@@ -10,9 +10,9 @@ absence and return, rather than raise on a missing key and take the whole pass w
 That is what these tests pin, one section at a time, for each entry point that asks for
 a block or union by name.
 
-The corpus is the four families the ``engineered`` union names, so that union *is*
-present: the tests then distinguish "this section lost its union" from "this corpus has
-nothing in it".
+The corpus is the three families the family union names, so that union *is* present:
+the tests then distinguish "this section lost its union" from "this corpus has nothing
+in it".
 
 CPU only; the bank is synthetic and small.
 """
@@ -109,7 +109,7 @@ def test_the_corpus_holds_the_families_and_no_union_over_the_core_blocks(
     assert not families_only.has_block(ATTENTION_AND_CACHE)
     all_blocks, _ = get_available_blocks(families_only)
     assert set(all_blocks) == set(FAMILY_WIDTHS) | {ALL_FAMILIES}
-    # The engineered union is exactly its members' widths, not a subset of them.
+    # The family union is exactly its members' widths, not a subset of them.
     assert families_only.get_block(ALL_FAMILIES).shape[1] == sum(FAMILY_WIDTHS.values())
 
 

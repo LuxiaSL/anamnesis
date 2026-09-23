@@ -11,12 +11,19 @@ Two things get renamed here, and they are renamed in this order:
 
 ``SECTION_RENAMES`` / ``FIELD_RENAMES``
     Section keys, and the field names inside one section.
-``BLOCK_LABEL_RENAMES``
+``BLOCK_LABEL_RENAMES`` / ``LEGACY_UNION_LABELS``
     The label a block or a union of blocks is reported under, wherever it appears in
     the document — as a dict key, as a component of a ``a+b`` combination key, or as a
     string value naming which block a number came from. Labels are not confined to one
     section, so this pass walks the whole document, and it runs second so that it sees
     field names already on their current spelling.
+
+The two label tables answer different questions. A rename says the banked label and
+the current one address the same columns under two spellings, so the number reads
+forward onto the current label. A legacy union label says the banked union held a
+different set of blocks than any union the loader builds now, so its number reads
+onto a label no current run carries, and a comparison that meets it beside a current
+union sees two names rather than one.
 
 Why migration tables rather than validation aliases on the fields
 -----------------------------------------------------------------
@@ -126,18 +133,20 @@ FIELD_RENAMES: dict[str, dict[str, str]] = {
 # banked files carry, matched against what comes off disk and never written. They are
 # not a taxonomy, and editing one to look better makes an existing file unreadable.
 #
-# Current label → the retired spelling, or None where the current label is the only
-# one a file has ever carried. Keyed by the current label and total over the label
-# set, so a block or union added to `anamnesis/analysis/gauntlet/signature_io.py` has
-# to say which it is, and a rename cannot land without an entry here.
+# Current label → the retired spelling, or None where no banked file carries these
+# same columns under another spelling. Keyed by the current label and total over the
+# label set, so a block or union added to
+# `anamnesis/analysis/gauntlet/signature_io.py` has to say which it is, and a rename
+# cannot land without an entry here. A banked union whose membership differs from the
+# current one is not a rename, and is read through ``LEGACY_UNION_LABELS`` below.
 RETIRED_LABEL_SPELLINGS: dict[str, str | None] = {
     NORMS_AND_OUTPUT_STATS: "T1",
     ATTENTION_AND_DELTAS: "T2",
     CACHE_AND_KEYS: "T2.5",
     RESIDUAL_PCA: "T3",
     ATTENTION_AND_CACHE: "T2+T2.5",
-    ATTENTION_AND_CACHE_WITH_FAMILIES: "T2+T2.5+engineered",
-    EVERYTHING: "combined_v2",
+    ATTENTION_AND_CACHE_WITH_FAMILIES: None,
+    EVERYTHING: None,
     ALL_CORE: None,
     ALL_FAMILIES: None,
     RESIDUAL_TRAJECTORY: None,
@@ -157,9 +166,75 @@ BLOCK_LABEL_RENAMES: dict[str, str] = {
 # vocabulary alone would reject six results files over blocks they legitimately hold.
 READ_ONLY_LABELS: frozenset[str] = frozenset({"temporal_dynamics", "contrastive_projection"})
 
-KNOWN_LABELS: frozenset[str] = ALL_LABELS | READ_ONLY_LABELS
-"""Every block label a results document may carry: the live vocabulary and the
-read-only spellings beside it. What a reader of a banked file checks against."""
+# The unions a banked file reports whose membership no current union matches. Each is
+# read under a label of its own with a ``legacy_`` prefix, so the banked number keeps
+# its identity and cannot be looked up under a current label by accident. The labels
+# are literals rather than derived from the current ones: respelling a current union
+# must not move the label a banked number is read under.
+LEGACY_FAMILY_UNION = "legacy_engineered"
+LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES = "attention_and_cache+legacy_engineered"
+LEGACY_EVERYTHING = "legacy_every_block"
+
+LEGACY_UNION_MEMBERS: dict[str, tuple[str, ...]] = {
+    LEGACY_FAMILY_UNION: (
+        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, "temporal_dynamics",
+    ),
+    LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES: (
+        ATTENTION_AND_DELTAS, CACHE_AND_KEYS,
+        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES, "temporal_dynamics",
+    ),
+    LEGACY_EVERYTHING: (
+        NORMS_AND_OUTPUT_STATS, ATTENTION_AND_DELTAS, CACHE_AND_KEYS, RESIDUAL_PCA,
+        RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES,
+        "temporal_dynamics", "contrastive_projection",
+    ),
+}
+"""Legacy union label → the blocks the banked union concatenated. The widths a banked
+``integrity`` section records for each union are the sum of these members' widths,
+which is how the membership is known rather than recalled."""
+
+LEGACY_UNION_COUNTERPARTS: dict[str, str] = {
+    LEGACY_FAMILY_UNION: ALL_FAMILIES,
+    LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES: ATTENTION_AND_CACHE_WITH_FAMILIES,
+    LEGACY_EVERYTHING: EVERYTHING,
+}
+"""Legacy union label → the current union it resembles and does not equal. What a
+cross-run comparison consults to say that two runs report the same role under two
+different memberships, rather than silently finding the label absent on one side."""
+
+# WIRE VOCABULARY, read-side only, like the retired spellings above. Banked spelling
+# → the legacy label its number reads as. More than one spelling may land on one
+# legacy label: the attention-and-cache-plus-families union is spelled with the bin
+# labels in some banked files and with the block labels in others, and it is one
+# membership either way.
+LEGACY_UNION_LABELS: dict[str, str] = {
+    "engineered": LEGACY_FAMILY_UNION,
+    "T2+T2.5+engineered": LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES,
+    "attention_and_cache+engineered": LEGACY_ATTENTION_AND_CACHE_WITH_FAMILIES,
+    "combined_v2": LEGACY_EVERYTHING,
+}
+
+KNOWN_LABELS: frozenset[str] = ALL_LABELS | READ_ONLY_LABELS | frozenset(LEGACY_UNION_MEMBERS)
+"""Every block label a results document may carry once read: the live vocabulary, the
+read-only spellings beside it, and the legacy union labels. What a reader of a banked
+file checks against."""
+
+
+def union_counterpart(label: str) -> str | None:
+    """The other-membership label for a union whose membership changed, else None.
+
+    A legacy union label answers with the current union it resembles, and a current
+    union label with its legacy one. Two runs that report a union under a label and
+    its counterpart hold the same role over different blocks, so their numbers are not
+    one measurement.
+    """
+    if label in LEGACY_UNION_COUNTERPARTS:
+        return LEGACY_UNION_COUNTERPARTS[label]
+    for legacy, current in LEGACY_UNION_COUNTERPARTS.items():
+        if current == label:
+            return legacy
+    return None
+
 
 # Fields whose keys are several labels joined with ``+``, and which reading applies:
 # ``members`` translates each component on its own, ``union_first`` takes the longest
@@ -175,9 +250,13 @@ COMPOUND_LABEL_FIELDS: dict[str, str] = {
 
 _WHOLE = "whole"
 
+_READ_FORWARD: dict[str, str] = {**BLOCK_LABEL_RENAMES, **LEGACY_UNION_LABELS}
+"""Every banked label spelling the read side translates, renames and legacy unions
+together, so each translator consults one table."""
+
 
 def _translate_whole(label: str) -> str:
-    return BLOCK_LABEL_RENAMES.get(label, label)
+    return _READ_FORWARD.get(label, label)
 
 
 def _translate_members(key: str) -> str:
@@ -196,8 +275,8 @@ def _translate_union_first(key: str) -> str:
     while start < len(parts):
         for end in range(len(parts), start, -1):
             candidate = "+".join(parts[start:end])
-            if candidate in BLOCK_LABEL_RENAMES:
-                out.append(BLOCK_LABEL_RENAMES[candidate])
+            if candidate in _READ_FORWARD:
+                out.append(_READ_FORWARD[candidate])
                 start = end
                 break
         else:
@@ -231,7 +310,7 @@ def _rename_keys(value: Any, renames: dict[str, str]) -> Any:
 
 
 def _relabel(value: Any, key_style: str = _WHOLE) -> Any:
-    """``value`` with every retired block label replaced by the current one.
+    """``value`` with every banked block label replaced by the label it now reads as.
 
     ``key_style`` says how this dict's own keys are read — a plain label, or one of the
     combination spellings in ``COMPOUND_LABEL_FIELDS``. It applies to one level only:

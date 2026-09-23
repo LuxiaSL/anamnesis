@@ -11,8 +11,8 @@ Two places still hold the strings, and both are wire format rather than descript
     `anamnesis/extraction/state_extractor.py` — every signature ever banked keys its
     arrays and its slice table with exactly them;
   * the labels older banked results were *reported* under, in
-    `anamnesis/analysis/gauntlet/schemas/compat.py` — the table that reads such a file
-    forward onto the labels now in use.
+    `anamnesis/analysis/gauntlet/schemas/compat.py` — the tables that read such a file
+    forward onto the labels now in use, the renames and the legacy unions both.
 
 Everything else is a regression. This test assembles its patterns from those constants
 at runtime, so it is not its own hit, and so a string that stops being retired stops
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from anamnesis.analysis.gauntlet.schemas.compat import BLOCK_LABEL_RENAMES
+from anamnesis.analysis.gauntlet.schemas.compat import BLOCK_LABEL_RENAMES, LEGACY_UNION_LABELS
 from anamnesis.feature_map import (
     STORED_FAMILY_ATTENTION_OTHER,
     STORED_FAMILY_ATTENTION_SPECTRAL,
@@ -67,10 +67,24 @@ OWNS_THE_VOCABULARY: dict[str, str] = {
 """Files allowed a hit, and why. A file here with no hit left is a stale exemption."""
 
 
+PROSE_SPELLINGS: frozenset[str] = frozenset({"engineered"})
+"""Banked union spellings that are also an ordinary English word in this codebase's
+prose. The banked family union was reported as ``engineered``, which is also the word
+for the families themselves, so a scan for it would flag every sentence about them. As
+a label it is held by the compat tests instead, which pin that it reads as a legacy
+union and never reaches a written result."""
+
+
+def banked_union_spellings() -> tuple[str, ...]:
+    """The banked union spellings the scan looks for: all but the prose words."""
+    return tuple(label for label in LEGACY_UNION_LABELS if label not in PROSE_SPELLINGS)
+
+
 def retired_strings() -> tuple[str, ...]:
     """Every retired spelling, from the constants that hold it."""
     return (
         *BLOCK_LABEL_RENAMES,
+        *banked_union_spellings(),
         STORED_NORMS_AND_OUTPUT_STATS,
         STORED_ATTENTION_AND_DELTAS,
         STORED_CACHE_AND_KEYS,
@@ -91,8 +105,9 @@ def retired_pattern() -> re.Pattern[str]:
     identifier is somebody else's name — while a stored name is matched anywhere,
     because it reaches disk inside ``features_<name>``.
     """
-    bin_labels = sorted(BLOCK_LABEL_RENAMES, key=len, reverse=True)
-    stored = sorted(set(retired_strings()) - set(BLOCK_LABEL_RENAMES), key=len, reverse=True)
+    labels = {*BLOCK_LABEL_RENAMES, *banked_union_spellings()}
+    bin_labels = sorted(labels, key=len, reverse=True)
+    stored = sorted(set(retired_strings()) - labels, key=len, reverse=True)
     parts = [
         rf"(?<![A-Za-z0-9_]){re.escape(label)}(?![A-Za-z0-9_])" for label in bin_labels
     ]

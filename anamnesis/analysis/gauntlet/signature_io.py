@@ -7,7 +7,7 @@ directory into the two objects the gauntlet's sections consume:
 ``Run4Data``
     Feature matrices partitioned by block, plus the unions over them, plus the
     mode and topic labels aligned to the matrix rows. Both the four core blocks
-    and the v2 families are supported, and which ones are present is discovered
+    and the engineered families are supported, and which ones are present is discovered
     from the npz contents rather than declared, so a directory extracted with a
     narrower suite loads as itself.
 ``AnalysisData``
@@ -70,11 +70,19 @@ ATTENTION_FLOW = "attention_flow"
 GATE_FEATURES = "gate_features"
 
 # Union labels: a block built by concatenating others, addressed as one.
+#
+# A union's label is a claim about its membership, so a union whose members change
+# takes a new label rather than keeping the old spelling over a different feature
+# set. The family union is spelled by its members for that reason: the trajectory,
+# attention-flow and gate families. A results file that carries a union label from
+# a different membership is read under a distinct legacy label by
+# `anamnesis/analysis/gauntlet/schemas/compat.py`, so the two never compare as one
+# measurement.
 ATTENTION_AND_CACHE = "attention_and_cache"
 ALL_CORE = "combined"
-ALL_FAMILIES = "engineered"
+ALL_FAMILIES = "trajectory_flow_and_gate"
 EVERYTHING = "every_block"
-ATTENTION_AND_CACHE_WITH_FAMILIES = "attention_and_cache+engineered"
+ATTENTION_AND_CACHE_WITH_FAMILIES = f"{ATTENTION_AND_CACHE}+{ALL_FAMILIES}"
 
 # Label → the name the block is stored under. The four core blocks were banked
 # under names that say nothing about what they read, and every signature ever
@@ -111,7 +119,9 @@ FAMILY_BLOCKS = [RESIDUAL_TRAJECTORY, ATTENTION_FLOW, GATE_FEATURES]
 # numbers do not contain.
 #
 # ``ALL_FAMILIES`` spans every family block, so it is written as that list rather
-# than as a second enumeration of the same members.
+# than as a second enumeration of the same members. Its label names those members,
+# which `tests/test_signature_io.py` pins: a family added to or removed from
+# ``FAMILY_BLOCKS`` fails there until the label and the legacy table move with it.
 BLOCK_UNIONS: dict[str, list[str]] = {
     ATTENTION_AND_CACHE: [ATTENTION_AND_DELTAS, CACHE_AND_KEYS],
     ALL_CORE: list(CORE_BLOCKS),
