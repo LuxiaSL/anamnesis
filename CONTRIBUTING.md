@@ -16,10 +16,13 @@ travels the other road.
 Documentation and comments here obey two rules at once. Both are mechanically checked, and both
 apply to three surfaces: comments, docstrings, and the message a `raise` or a logging call says
 out loud. A stranger meets that last one at the moment something breaks, which is the worst
-moment to hand them a pointer they cannot follow. The rules never apply to string data — a
-fixture, a dict key, a filename, a row a run writes into a report — which is content the program
-handles rather than prose a reader is meant to believe. Inside an f-string, the substitutions are
-code and are read as such.
+moment to hand them a pointer they cannot follow. The rules never apply to wire format — a
+fixture, a dict key, a status value, a filename, a label banked results carry — which is content
+the program keys on, and which changing would break reading what is already banked. They do apply
+to prose a run writes for a human: a `note`, a `description`, a `reason` or a table caption in a
+report is read the way a comment is read, so it states the standing fact and cites nothing. The
+checkers see only the first three surfaces; the fourth is a reviewer's catch. Inside an f-string,
+the substitutions are code and are read as such.
 
 ### 1. State what is true now
 
