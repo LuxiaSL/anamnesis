@@ -9,6 +9,17 @@ description = "Computational state signatures: instrument for how a forward pass
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
+authors = [{ name = "Luxia", email = "mail.luxia@gmail.com" }]
+# The interpreters are the ones the gate workflow runs every check on, so the claim
+# `requires-python` makes and the claim these rows make are tested by the same job.
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "pydantic>=2.7",
     "numpy>=1.26",
@@ -24,6 +35,12 @@ dependencies = [
     "transformers>=4.54",
     "tqdm>=4.66",
 ]
+
+# An installed wheel carries no tree with it, so the link back to the source is the
+# only way a reader of the metadata reaches the code the documentation points at.
+[project.urls]
+Homepage = "https://github.com/LuxiaSL/anamnesis"
+Repository = "https://github.com/LuxiaSL/anamnesis"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
