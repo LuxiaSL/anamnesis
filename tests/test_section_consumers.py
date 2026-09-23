@@ -1,20 +1,25 @@
 """A section that reads another section's result treats the error stub as a value.
 
 Most sections read the signature data. Two things read *sections*: the prediction
-scorecard, which scores nine pre-registered predictions off five of them, and the
+scorecard, which scores nine standing expectations off five of them, and the
 summary the runner prints at the end of a pass. A section that could not run returns
 its reason in place of its numbers, so for those two readers a stub is not an error
 condition — it is one of the values their input can have, exactly as an absent block
 is one of the states a corpus can be in.
 
-Two properties, and the second is the one that matters:
+Three properties, and the last two are the ones that matter:
 
   * a stubbed upstream produces a stubbed downstream reading, never an exception —
     otherwise one section that could not run ends the whole pass;
   * a prediction whose evidence is absent is **unscored**, never scored WRONG. A
-    verdict against a pre-registered prediction is a finding, and a finding that
-    rests on a measurement nobody took is the same overstatement as a union
-    reported at a width it does not have.
+    verdict against a standing expectation is a finding, and a finding that rests on
+    a measurement nobody took is the same overstatement as a union reported at a
+    width it does not have;
+  * a verdict never travels without what bounds it. The row that orders three feature
+    blocks carries the limit on what a block ordering can mean, and the scorecard
+    carries what corpus its thresholds are fixed for — in the result and in the
+    printed summary both, because a limit only one of those two surfaces states is a
+    limit half the readers never meet.
 
 The fixtures here are the smallest results documents that satisfy the section
 schemas, so one upstream can be stubbed at a time and the rows that depend on it
@@ -47,7 +52,7 @@ from anamnesis.analysis.gauntlet.schemas import (
     TopologyResult,
     BlockConvergenceResult,
 )
-from anamnesis.analysis.gauntlet.scorecard import run_scorecard
+from anamnesis.analysis.gauntlet.scorecard import REGISTERED_CORPUS, run_scorecard
 from anamnesis.analysis.gauntlet.signature_io import (
     ALL_CORE,
     ATTENTION_AND_CACHE,
@@ -56,7 +61,11 @@ from anamnesis.analysis.gauntlet.signature_io import (
     NORMS_AND_OUTPUT_STATS,
     RESIDUAL_PCA,
 )
-from anamnesis.analysis.gauntlet.utils import is_error_stub, section_reading
+from anamnesis.analysis.gauntlet.utils import (
+    BLOCK_READOUT_LIMIT,
+    is_error_stub,
+    section_reading,
+)
 
 MODES = ["linear", "contrastive", "dialectical", "socratic", "analogical"]
 
@@ -318,6 +327,63 @@ def test_the_printed_summary_reads_stubs_without_raising(capsys: Any) -> None:
     assert "CCGP" in printed and "did not run" in printed
     assert "Topology" in printed
     assert "INSUFFICIENT_DATA" in printed
+
+
+BLOCK_ORDERING_ROW = 6
+
+
+def test_the_block_ordering_row_carries_its_limit_in_every_outcome() -> None:
+    """Row 6 states what a block ordering cannot mean, scored or unscored.
+
+    The limit is a property of the reading, not of the verdict, so it is on the row
+    whether the row said CONFIRMED, WRONG or nothing at all.
+    """
+    for document in (a_full_results_document(), {}):
+        row = rows_by_number(run_scorecard(document))[BLOCK_ORDERING_ROW]
+        assert row.caveat == BLOCK_READOUT_LIMIT, row.outcome
+        assert "localizes nothing" in row.caveat
+        assert "run_subfamily_decomp" in row.caveat
+    # The row's wording states the ordering it tests, not a substrate the limit denies.
+    scored = rows_by_number(run_scorecard(a_full_results_document()))[BLOCK_ORDERING_ROW]
+    assert scored.outcome == "CONFIRMED", "the fixture orders the three blocks"
+    assert "load-bearing" not in scored.prediction
+
+
+def test_the_printed_summary_shows_no_verdict_without_its_limit(capsys: Any) -> None:
+    """The surface a first-time reader meets: the limit is printed beside the verdict."""
+    document = a_full_results_document()
+    document["run_name"] = "synthetic_demo"
+    document["scorecard"] = run_scorecard(document, lane_id="synthetic-bank-v1")
+    _print_summary(document)
+    printed = capsys.readouterr().out
+
+    assert "CONFIRMED" in printed
+    # Twice: once under the block ranking the readout prints, once under row 6.
+    assert printed.count("localizes nothing") == 2
+    assert "drawn from a generator" in printed
+    assert "synthetic_demo" in printed
+
+
+def test_the_scorecard_states_what_corpus_its_thresholds_are_fixed_for() -> None:
+    """A verdict is agreement with an expectation fixed elsewhere, and says so."""
+    document = a_full_results_document()
+    document["run_name"] = "somebody_elses_model"
+
+    measured = run_scorecard(document, lane_id="cuda-h100-torch271")
+    assert measured.corpus_caveat is not None
+    assert REGISTERED_CORPUS in measured.corpus_caveat
+    assert "somebody_elses_model" in measured.corpus_caveat
+    assert "drawn from a generator" not in measured.corpus_caveat
+
+    drawn = run_scorecard(document, lane_id="synthetic-bank-v1")
+    assert drawn.corpus_caveat is not None
+    assert "drawn from a generator" in drawn.corpus_caveat
+
+    # A caller with no lane to hand still gets the registration stated.
+    unknown = run_scorecard(document)
+    assert unknown.corpus_caveat is not None
+    assert REGISTERED_CORPUS in unknown.corpus_caveat
+    assert "drawn from a generator" not in unknown.corpus_caveat
 
 
 def test_section_reading_distinguishes_its_three_states() -> None:

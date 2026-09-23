@@ -37,10 +37,12 @@ from anamnesis.analysis.gauntlet.signature_io import load_run4
 from anamnesis.analysis.lane_guard import (
     MixedLaneError,
     gate_banked_signatures,
+    lane_is_drawn,
     require_single_lane,
     sidecar_path,
 )
 from anamnesis.steering import readouts
+from anamnesis.synthetic_bank import SYNTHETIC_LANE
 
 
 def test_legacy_inputs_are_not_invented_cpu_certification():
@@ -257,3 +259,17 @@ def test_steering_readout_gates_the_bank_it_normalizes(tmp_path):
     write_bank(tmp_path, {1: "other"})
     with pytest.raises(MixedLaneError):
         readouts.floor_z(sig_dir, median, scale)
+
+
+def test_a_drawn_bank_is_readable_from_its_lane_alone():
+    """The lane is the only place a drawn bank differs from a measured one.
+
+    A reading over drawn vectors has to say so, and nothing in a vector's shape or
+    values carries that — so the bank the fixture writer produces names itself, and
+    the check that reads it is the one every reader uses.
+    """
+    assert lane_is_drawn(SYNTHETIC_LANE)
+    assert not lane_is_drawn("cuda-h100-torch271")
+    # An untagged bank is unknown provenance, which the gate above handles as its own
+    # case; claiming it drawn would be inventing a fact about it.
+    assert not lane_is_drawn(None)

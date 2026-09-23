@@ -1,4 +1,19 @@
-"""Section 10: Prediction scorecard — evaluate pre-registered 8B predictions.
+"""Section 10: the nine standing expectations this instrument checks, scored.
+
+The nine are here, in this module, and each row carries its own text, its own
+threshold and the confidence attached to it — so the scorecard is readable without
+a second document beside it. What the rows are not is a result: every threshold is
+fixed for one corpus, :data:`REGISTERED_CORPUS`, and a pass over any other corpus
+scores this corpus's agreement with an expectation fixed for that one. A CONFIRMED
+row is therefore never by itself a finding about the model behind the corpus that
+was read, and ``ScorecardResult.corpus_caveat`` states that where a reader of the
+output meets it rather than leaving it in this docstring.
+
+One row needs a limit of its own beside its verdict, and carries it in
+``ScorecardPrediction.caveat``: the row that orders three feature blocks by
+accuracy. Those blocks each span more than one substrate, so their ordering
+localizes nothing — :data:`anamnesis.analysis.gauntlet.utils.BLOCK_READOUT_LIMIT`
+is the statement, shared with the section that measures it.
 
 This section reads other sections rather than the data, which makes the error
 stub a possible value of every one of its inputs: a section that could not run
@@ -16,6 +31,8 @@ reached only once their inputs exist, and `anamnesis/analysis/gauntlet/utils.py`
 from __future__ import annotations
 
 from typing import Any
+
+from anamnesis.analysis.lane_guard import lane_is_drawn
 
 from .signature_io import (
     ALL_CORE,
@@ -35,17 +52,58 @@ from .schemas import (
     LegacyBinReadoutResult,
     TopologyResult,
 )
-from .utils import section_reading
+from .utils import BLOCK_READOUT_LIMIT, section_reading
+
+REGISTERED_CORPUS = (
+    "a corpus of the five format-controlled modes over the 8b model preset"
+)
+"""The corpus every threshold in this module is fixed for.
+
+The preset is the ``8b`` row of `anamnesis/config/models.py` and the modes are
+`anamnesis/modes/run4_modes.py`; a threshold means what it means against those two.
+Named here so the verdicts can be read for what they are — agreement between the
+corpus under the pass and an expectation fixed for this one. A threshold moved to suit
+another corpus is a new expectation, and then this line changes with it.
+"""
 
 
-def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
-    """Evaluate 9 pre-registered predictions against computed results.
+def _corpus_caveat(run_name: str | None, lane_id: str | None) -> str:
+    """What a reader has to know before taking a verdict for a result.
 
-    Each prediction was registered with its confidence and its importance before
-    the 8B results existed, and is restated at the branch that scores it: the
-    text, the threshold and the registered confidence travel together in the
-    `ScorecardPrediction` row, so the scorecard is readable without a second
-    document beside it.
+    ``run_name`` and ``lane_id`` describe the corpus this pass read: the label it was
+    asked for, and the arithmetic lane its vectors carry. A lane that names itself
+    drawn gets the stronger sentence, because the demo corpus a fresh checkout can
+    produce is drawn, and a reader meeting nine verdicts over it should not have to
+    infer what they are about.
+    """
+    corpus = run_name or "an unnamed corpus"
+    caveat = (
+        f"The nine expectations below are fixed for {REGISTERED_CORPUS}, and this pass "
+        f"read {corpus}. A verdict states whether this corpus agrees with an expectation "
+        "fixed for that one; over another model, another mode set or another feature "
+        "bank, no verdict here is a finding about the model behind the corpus."
+    )
+    if lane_is_drawn(lane_id):
+        caveat += (
+            f" This corpus carries lane {lane_id}: its numbers are drawn from a "
+            "generator rather than measured from a forward pass, so every verdict below "
+            "is about that generator and about no model at all."
+        )
+    return caveat
+
+
+def run_scorecard(
+    all_results: dict[str, Any], *, lane_id: str | None = None,
+) -> ScorecardResult:
+    """Score the nine standing expectations against what the other sections measured.
+
+    ``lane_id`` is the arithmetic lane of the corpus the pass read, used only to state
+    what the verdicts are about; a caller that does not have it gets the statement
+    without that sentence.
+
+    Each expectation is restated at the branch that scores it: the text, the threshold
+    and the confidence attached to it travel together in the `ScorecardPrediction` row,
+    so the scorecard is readable without a second document beside it.
 
     Every row comes back. A row whose upstream section did not run carries
     ``outcome="INSUFFICIENT_DATA"`` and that section's reason in
@@ -232,7 +290,7 @@ def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
         mean_norms_and_attention_id=mean_other,
     ))
 
-    # ── Prediction 6: the cache-and-keys block is load-bearing ──
+    # ── Prediction 6: the ordering of three blocks by their own accuracy ──
     block_inversion: bool | None = None
     per_block: dict[str, float] = {}
     removal_cost: dict[str, float | None] = {NORMS_AND_OUTPUT_STATS: None, ATTENTION_AND_DELTAS: None, CACHE_AND_KEYS: None}
@@ -261,13 +319,14 @@ def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
         )
     predictions.append(ScorecardPrediction(
         prediction=(
-            "6. Cache reads and key geometry are load-bearing: that block beats "
-            "attention-and-deltas, which beats norms-and-output-stats"
+            "6. In the per-block readout, cache-and-keys scores above "
+            "attention-and-deltas, which scores above norms-and-output-stats"
         ),
         confidence="70%",
         importance="MEDIUM",
         outcome=p6_outcome,
         unscorable_because=p6_gap,
+        caveat=BLOCK_READOUT_LIMIT,
         cache_beats_attention_beats_norms=block_inversion,
         per_block_accuracy=per_block,
         removal_costs=removal_cost,
@@ -390,4 +449,12 @@ def run_scorecard(all_results: dict[str, Any]) -> ScorecardResult:
         if scored_nothing else None
     )
 
-    return ScorecardResult(predictions=predictions, summary=summary, error=error)
+    run_name = all_results.get("run_name")
+    return ScorecardResult(
+        predictions=predictions,
+        summary=summary,
+        error=error,
+        corpus_caveat=_corpus_caveat(
+            run_name if isinstance(run_name, str) else None, lane_id,
+        ),
+    )

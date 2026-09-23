@@ -61,7 +61,9 @@ taking from this repository.
 The synthetic numbers are about nothing: they come from a generator, not a forward pass.
 [`anamnesis/synthetic_bank.py`](anamnesis/synthetic_bank.py) states what the construction
 deliberately does and does not put in them — read it before quoting anything the demo
-prints.
+prints. One consequence catches readers out: the demo still ranks feature blocks against
+each other, and that ranking follows the block widths and the seed. It is a property of
+the fixture, and the pass says so where it prints it.
 
 ## Installing
 

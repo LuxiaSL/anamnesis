@@ -48,7 +48,7 @@ from .schemas import (
     BlockRankingEntry,
     TripleBlockCombo,
 )
-from .utils import absence_reason
+from .utils import BLOCK_READOUT_LIMIT, absence_reason, print_caveat
 
 _RF_KWARGS = dict(n_estimators=100, n_jobs=1)
 
@@ -119,9 +119,10 @@ def run_legacy_bin_readout(data: AnalysisData) -> LegacyBinReadoutResult:
     present_families = [t for t in FAMILY_BLOCKS if t in data.run4.block_features]
     all_individual = present_core + present_families
 
-    print(f"  Core blocks: {present_core}")
+    print_caveat(BLOCK_READOUT_LIMIT)
+    print(f"  Core blocks — the ones every extraction writes: {present_core}")
     if present_families:
-        print(f"  Family blocks: {present_families}")
+        print(f"  Family blocks — one engineered feature family each: {present_families}")
 
     # ── Per-block accuracy (each block alone) ──
     per_block_accuracy: dict[str, float] = {}

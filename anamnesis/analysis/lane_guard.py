@@ -31,6 +31,26 @@ class MixedLaneError(ValueError):
     """A scientific input combines incompatible or missing lane identities."""
 
 
+DRAWN_LANE_MARKER = "synthetic"
+"""The mark a lane identity carries when its numbers are drawn rather than measured.
+
+A bank of drawn vectors is the same shape as a measured one, so nothing downstream can
+tell them apart except the lane identity — which is why a drawn bank carries this mark
+and a reading over one can say what it is about. `anamnesis/synthetic_bank.py` writes
+the one such bank this package produces.
+"""
+
+
+def lane_is_drawn(lane_id: str | None) -> bool:
+    """Whether a lane identity says its numbers came from a generator.
+
+    A reader that reports a verdict over drawn vectors has to state that the verdict
+    is about the generator. ``None`` — an untagged bank — is not drawn: an absent lane
+    is unknown provenance, which :func:`require_single_lane` treats as its own case.
+    """
+    return lane_id is not None and DRAWN_LANE_MARKER in lane_id.lower()
+
+
 def metadata_lane(metadata: Mapping[str, Any]) -> str | None:
     values = []
     if "lane_id" in metadata:
