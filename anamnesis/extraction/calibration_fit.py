@@ -44,22 +44,32 @@ rows a fit filled, not the width it allocated. A row no generation reached is wr
 as zeros and corrects nothing, so a table that is wide enough and short of data
 disables the correction over its tail with no error anywhere downstream.
 :func:`require_coverage` is the refusal, and :func:`write_calibration` applies it
-before a byte is written. Instruct checkpoints stop at their end-of-turn token, so
-their generations rarely reach late positions at all; ``suppress_eos`` in
-:func:`generate_prompt_states` keeps each generation going to its token budget, which
-is what makes a late position reachable. Every write leaves a
+before a byte is written. How far a generation reaches is its prompt length plus its
+token budget, and the ruler's prompts are short, so the budget is what a late position
+needs: :func:`budget_to_reach` sizes it for a required position, and
+:func:`required_position` reads that position off the replay manifest of the bank the
+calibration will correct. ``suppress_eos`` keeps a generation going past its
+end-of-turn token as well, for a checkpoint whose answers stop early; the text it adds
+is text the model does not produce in a real generation. Every write leaves a
 :class:`CalibrationBuildReceipt` beside the basis saying what was asked for, what was
 reached, and the digests of the files it describes.
 
+**A calibration samples tokens first and reads states second**, the way a signature is
+computed. :func:`generate_calibration_tokens` samples each prompt with no states
+captured, into a replay manifest; :func:`replay_prompt_states` then runs one forward
+pass over each whole sequence and reads every layer's state at every position. The
+states the means are taken over are therefore computed the way the states they
+correct are — a teacher-forced pass over banked ids — and sampling, which is most of
+the cost, carries none of the capture. The manifest is written beside the basis, so a
+basis or a table width can be refitted over the same text without sampling again.
+
 The fit takes an iterable of :class:`PromptStates` rather than a loaded model, so
-the arithmetic runs — and is tested — on a machine with no weights on it.
-:func:`generate_prompt_states` is the one function here that runs a model, and it
-is where the model runtime is imported.
+the arithmetic runs — and is tested — on a machine with no weights on it. The two
+functions that run a model import the model runtime inside themselves.
 """
 
 from __future__ import annotations
 
-import gc
 import hashlib
 import json
 import logging
@@ -81,6 +91,11 @@ from anamnesis.extraction.calibration import (
     POSITIONAL_MEANS_KEY,
     load_positional_means,
     positions_calibrated,
+)
+from anamnesis.extraction.replay.manifest import (
+    ReplayManifest,
+    entry_from_ids,
+    manifest_from_entries,
 )
 from anamnesis.provenance import digest_of_shas, file_sha
 
@@ -105,6 +120,10 @@ CALIBRATION_PROMPTS_KEY = "prompts"
 BUILD_RECEIPT_SUFFIX = ".build.json"
 """What replaces the basis file's suffix to name the receipt beside it, so a second
 basis written into one directory under another name keeps its own receipt."""
+
+TOKENS_SUFFIX = ".tokens.json"
+"""What replaces the basis file's suffix to name the replay manifest of the sequences
+the calibration was fitted over, keyed by prompt index."""
 
 
 class CalibrationFitError(RuntimeError):
@@ -255,6 +274,111 @@ class CalibrationFit:
         return positions_calibrated(self.positional_means, counts)
 
 
+def encode_prompt(tokenizer: Any, text: str, *, chat_template: bool = True) -> list[int]:
+    """One ruler prompt as token ids: a user turn in the chat template, or bare.
+
+    ``chat_template=False``, or a tokenizer with no template, takes the bare prompt —
+    a base model's calibration must match the bare prompts its generations will use,
+    and a base checkpoint can ship a tokenizer that carries a template it was never
+    trained on.
+    """
+    import torch
+
+    if not chat_template or tokenizer.chat_template is None:
+        result = tokenizer(text, return_tensors="pt")["input_ids"]
+    else:
+        result = tokenizer.apply_chat_template(
+            [{"role": "user", "content": text}],
+            add_generation_prompt=True,
+            return_tensors="pt",
+        )
+    ids = result if torch.is_tensor(result) else result["input_ids"]
+    return [int(token) for token in ids[0].tolist()]
+
+
+def generate_calibration_tokens(
+    loaded: LoadedModel,
+    prompts: Sequence[str],
+    settings: GenerationConfig,
+    *,
+    suppress_eos: bool = False,
+    chat_template: bool = True,
+) -> ReplayManifest:
+    """Sample each prompt under ``settings`` and keep only the token ids.
+
+    The manifest is keyed by prompt index. Each generation is seeded by that index,
+    so a calibration is reproducible and one prompt's text does not depend on which
+    prompts ran before it. No hidden state, attention weight or logit is kept while
+    sampling: the states are read afterwards by :func:`replay_prompt_states`.
+
+    The key-value cache is asked for explicitly. A checkpoint whose configuration
+    turns it off otherwise recomputes the whole prefix at every step, which makes a
+    generation quadratic in its length and a long calibration unaffordable.
+
+    ``suppress_eos`` generates with no stop token, so every generation runs to
+    ``settings.max_new_tokens`` and continues past any end-of-turn token it samples.
+    """
+    import torch
+
+    device = next(loaded.model.parameters()).device
+    entries = {}
+    for index, text in enumerate(prompts):
+        prompt = encode_prompt(loaded.tokenizer, text, chat_template=chat_template)
+        input_ids = torch.tensor([prompt], device=device)
+        torch.manual_seed(index)
+        with torch.no_grad():
+            out = loaded.model.generate(
+                input_ids,
+                attention_mask=torch.ones_like(input_ids),
+                max_new_tokens=settings.max_new_tokens,
+                temperature=settings.temperature,
+                top_p=settings.top_p,
+                do_sample=settings.do_sample,
+                eos_token_id=None if suppress_eos else list(settings.eos_token_ids),
+                use_cache=True,
+            )
+        sequence = out[0] if torch.is_tensor(out) else out.sequences[0]
+        entries[index] = entry_from_ids(sequence.tolist(), len(prompt))
+        if (index + 1) % 10 == 0:
+            logger.info(f"calibration tokens {index + 1}/{len(prompts)}")
+    return manifest_from_entries(entries)
+
+
+def replay_prompt_states(
+    loaded: LoadedModel, manifest: ReplayManifest
+) -> Iterator[PromptStates]:
+    """Every layer's state at every position of each banked sequence, one forward each.
+
+    The positions read are the ones step-by-step decoding computes: the prompt, then
+    one state per generated token except the last, whose state no decode step ever
+    computes because no token is sampled from it. So the forward runs over the
+    sequence without its final token, and ``steps[i]`` is absolute position
+    ``prompt_length + i`` exactly as it is for a generation.
+
+    Sequences come out in the manifest's id order. One sequence's states are
+    materialised at a time and released before the next.
+    """
+    import torch
+
+    device = next(loaded.model.parameters()).device
+    for gen_id in manifest.gen_ids():
+        entry = manifest.entry(gen_id)
+        ids = torch.tensor([entry.input_ids[:-1]], device=device)
+        with torch.no_grad():
+            out = loaded.model(ids, output_hidden_states=True, use_cache=False)
+        states = np.stack([layer[0].float().cpu().numpy() for layer in out.hidden_states])
+        del out
+        length = entry.prompt_length
+        yield PromptStates(
+            prompt_length=length,
+            prefill=states[:, :length],
+            steps=tuple(states[:, position] for position in range(length, states.shape[1])),
+        )
+        del states
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
 def generate_prompt_states(
     loaded: LoadedModel,
     prompts: Sequence[str],
@@ -263,30 +387,8 @@ def generate_prompt_states(
     suppress_eos: bool = False,
     chat_template: bool = True,
 ) -> Iterator[PromptStates]:
-    """Generate each prompt under ``settings`` and hand its states back as numpy.
-
-    Seeded by prompt index so a calibration is reproducible. Each prompt is one user
-    turn in the checkpoint's chat template; ``chat_template=False``, or a checkpoint
-    with no chat template, takes the bare prompt instead — a base model's
-    calibration must match the bare prompts its generations will use, and a base
-    checkpoint can ship a tokenizer that carries a template it was never trained on.
-
-    The key-value cache is asked for explicitly. A checkpoint whose configuration
-    turns it off otherwise recomputes the whole prefix at every step, which makes a
-    generation quadratic in its length and a long calibration unaffordable; the
-    states agree either way up to floating-point reduction order.
-
-    ``suppress_eos`` generates with no stop token, so every generation runs to
-    ``settings.max_new_tokens`` and continues past any end-of-turn token it
-    samples. Without it, an instruct checkpoint ends where its answer ends, and
-    positions past the longest answer get no data however large the budget is.
-
-    The model runtime is imported inside this function: everything else in this
-    module is numpy and scikit-learn, and a machine with no accelerator reads the
-    prompt set, the decode policy and the fit.
-
-    One prompt's states are materialised at a time and released before the next,
-    so the peak is one generation's hidden states rather than the pass's.
+    """Sample the prompts, then replay them: :func:`generate_calibration_tokens`
+    followed by :func:`replay_prompt_states`.
 
     Raises
     ------
@@ -294,53 +396,49 @@ def generate_prompt_states(
         When ``settings`` asks for no hidden states, which are the only substrate a
         calibration reads.
     """
-    import torch
-
     if not settings.output_hidden_states:
         raise CalibrationFitError(
             "the decode policy asks for no hidden states, and a calibration reads nothing else"
         )
-    device = next(loaded.model.parameters()).device
-    for index, text in enumerate(prompts):
-        if not chat_template or loaded.tokenizer.chat_template is None:
-            result = loaded.tokenizer(text, return_tensors="pt")["input_ids"]
-        else:
-            result = loaded.tokenizer.apply_chat_template(
-                [{"role": "user", "content": text}],
-                add_generation_prompt=True,
-                return_tensors="pt",
-            )
-        input_ids = (result if torch.is_tensor(result) else result["input_ids"]).to(device)
-        torch.manual_seed(index)
-        with torch.no_grad():
-            out = loaded.model.generate(
-                input_ids,
-                max_new_tokens=settings.max_new_tokens,
-                temperature=settings.temperature,
-                top_p=settings.top_p,
-                do_sample=settings.do_sample,
-                eos_token_id=None if suppress_eos else list(settings.eos_token_ids),
-                output_hidden_states=settings.output_hidden_states,
-                output_attentions=settings.output_attentions,
-                output_logits=settings.output_logits,
-                return_dict_in_generate=settings.return_dict_in_generate,
-                use_cache=True,
-            )
-        hidden = out.hidden_states
-        yield PromptStates(
-            prompt_length=int(input_ids.shape[1]),
-            prefill=np.stack([layer[0].cpu().float().numpy() for layer in hidden[0]]),
-            steps=tuple(
-                np.stack([layer[0, -1].cpu().float().numpy() for layer in step])
-                for step in hidden[1:]
-            ),
-        )
-        del out, hidden
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        gc.collect()
-        if (index + 1) % 10 == 0:
-            logger.info(f"calibration {index + 1}/{len(prompts)}")
+    manifest = generate_calibration_tokens(
+        loaded, prompts, settings, suppress_eos=suppress_eos, chat_template=chat_template
+    )
+    yield from replay_prompt_states(loaded, manifest)
+
+
+def required_position(manifest: ReplayManifest) -> int:
+    """The last position a replay over ``manifest`` reads a state at.
+
+    A sequence of ``n`` ids has states read through position ``n - 2``, the last
+    one a decode step computes, so this is the position a calibration correcting
+    that bank must cover.
+
+    Raises
+    ------
+    ValueError
+        When the manifest holds no sequences.
+    """
+    if not manifest.entries:
+        raise ValueError("the replay manifest holds no sequences, so it requires no position")
+    return max(len(entry.input_ids) for entry in manifest.entries.values()) - 2
+
+
+def budget_to_reach(required_through: int, prompt_lengths: Sequence[int]) -> int:
+    """The token budget at which every prompt reaches ``required_through``.
+
+    A prompt of length ``L`` generating ``N`` tokens has states through position
+    ``L + N - 2``, so the shortest prompt needs ``required_through - L + 2``. A
+    generation that stops at its end-of-turn token earlier than its budget still
+    falls short, and :func:`require_coverage` reads what was actually reached.
+
+    Raises
+    ------
+    ValueError
+        When no prompt lengths are given.
+    """
+    if not prompt_lengths:
+        raise ValueError("no prompts to size a budget for")
+    return max(1, int(required_through) - min(int(length) for length in prompt_lengths) + 2)
 
 
 def _accumulate_positions(
@@ -594,6 +692,7 @@ def write_calibration(
     basis_path: Path,
     *,
     required_through: int | None = None,
+    tokens: ReplayManifest | None = None,
 ) -> None:
     """Write the artifacts this pass produced, leaving reused means alone.
 
@@ -601,7 +700,8 @@ def write_calibration(
     the timestamp would say a correction moved when it did not.
 
     With ``required_through``, :func:`require_coverage` runs first, so a fit that
-    falls short writes nothing.
+    falls short writes nothing. ``tokens``, the sequences the fit was taken over, is
+    written beside the basis at :func:`tokens_path`.
 
     Raises
     ------
@@ -627,6 +727,10 @@ def write_calibration(
     with open(basis_path, "wb") as handle:
         pickle.dump(fit.basis, handle)
     logger.info(f"basis -> {basis_path}")
+    if tokens is not None:
+        target = tokens_path(basis_path)
+        target.write_text(json.dumps(tokens.model_dump()))
+        logger.info(f"calibration tokens ({tokens.n_ok} sequences) -> {target}")
 
 
 class BuildCoverage(BaseModel):
@@ -678,6 +782,10 @@ class CalibrationBuildReceipt(BaseModel):
     coverage: BuildCoverage
     files: dict[str, str] = Field(description="Filename to SHA-256 of each artifact")
     calibration_sha256: str
+    tokens_sha256: str | None = Field(
+        default=None,
+        description="SHA-256 of the replay manifest the fit was taken over, when one was written",
+    )
 
 
 def prompts_digest(prompts: Sequence[str]) -> str:
@@ -690,6 +798,11 @@ def prompts_digest(prompts: Sequence[str]) -> str:
 def build_receipt_path(basis_path: Path) -> Path:
     """Where the receipt for a basis written at ``basis_path`` goes."""
     return Path(basis_path).with_suffix(BUILD_RECEIPT_SUFFIX)
+
+
+def tokens_path(basis_path: Path) -> Path:
+    """Where the replay manifest of a basis written at ``basis_path`` goes."""
+    return Path(basis_path).with_suffix(TOKENS_SUFFIX)
 
 
 def build_receipt(
@@ -706,13 +819,18 @@ def build_receipt(
     means_path: Path,
     basis_path: Path,
     required_through: int | None = None,
+    tokens_written: bool = False,
 ) -> CalibrationBuildReceipt:
     """The receipt for a fit whose artifacts are at ``means_path`` and ``basis_path``.
+
+    ``tokens_written`` says :func:`write_calibration` wrote the sequences beside the
+    basis in this pass, and their digest is then recorded; a file left there by an
+    earlier pass is not this fit's and is not read.
 
     Raises
     ------
     FileNotFoundError
-        When either artifact is absent: a receipt names bytes, so it is taken after
+        When an artifact is absent: a receipt names bytes, so it is taken after
         :func:`write_calibration`.
     """
     width = int(fit.positional_means.shape[1])
@@ -745,6 +863,7 @@ def build_receipt(
         ),
         files=files,
         calibration_sha256=digest_of_shas(files),
+        tokens_sha256=file_sha(tokens_path(basis_path)) if tokens_written else None,
     )
 
 

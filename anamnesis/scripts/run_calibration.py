@@ -20,10 +20,17 @@ silently invalidates every signature computed against it:
 about to write: a fit whose filled positions stop short of it writes nothing. A
 width that cannot hold the position is refused before a model is loaded; a fit that
 does not reach it is refused after generation, since only then is it known how far
-the generations went. ``--suppress-eos`` and ``--max-positions`` are how a
-calibration is made to reach late positions. Every write leaves a build receipt
-beside the basis, ``<basis stem>.build.json``, recording the settings, the coverage
-reached and the digests of both artifacts.
+the generations went. ``--reach-from`` names the replay manifest of the bank the
+calibration will correct and requires the last position a replay over it reads.
+Given a required position and no ``--max-new-tokens``, the token budget is sized so
+every ruler prompt reaches it, and the table is made wide enough to hold it.
+
+Sampling and reading states are separate passes, as they are for a signature: the
+prompts are sampled with nothing captured, then each sequence is replayed once to
+read its states. Every write leaves the sampled sequences beside the basis as a
+replay manifest, ``<basis stem>.tokens.json``, and a build receipt,
+``<basis stem>.build.json``, recording the settings, the coverage reached and the
+digests of every file written.
 """
 
 from __future__ import annotations
@@ -92,6 +99,13 @@ def parser() -> argparse.ArgumentParser:
         help="Refuse to write a calibration whose filled positions do not reach this one",
     )
     p.add_argument(
+        "--reach-from",
+        type=Path,
+        default=None,
+        help="Replay manifest (or its run directory) of the bank this calibration will "
+             "correct; requires the last position a replay over it reads",
+    )
+    p.add_argument(
         "--no-chat-template",
         action="store_true",
         help="Tokenise each prompt bare rather than as a user turn in the chat template, "
@@ -115,11 +129,40 @@ def resolve_paths(args: argparse.Namespace) -> tuple[ModelPreset, Path, Path]:
     )
 
 
-def table_width(args: argparse.Namespace, settings: GenerationConfig) -> int:
-    """Width of the means table this invocation allocates."""
+def table_width(
+    args: argparse.Namespace, settings: GenerationConfig, required_through: int | None = None
+) -> int:
+    """Width of the means table this invocation allocates.
+
+    ``--max-positions`` when given; otherwise the token budget plus the prompt
+    headroom, widened to hold ``required_through`` when that is further out.
+    """
     if args.max_positions is not None:
         return int(args.max_positions)
-    return settings.max_new_tokens + calibration_fit.PROMPT_HEADROOM
+    width = settings.max_new_tokens + calibration_fit.PROMPT_HEADROOM
+    return width if required_through is None else max(width, int(required_through) + 1)
+
+
+def required_through(args: argparse.Namespace) -> int | None:
+    """The position this invocation must cover: named, read off a bank, or none.
+
+    Raises
+    ------
+    SystemExit
+        When both ways of naming it are given, or the bank's manifest is unreadable.
+    """
+    if args.reach_from is None:
+        return args.required_through
+    if args.required_through is not None:
+        raise SystemExit("give --required-through or --reach-from, not both")
+    from pydantic import ValidationError
+
+    from anamnesis.extraction.replay.manifest import load_replay_manifest
+
+    try:
+        return calibration_fit.required_position(load_replay_manifest(args.reach_from))
+    except (FileNotFoundError, ValueError, ValidationError) as exc:
+        raise SystemExit(f"--reach-from {args.reach_from}: {exc}") from exc
 
 
 def describe(
@@ -129,6 +172,7 @@ def describe(
     prompts: tuple[str, ...],
     means_path: Path,
     basis_path: Path,
+    required: int | None,
 ) -> None:
     """Print what this invocation would do, for ``--dry-run``."""
     print(f"model: {args.model_path or preset.model_id}")
@@ -152,9 +196,12 @@ def describe(
         f"{calibration_fit.POSITION_COUNT_FLOOR} states"
     )
     print(f"  stop tokens honoured: {'no, suppressed' if args.suppress_eos else 'yes'}")
-    print(f"  means table: {table_width(args, settings)} positions")
-    if args.required_through is not None:
-        print(f"  required through position: {args.required_through}")
+    if required is not None:
+        source = f" (read from {args.reach_from})" if args.reach_from is not None else ""
+        print(f"  required through position: {required}{source}")
+        if args.max_new_tokens is None:
+            print("  token budget: sized once the prompts are tokenised, so every prompt reaches it")
+    print(f"  means table: {table_width(args, settings, required)} positions at the budget above")
     print(f"  basis fit: {'pooled, uncorrected' if args.pooled else 'per layer, corrected'}")
     reuse = means_path.exists() and not args.refit_means
     print(f"  positional means -> {'reused from' if reuse else 'written to'} {means_path}")
@@ -175,15 +222,16 @@ def main(argv: list[str] | None = None) -> None:
         preset, max_new_tokens=args.max_new_tokens
     )
 
-    width = table_width(args, settings)
-    if args.required_through is not None and not 0 <= args.required_through < width:
+    required = required_through(args)
+    width = table_width(args, settings, required)
+    if required is not None and not 0 <= required < width:
         raise SystemExit(
-            f"position {args.required_through} is required, and the means table is "
+            f"position {required} is required, and the means table is "
             f"{width} positions wide; raise --max-positions past it"
         )
 
     if args.dry_run:
-        describe(args, preset, settings, prompts, means_path, basis_path)
+        describe(args, preset, settings, prompts, means_path, basis_path, required)
         return
 
     if basis_path.exists() and not args.refit_basis:
@@ -206,20 +254,43 @@ def main(argv: list[str] | None = None) -> None:
     loaded = load_model(config, sampled_layers=[])
     loaded.disable_hooks()  # calibration reads hidden states from the forward, not from hooks
     try:
+        if required is not None:
+            lengths = [
+                len(calibration_fit.encode_prompt(
+                    loaded.tokenizer, text, chat_template=not args.no_chat_template
+                ))
+                for text in prompts
+            ]
+            needed = calibration_fit.budget_to_reach(required, lengths)
+            if args.max_new_tokens is None:
+                settings = calibration_fit.generation_settings(
+                    preset, max_new_tokens=max(needed, settings.max_new_tokens)
+                )
+                logger.info(
+                    f"token budget {settings.max_new_tokens}: position {required} from "
+                    f"prompts as short as {min(lengths)} tokens"
+                )
+            elif args.max_new_tokens < needed:
+                raise SystemExit(
+                    f"--max-new-tokens {args.max_new_tokens} cannot reach position {required} "
+                    f"from a {min(lengths)}-token prompt; it needs {needed}, or leave it unset"
+                )
+            width = table_width(args, settings, required)
+        tokens = calibration_fit.generate_calibration_tokens(
+            loaded,
+            prompts,
+            settings,
+            suppress_eos=args.suppress_eos,
+            chat_template=not args.no_chat_template,
+        )
         fit = calibration_fit.fit_calibration(
-            calibration_fit.generate_prompt_states(
-                loaded,
-                prompts,
-                settings,
-                suppress_eos=args.suppress_eos,
-                chat_template=not args.no_chat_template,
-            ),
+            calibration_fit.replay_prompt_states(loaded, tokens),
             preset=preset,
             settings=settings,
             n_components=n_components,
             pooled=args.pooled,
             existing_means=existing_means,
-            max_positions=args.max_positions,
+            max_positions=width,
         )
     except calibration_fit.CalibrationFitError as exc:
         raise SystemExit(str(exc)) from exc
@@ -232,7 +303,7 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         calibration_fit.write_calibration(
-            fit, means_path, basis_path, required_through=args.required_through
+            fit, means_path, basis_path, required_through=required, tokens=tokens
         )
     except calibration_fit.CoverageShortfall as exc:
         raise SystemExit(str(exc)) from exc
@@ -249,7 +320,8 @@ def main(argv: list[str] | None = None) -> None:
             n_components=n_components,
             means_path=means_path,
             basis_path=basis_path,
-            required_through=args.required_through,
+            required_through=required,
+            tokens_written=True,
         ),
         basis_path,
     )
