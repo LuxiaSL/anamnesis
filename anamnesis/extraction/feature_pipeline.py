@@ -32,7 +32,6 @@ import argparse
 import json
 import logging
 import os
-import pickle
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -46,6 +45,7 @@ from anamnesis.config import (
     ExtractionConfig,
     FeaturePipelineConfig,
 )
+from anamnesis.extraction.calibration import read_pca_basis
 from anamnesis.extraction.raw_saver import list_raw_tensor_ids, load_raw_tensors
 from anamnesis.extraction.state_extractor import (
     STORED_BLOCK_SLICES_KEY,
@@ -699,34 +699,27 @@ def recompute_all_features(
 
 def _load_pca_model(
     pca_path: Path,
-) -> tuple[F32 | None, F32 | None]:
-    """Load PCA components and mean from pickle file."""
-    if not pca_path.exists():
+) -> tuple[F32 | dict[int, F32] | None, F32 | dict[int, F32] | None]:
+    """PCA components and mean as float32, from any banked shape, or ``(None, None)``.
+
+    The file is read by :func:`anamnesis.extraction.calibration.read_pca_basis`. A
+    pooled basis comes back as two arrays and a per-layer basis as two mappings
+    keyed by layer index, which :func:`recompute_all_features` takes either way.
+
+    An absent file is logged and returns ``(None, None)``: a recompute may run
+    without the residual block, and ``--no-residual-pca`` is not the only way to
+    ask for that. A file that is present and unreadable is a refusal instead.
+
+    Raises
+    ------
+    anamnesis.extraction.calibration.CalibrationMalformed
+        When the file holds none of the banked shapes, or a per-layer basis
+        without a layer's mean.
+    """
+    if not Path(pca_path).exists():
         logger.warning(f"PCA model not found: {pca_path}")
         return None, None
-
-    with open(pca_path, "rb") as f:
-        pca_data = pickle.load(f)
-
-    if isinstance(pca_data, dict):
-        # Per-layer format: {layer_idx: {"components", "mean", ...}} → return dicts
-        vals = list(pca_data.values())
-        if vals and isinstance(vals[0], dict) and "components" in vals[0]:
-            comp = {int(k): np.asarray(v["components"], dtype=np.float32) for k, v in pca_data.items()}
-            mean = {int(k): np.asarray(v["mean"], dtype=np.float32) for k, v in pca_data.items()}
-            return comp, mean  # type: ignore[return-value]
-        components = pca_data.get("components")
-        mean = pca_data.get("mean")
-    else:
-        components = getattr(pca_data, "components_", None)
-        mean = getattr(pca_data, "mean_", None)
-
-    if components is not None:
-        components = np.asarray(components, dtype=np.float32)
-    if mean is not None:
-        mean = np.asarray(mean, dtype=np.float32)
-
-    return components, mean
+    return read_pca_basis(pca_path).float32_arrays()
 
 
 def main() -> None:

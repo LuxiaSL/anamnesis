@@ -70,7 +70,6 @@ import abc
 import argparse
 import itertools
 import logging
-import pickle
 import sys
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Sequence
@@ -79,6 +78,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from anamnesis.extraction.calibration import CalibrationMalformed, read_pca_basis
 from anamnesis.extraction.feature_families import FeatureFamilyResult
 
 logger = logging.getLogger(__name__)
@@ -424,42 +424,42 @@ class ProjectionBasisBank(BaseModel):
     def from_pca_pickle(cls, path: Path | str, label: str = "pcaA") -> "ProjectionBasisBank":
         """Load a banked calibration PCA (global or per-layer format).
 
-        Mirrors ``feature_pipeline._load_pca_model``'s format sniffing so the same artefacts
-        that already feed the residual-PCA block feed this family, with no new calibration step.
+        The file is read by :func:`anamnesis.extraction.calibration.read_pca_basis`,
+        the reader the residual-PCA block's artefacts go through as well, so the
+        same files feed this family with no new calibration step. The arrays are
+        cast to float64 here, the precision the projection below runs at.
+
+        Raises
+        ------
+        ProjectionError
+            When the file is absent or holds none of the banked shapes.
         """
         p = Path(path)
         if not p.exists():
             raise ProjectionError(f"PCA calibration not found: {p}")
-        with open(p, "rb") as f:
-            obj = pickle.load(f)
+        try:
+            stored = read_pca_basis(p)
+        except CalibrationMalformed as exc:
+            raise ProjectionError(f"unusable PCA calibration {p}: {exc}") from exc
 
-        if isinstance(obj, dict):
-            vals = list(obj.values())
-            if vals and isinstance(vals[0], dict) and "components" in vals[0]:
-                per_layer = {
-                    int(k): ProjectionBasis(
-                        components=np.asarray(v["components"], dtype=np.float64),
-                        mean=(None if v.get("mean") is None
-                              else np.asarray(v["mean"], dtype=np.float64)),
-                        label=label,
-                        layer_idx=int(k),
-                    )
-                    for k, v in obj.items()
-                }
-                return cls(per_layer=per_layer, fallback=None)
-            components = obj.get("components")
-            mean = obj.get("mean")
-        else:
-            components = getattr(obj, "components_", None)
-            mean = getattr(obj, "mean_", None)
-
-        if components is None:
-            raise ProjectionError(f"no 'components' in PCA calibration {p}")
+        if stored.pooled is None:
+            per_layer = {
+                layer: ProjectionBasis(
+                    components=np.asarray(basis.components, dtype=np.float64),
+                    mean=(None if basis.mean is None
+                          else np.asarray(basis.mean, dtype=np.float64)),
+                    label=label,
+                    layer_idx=layer,
+                )
+                for layer, basis in stored.per_layer.items()
+            }
+            return cls(per_layer=per_layer, fallback=None)
         return cls(
             per_layer={},
             fallback=ProjectionBasis(
-                components=np.asarray(components, dtype=np.float64),
-                mean=(None if mean is None else np.asarray(mean, dtype=np.float64)),
+                components=np.asarray(stored.pooled.components, dtype=np.float64),
+                mean=(None if stored.pooled.mean is None
+                      else np.asarray(stored.pooled.mean, dtype=np.float64)),
                 label=label,
             ),
         )
