@@ -38,6 +38,19 @@ and every corrected feature subtracts those means — so the file's bytes are pi
 digest in ``tests/test_prompt_sets.py`` rather than left to be edited under a fit
 that has already run.
 
+**A calibration can be asked to cover a position, and refuses to be written short of
+it.** Coverage is :func:`anamnesis.extraction.calibration.positions_calibrated`: the
+rows a fit filled, not the width it allocated. A row no generation reached is written
+as zeros and corrects nothing, so a table that is wide enough and short of data
+disables the correction over its tail with no error anywhere downstream.
+:func:`require_coverage` is the refusal, and :func:`write_calibration` applies it
+before a byte is written. Instruct checkpoints stop at their end-of-turn token, so
+their generations rarely reach late positions at all; ``suppress_eos`` in
+:func:`generate_prompt_states` keeps each generation going to its token budget, which
+is what makes a late position reachable. Every write leaves a
+:class:`CalibrationBuildReceipt` beside the basis saying what was asked for, what was
+reached, and the digests of the files it describes.
+
 The fit takes an iterable of :class:`PromptStates` rather than a loaded model, so
 the arithmetic runs — and is tested — on a machine with no weights on it.
 :func:`generate_prompt_states` is the one function here that runs a model, and it
@@ -47,15 +60,17 @@ is where the model runtime is imported.
 from __future__ import annotations
 
 import gc
+import hashlib
 import json
 import logging
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, Literal, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import BaseModel, ConfigDict, Field
 from sklearn.decomposition import PCA
 
 from anamnesis.config import GenerationConfig, ModelPreset, resolve_preset
@@ -67,6 +82,7 @@ from anamnesis.extraction.calibration import (
     load_positional_means,
     positions_calibrated,
 )
+from anamnesis.provenance import digest_of_shas, file_sha
 
 if TYPE_CHECKING:  # the annotation alone, so reading a fit costs no model runtime
     from anamnesis.extraction.model_loader import LoadedModel
@@ -86,12 +102,25 @@ CALIBRATION_PROMPT_SET = "calibration_prompts.json"
 CALIBRATION_PROMPTS_KEY = "prompts"
 """The list of prompt strings inside that file."""
 
+BUILD_RECEIPT_SUFFIX = ".build.json"
+"""What replaces the basis file's suffix to name the receipt beside it, so a second
+basis written into one directory under another name keeps its own receipt."""
+
 
 class CalibrationFitError(RuntimeError):
     """A fit that would write an artifact nothing can be projected onto.
 
     Raised rather than returned: an empty basis is not a partial result, it is a
     file that would make every residual-PCA feature downstream of it zero.
+    """
+
+
+class CoverageShortfall(CalibrationFitError):
+    """A fit whose filled positions stop short of the position it was asked to cover.
+
+    Raised before anything is written: a thin table that reaches disk is read as a
+    calibration, and its zero rows switch the correction off over every position
+    past the last filled one.
     """
 
 
@@ -214,15 +243,35 @@ class CalibrationFit:
         covered = self.position_counts.sum(axis=0) > 0
         return int(np.max(np.where(covered))) if covered.any() else 0
 
+    @property
+    def positions_calibrated(self) -> int:
+        """How many leading positions the means fill, by
+        :func:`anamnesis.extraction.calibration.positions_calibrated`.
+
+        Read from this pass's counts when it measured the means, and from the means
+        themselves when they came off disk, since a reused table has no counts here.
+        """
+        counts = self.position_counts if self.means_refitted else None
+        return positions_calibrated(self.positional_means, counts)
+
 
 def generate_prompt_states(
-    loaded: LoadedModel, prompts: Sequence[str], settings: GenerationConfig
+    loaded: LoadedModel,
+    prompts: Sequence[str],
+    settings: GenerationConfig,
+    *,
+    suppress_eos: bool = False,
 ) -> Iterator[PromptStates]:
     """Generate each prompt under ``settings`` and hand its states back as numpy.
 
     Seeded by prompt index so a calibration is reproducible, and a checkpoint with
     no chat template takes the bare prompt — a base model's calibration must match
     the bare prompts its generations will use.
+
+    ``suppress_eos`` generates with no stop token, so every generation runs to
+    ``settings.max_new_tokens`` and continues past any end-of-turn token it
+    samples. Without it, an instruct checkpoint ends where its answer ends, and
+    positions past the longest answer get no data however large the budget is.
 
     The model runtime is imported inside this function: everything else in this
     module is numpy and scikit-learn, and a machine with no accelerator reads the
@@ -262,7 +311,7 @@ def generate_prompt_states(
                 temperature=settings.temperature,
                 top_p=settings.top_p,
                 do_sample=settings.do_sample,
-                eos_token_id=list(settings.eos_token_ids),
+                eos_token_id=None if suppress_eos else list(settings.eos_token_ids),
                 output_hidden_states=settings.output_hidden_states,
                 output_attentions=settings.output_attentions,
                 output_logits=settings.output_logits,
@@ -431,8 +480,14 @@ def fit_calibration(
     n_components: int,
     pooled: bool = False,
     existing_means: F32 | None = None,
+    max_positions: int | None = None,
 ) -> CalibrationFit:
     """Both artifacts, from one pass over a prompt set's states.
+
+    ``max_positions`` is the width of the means table, and defaults to the token
+    budget plus :data:`PROMPT_HEADROOM`. A state past it is not counted. The width
+    is an allocation, not a coverage: which rows are filled is decided by how far
+    the generations reach, and is what :func:`require_coverage` reads.
 
     ``existing_means`` reuses a correction already on disk instead of measuring a
     new one, which is what lets a basis be refitted and compared without moving
@@ -445,11 +500,15 @@ def fit_calibration(
     Raises
     ------
     CalibrationFitError
-        From the basis fit, when it would have nothing to fit over.
+        From the basis fit, when it would have nothing to fit over, or when
+        ``max_positions`` is not a positive width.
     """
     row = resolve_preset(preset)
     depth = row.num_layers + 1
-    max_positions = settings.max_new_tokens + PROMPT_HEADROOM
+    if max_positions is None:
+        max_positions = settings.max_new_tokens + PROMPT_HEADROOM
+    if max_positions <= 0:
+        raise CalibrationFitError(f"max_positions {max_positions} is not a table width")
     sums = np.zeros((depth, max_positions, row.hidden_dim), dtype=np.float64)
     counts: I64 = np.zeros((depth, max_positions), dtype=np.int64)
     # A sample is kept with the position it came from, because correcting it needs
@@ -492,12 +551,56 @@ def read_existing_means(means_path: Path, refit: bool) -> F32 | None:
     return means
 
 
-def write_calibration(fit: CalibrationFit, means_path: Path, basis_path: Path) -> None:
+def require_coverage(fit: CalibrationFit, required_through: int) -> None:
+    """Refuse a fit whose filled rows do not reach position ``required_through``.
+
+    Raises
+    ------
+    CoverageShortfall
+        When ``required_through`` is outside the table, or when the last filled
+        row is before it. The message names both, and the ways to close the gap.
+    """
+    width = int(fit.positional_means.shape[1])
+    if required_through < 0:
+        raise CoverageShortfall(f"required_through {required_through} is not a position")
+    if required_through >= width:
+        raise CoverageShortfall(
+            f"position {required_through} is required, and the means table is "
+            f"{width} positions wide; raise max_positions past it"
+        )
+    reached = fit.positions_calibrated
+    if reached <= required_through:
+        raise CoverageShortfall(
+            f"the positional means fill positions 0..{reached - 1} of a table "
+            f"{width} wide, and position {required_through} is required; rows "
+            f"{reached}..{required_through} are zeros and would correct nothing. "
+            f"Raise the token budget, add prompts, or suppress the stop token so "
+            f"generations reach it"
+        )
+
+
+def write_calibration(
+    fit: CalibrationFit,
+    means_path: Path,
+    basis_path: Path,
+    *,
+    required_through: int | None = None,
+) -> None:
     """Write the artifacts this pass produced, leaving reused means alone.
 
     Means that came off disk are not rewritten: the bytes would be the same, and
     the timestamp would say a correction moved when it did not.
+
+    With ``required_through``, :func:`require_coverage` runs first, so a fit that
+    falls short writes nothing.
+
+    Raises
+    ------
+    CoverageShortfall
+        From :func:`require_coverage`.
     """
+    if required_through is not None:
+        require_coverage(fit, required_through)
     basis_path.parent.mkdir(parents=True, exist_ok=True)
     if fit.means_refitted:
         means_path.parent.mkdir(parents=True, exist_ok=True)
@@ -510,8 +613,132 @@ def write_calibration(fit: CalibrationFit, means_path: Path, basis_path: Path) -
         )
         logger.info(
             f"positional means {fit.positional_means.shape} -> {means_path} "
-            f"(furthest position {fit.furthest_position})"
+            f"(filled through position {fit.positions_calibrated - 1})"
         )
     with open(basis_path, "wb") as handle:
         pickle.dump(fit.basis, handle)
     logger.info(f"basis -> {basis_path}")
+
+
+class BuildCoverage(BaseModel):
+    """What a calibration's means cover, as measured when it was written."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    table_positions: int = Field(description="Width of the means table")
+    positions_calibrated: int = Field(
+        description="Leading positions the means fill; position p is covered when p < this"
+    )
+    trailing_zero_rows: int = Field(description="Rows past the last filled one")
+    measured_by: Literal["pos_counts", "means"] = Field(
+        description="Whether coverage was read from this pass's counts or from reused means"
+    )
+    required_through: int | None = Field(
+        description="The position the build was required to cover, if one was named"
+    )
+
+
+class CalibrationBuildReceipt(BaseModel):
+    """What one calibration build was asked for, what it reached, and what it wrote.
+
+    Written beside the basis by :func:`write_build_receipt`. The digests name the
+    bytes on disk when the receipt was written — both artifacts, including means
+    that were reused rather than refitted — and ``calibration_sha256`` is
+    :func:`anamnesis.provenance.digest_of_shas` over them.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    model: str = Field(description="The preset row the build ran under")
+    model_id: str = Field(description="The checkpoint the states were generated from")
+    prompt_set_sha256: str = Field(description="SHA-256 of the prompts used, in order")
+    n_prompts: int
+    max_new_tokens: int
+    temperature: float
+    top_p: float
+    do_sample: bool
+    eos_token_ids: list[int] = Field(description="The preset's stop tokens")
+    suppress_eos: bool = Field(description="Whether generation ignored the stop tokens")
+    pooled: bool
+    n_components: int
+    means_refitted: bool
+    coverage: BuildCoverage
+    files: dict[str, str] = Field(description="Filename to SHA-256 of each artifact")
+    calibration_sha256: str
+
+
+def prompts_digest(prompts: Sequence[str]) -> str:
+    """SHA-256 over the prompts, in order, as a JSON list of strings."""
+    return hashlib.sha256(
+        json.dumps(list(prompts), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def build_receipt_path(basis_path: Path) -> Path:
+    """Where the receipt for a basis written at ``basis_path`` goes."""
+    return Path(basis_path).with_suffix(BUILD_RECEIPT_SUFFIX)
+
+
+def build_receipt(
+    fit: CalibrationFit,
+    *,
+    model: str,
+    model_id: str,
+    prompts: Sequence[str],
+    settings: GenerationConfig,
+    suppress_eos: bool,
+    pooled: bool,
+    n_components: int,
+    means_path: Path,
+    basis_path: Path,
+    required_through: int | None = None,
+) -> CalibrationBuildReceipt:
+    """The receipt for a fit whose artifacts are at ``means_path`` and ``basis_path``.
+
+    Raises
+    ------
+    FileNotFoundError
+        When either artifact is absent: a receipt names bytes, so it is taken after
+        :func:`write_calibration`.
+    """
+    width = int(fit.positional_means.shape[1])
+    reached = fit.positions_calibrated
+    files = {
+        Path(means_path).name: file_sha(means_path),
+        Path(basis_path).name: file_sha(basis_path),
+    }
+    return CalibrationBuildReceipt(
+        model=model,
+        model_id=model_id,
+        prompt_set_sha256=prompts_digest(prompts),
+        n_prompts=len(prompts),
+        max_new_tokens=settings.max_new_tokens,
+        temperature=settings.temperature,
+        top_p=settings.top_p,
+        do_sample=settings.do_sample,
+        eos_token_ids=list(settings.eos_token_ids),
+        suppress_eos=suppress_eos,
+        pooled=pooled,
+        n_components=n_components,
+        means_refitted=fit.means_refitted,
+        coverage=BuildCoverage(
+            table_positions=width,
+            positions_calibrated=reached,
+            trailing_zero_rows=width - reached,
+            measured_by="pos_counts" if fit.means_refitted else "means",
+            required_through=required_through,
+        ),
+        files=files,
+        calibration_sha256=digest_of_shas(files),
+    )
+
+
+def write_build_receipt(receipt: CalibrationBuildReceipt, basis_path: Path) -> Path:
+    """Write ``receipt`` beside the basis it describes, returning where it went."""
+    target = build_receipt_path(basis_path)
+    target.write_text(json.dumps(receipt.model_dump(mode="json"), indent=2) + "\n")
+    logger.info(
+        f"build receipt -> {target} (positions calibrated "
+        f"{receipt.coverage.positions_calibrated} of {receipt.coverage.table_positions})"
+    )
+    return target
