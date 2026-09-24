@@ -11,6 +11,14 @@ only symptom is a qualification receipt that describes a machine the run does no
 reproduce. :func:`resolve_fast_lane` is the one resolution, so there is nothing
 for them to disagree about.
 
+A process that keeps one model resident and harvests from its own generations
+needs the same resolution without a manifest and without a second load.
+:func:`prepare_fast_lane` is that: the arithmetic and the calibration, bound to a
+model the caller already holds (checked by :func:`check_loaded_model`) or to one
+:func:`load_lane_model` loads. :func:`resolve_fast_lane` binds through the same
+step, and :func:`anamnesis.extraction.fast.harvest.harvest_loaded` runs one span
+against the result.
+
 :func:`require_lane_arithmetic` is separable because its refusal is worth reaching
 before anything else is read. It is idempotent and :func:`resolve_fast_lane` calls
 it as its first act, so a caller that wants to refuse before it opens a manifest
@@ -25,21 +33,23 @@ ids they arrive at come in as an argument.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
-from anamnesis.config import ModelConfig, ModelPreset
+from anamnesis.config import ModelConfig, ModelPreset, resolve_preset
 from anamnesis.extraction.calibration import CALIBRATION_ARTIFACT_NAMES, load_calibration
 from anamnesis.extraction.replay_config import native_replay_configs
 from anamnesis.provenance import digest_of_shas, file_sha
 
 if TYPE_CHECKING:
     from anamnesis.config import ExtractionConfig, FeaturePipelineConfig
+    from anamnesis.extraction.fast.features import GpuFeatureLane
     from anamnesis.extraction.fast.schema import GpuFeatureSchema
+    from anamnesis.extraction.model_loader import LoadedModel
 
 F32 = NDArray[np.float32]
 
@@ -180,13 +190,21 @@ def resolve_lane_spans(
             input_ids=list(row["input_ids"]),
             prompt_length=int(row["prompt_length"]),
         )
-        if (
-            not 0 < span.prompt_length < span.end - 1
-            or span.end - 2 >= positions_calibrated
-        ):
+        if not span_is_supported(span, positions_calibrated):
             raise ValueError(f"generation {gen_id} outside supported span/calibration")
         spans.append(span)
     return tuple(spans)
+
+
+def span_is_supported(span: LaneSpan, positions_calibrated: int) -> bool:
+    """Whether the lane can replay ``span`` against a calibration this wide.
+
+    A span needs a prompt, at least two generated tokens, and a last replayed
+    position inside the positional-means table.
+    """
+    return (
+        0 < span.prompt_length < span.end - 1 and span.end - 2 < positions_calibrated
+    )
 
 
 def weight_file_digests(model_path: str | Path) -> dict[str, str]:
@@ -194,6 +212,9 @@ def weight_file_digests(model_path: str | Path) -> dict[str, str]:
 
     A receipt that named the checkpoint directory would say nothing a reader can
     check, because a directory is replaced in place. These name the bytes.
+
+    Each file is read once per process for as long as its size and mtime hold, so
+    a process that stamps many runs against one checkpoint pays for it once.
 
     Raises
     ------
@@ -206,7 +227,341 @@ def weight_file_digests(model_path: str | Path) -> dict[str, str]:
     weights = sorted(root.glob("*.safetensors"))
     if not weights:
         raise ValueError("local safetensors checkpoint required for explicit provenance")
-    return {path.name: file_sha(path) for path in [root / "config.json", *weights]}
+    return {
+        path.name: _cached_file_sha(path) for path in [root / "config.json", *weights]
+    }
+
+
+@dataclass(frozen=True)
+class LaneCalibration:
+    """The battery a preset declares, and the calibration its features are corrected by.
+
+    Everything a lane needs except a model, so a caller can refuse an incomplete
+    calibration or an unsupported span before paying for a load.
+    """
+
+    preset: ModelPreset
+    extraction: ExtractionConfig
+    families: FeaturePipelineConfig
+    positional_means: F32
+    pca_components: Any
+    pca_mean: Any
+    calibration_files: dict[str, str]
+    calibration_sha256: str
+
+    @property
+    def positions_calibrated(self) -> int:
+        """Width of the positional-means table: the positions a span may reach."""
+        return int(self.positional_means.shape[1])
+
+    def schema(self, n_steps: int) -> GpuFeatureSchema:
+        """The feature names and family slices a span of ``n_steps`` resolves to.
+
+        The names depend on the step count only for the shortest spans, where a
+        family emits zeros under its full names or drops a windowed series, so two
+        spans past that threshold share one schema.
+        """
+        from anamnesis.extraction.fast.schema import resolve_gpu_schema
+
+        return resolve_gpu_schema(
+            self.preset.num_layers,
+            n_steps,
+            self.extraction,
+            self.families,
+            self.pca_components,
+        )
+
+    def build_lane(self, feature_names: Sequence[str], device: str) -> GpuFeatureLane:
+        """A full-path lane over this calibration, emitting exactly ``feature_names``."""
+        from anamnesis.extraction.fast.features import GpuFeatureLane
+
+        return GpuFeatureLane(
+            self.extraction,
+            self.families,
+            list(feature_names),
+            self.positional_means,
+            self.pca_components,
+            self.pca_mean,
+            device=device,
+            calibration_sha256=self.calibration_sha256,
+            replay_path="full",
+        )
+
+
+def read_lane_calibration(preset: ModelPreset, calib_dir: Path) -> LaneCalibration:
+    """The preset's native battery and a complete calibration, digested.
+
+    Raises
+    ------
+    ValueError
+        When the directory lacks the positional means or the residual basis. A lane
+        with either missing would correct its features against nothing and emit
+        them under the corrected names.
+    """
+    extraction, families = native_replay_configs(preset)
+    positional_means, pca_components, pca_mean = load_calibration(calib_dir, True)
+    if positional_means is None or pca_components is None or pca_mean is None:
+        raise ValueError("complete positional/PCA calibration required")
+    calibration_files = {
+        name: file_sha(Path(calib_dir) / name) for name in CALIBRATION_ARTIFACT_NAMES
+    }
+    return LaneCalibration(
+        preset=preset,
+        extraction=extraction,
+        families=families,
+        positional_means=positional_means,
+        pca_components=pca_components,
+        pca_mean=pca_mean,
+        calibration_files=calibration_files,
+        calibration_sha256=digest_of_shas(calibration_files),
+    )
+
+
+def load_lane_model(preset: ModelPreset, model_path: str, device: str) -> LoadedModel:
+    """Load a checkpoint with exactly the capture surface the lane reads.
+
+    This lane banks features and no raw tensors, so it hooks exactly the surfaces
+    its reducers read: pre-RoPE keys, values, queries and gate activations at
+    ``preset.sampled_layers``. No consumer here reads o_proj outputs, so no
+    attention-output hook is registered — a capture nothing reads costs device
+    memory every step and buys nothing. :mod:`anamnesis.extraction.replay.cell`
+    banks the tensors themselves and so must keep every layer available instead.
+
+    A process that keeps one model resident loads it here once and hands the result
+    to :func:`prepare_fast_lane`, so the lane reads the surface it expects without
+    loading a second copy.
+    """
+    from anamnesis.extraction.model_loader import load_model
+
+    sampled = list(preset.sampled_layers)
+    return load_model(
+        ModelConfig.from_preset(preset, model_id=model_path, device_map=device),
+        sampled_layers=sampled,
+        register_gate_hooks=True,
+        key_layers=sampled,
+        value_layers=sampled,
+        query_layers=sampled,
+    )
+
+
+def _declared_device(device: str) -> Any:
+    """``device`` as the lane compares it: a CUDA device always carries its index."""
+    import torch
+
+    resolved = torch.device(device)
+    if resolved.type == "cuda" and resolved.index is None:
+        resolved = torch.device("cuda", torch.cuda.current_device())
+    return resolved
+
+
+def check_loaded_model(loaded: LoadedModel, preset: ModelPreset, device: str) -> None:
+    """Refuse a loaded model the lane would read wrongly or not at all.
+
+    A model handed in by a caller did not come through :func:`load_lane_model`, so
+    each fact that function guarantees is checked here instead: the architecture
+    the lane is written for, the depth and widths the preset declares (a feature
+    named for layer 20 of one model is a different quantity in another), eager
+    attention, eval mode, every parameter on the declared device, and a forward
+    hook on each projection the reducers read at each sampled layer.
+
+    Raises
+    ------
+    ValueError
+        Naming the first fact that does not hold.
+    """
+    from anamnesis.extraction.model_loader import decoder_layers
+
+    model = loaded.model
+    config = model.config
+    if config.model_type != "llama":
+        raise ValueError(
+            f"the fast lane reads a dense Llama; this model is {config.model_type!r}"
+        )
+    for field, have, want in (
+        ("num_hidden_layers", config.num_hidden_layers, preset.num_layers),
+        ("hidden_size", config.hidden_size, preset.hidden_dim),
+        ("num_attention_heads", config.num_attention_heads, preset.num_attention_heads),
+        ("num_key_value_heads", config.num_key_value_heads, preset.num_kv_heads),
+    ):
+        if have != want:
+            raise ValueError(
+                f"model {field}={have} but preset {preset.name!r} declares {want}; "
+                "the layer plan and the calibration describe a different model"
+            )
+    if config._attn_implementation != "eager":
+        raise ValueError("GPU lane requires eager attention")
+    if model.training:
+        raise ValueError("GPU lane requires an eval-mode model")
+    declared = _declared_device(device)
+    if any(p.device != declared for p in model.parameters()):
+        raise ValueError(f"the lane requires a model entirely on {declared}")
+    layers = decoder_layers(model)
+    for layer in preset.sampled_layers:
+        block = layers[layer]
+        for name, module in (
+            ("k_proj", block.self_attn.k_proj),
+            ("v_proj", block.self_attn.v_proj),
+            ("q_proj", block.self_attn.q_proj),
+            ("gate_proj", block.mlp.gate_proj),
+        ):
+            if not module._forward_hooks:
+                raise ValueError(
+                    f"layer {layer} {name} carries no capture hook; load the model "
+                    "with load_lane_model so the lane reads the surface it expects"
+                )
+
+
+_WEIGHT_SHAS: dict[tuple[str, int, int], str] = {}
+"""File digests keyed by (resolved path, size, mtime), for :func:`weight_file_digests`."""
+
+
+def _cached_file_sha(path: Path) -> str:
+    """:func:`file_sha`, computed once per file for as long as its size and mtime hold.
+
+    A checkpoint is tens to hundreds of gigabytes, so a process that stamps many
+    runs against one resident model would otherwise re-read it for every stamp. A
+    file rewritten in place changes its mtime, so the digest cannot go stale.
+    """
+    stat = path.stat()
+    key = (str(path.resolve()), int(stat.st_size), int(stat.st_mtime_ns))
+    digest = _WEIGHT_SHAS.get(key)
+    if digest is None:
+        digest = _WEIGHT_SHAS[key] = file_sha(path)
+    return digest
+
+
+@dataclass
+class PreparedLane:
+    """A calibration bound to a resident model: what a process harvests against.
+
+    Built once by :func:`prepare_fast_lane`. A lane is keyed by the feature schema
+    it emits, and a schema depends on a span's step count only for the shortest
+    spans, so :meth:`lane` builds at most a handful of lanes over the life of a
+    process and reuses them.
+    """
+
+    calibration: LaneCalibration
+    loaded: LoadedModel
+    device: str
+    model_files: dict[str, str] | None
+    _schemas: dict[int, GpuFeatureSchema] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _lanes: dict[tuple[str, ...], GpuFeatureLane] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+
+    @property
+    def preset(self) -> ModelPreset:
+        """The model row the calibration and the model were both checked against."""
+        return self.calibration.preset
+
+    def lane(self, n_steps: int) -> tuple[GpuFeatureLane, GpuFeatureSchema]:
+        """The lane and schema for a span of ``n_steps`` incremental steps."""
+        schema = self._schemas.get(n_steps)
+        if schema is None:
+            schema = self._schemas[n_steps] = self.calibration.schema(n_steps)
+        lane = self._lanes.get(schema.feature_names)
+        if lane is None:
+            lane = self.calibration.build_lane(schema.feature_names, self.device)
+            self._lanes[schema.feature_names] = lane
+        return lane, schema
+
+    def provenance(self) -> dict[str, Any]:
+        """What a harvest ran against: preset, calibration digests, checkpoint digests.
+
+        Per-span identity — the lane id, the token digest — is on each result's
+        receipt; this is the part every span in the process shares.
+        """
+        return dict(
+            preset=self.preset.name,
+            device=str(self.device),
+            calibration_files=dict(self.calibration.calibration_files),
+            calibration_sha256=self.calibration.calibration_sha256,
+            model_files_sha256=self.model_files,
+            model_config=self.loaded.model.config.to_dict(),
+            lane_runtime_source_sha256=file_sha(Path(__file__)),
+        )
+
+
+def prepare_fast_lane(
+    preset: str | ModelPreset,
+    calib_dir: Path,
+    *,
+    device: str = DEFAULT_DEVICE,
+    loaded: LoadedModel | None = None,
+    model_path: str | None = None,
+    model_files: Mapping[str, str] | None = None,
+    require_local_weights: bool = False,
+) -> PreparedLane:
+    """Pin the arithmetic, read the calibration, and bind a model to them.
+
+    With ``loaded``, the model is the caller's and is checked rather than loaded:
+    :func:`check_loaded_model` refuses one whose architecture, depth, widths,
+    attention kernel, placement or capture hooks the lane cannot read. Without it,
+    the checkpoint at ``model_path`` is loaded by :func:`load_lane_model`.
+
+    Parameters
+    ----------
+    preset
+        A registry name or a :class:`~anamnesis.config.ModelPreset`. A row that is
+        not in the registry can be passed directly.
+    calib_dir
+        Directory holding the positional means and the residual basis.
+    device
+        Device the model and the lane run on; part of what a result is about.
+    loaded
+        A model already resident in this process.
+    model_path
+        Local checkpoint directory. Required to load a model, and to digest the
+        checkpoint when ``require_local_weights`` asks for digests.
+    model_files
+        Checkpoint digests the caller already holds, keyed by file name as
+        :func:`weight_file_digests` keys them. Taken as given in place of reading
+        the checkpoint.
+    require_local_weights
+        Stamp the checkpoint's digests into :meth:`PreparedLane.provenance`. They
+        are computed once per file and reused while the file's size and mtime hold.
+
+    Raises
+    ------
+    ValueError
+        From :func:`require_lane_arithmetic`, :func:`read_lane_calibration`,
+        :func:`check_loaded_model` or :func:`weight_file_digests`; or when neither a
+        model nor a path to load one is given.
+    """
+    require_lane_arithmetic()
+    row = resolve_preset(preset)
+    calibration = read_lane_calibration(row, Path(calib_dir))
+    if loaded is None and model_path is None:
+        raise ValueError("pass a loaded model or a model_path to load one from")
+    digests: dict[str, str] | None = None
+    if model_files is not None:
+        digests = dict(model_files)
+    elif require_local_weights:
+        if model_path is None:
+            raise ValueError(
+                "require_local_weights digests a checkpoint directory; pass model_path "
+                "or the digests themselves as model_files"
+            )
+        digests = weight_file_digests(model_path)
+    if loaded is None:
+        assert model_path is not None
+        loaded = load_lane_model(row, model_path, device)
+    return _bind(calibration, loaded, device, digests)
+
+
+def _bind(
+    calibration: LaneCalibration,
+    loaded: LoadedModel,
+    device: str,
+    model_files: dict[str, str] | None,
+) -> PreparedLane:
+    """A calibration and a model the lane can read, as one :class:`PreparedLane`."""
+    check_loaded_model(loaded, calibration.preset, device)
+    return PreparedLane(
+        calibration=calibration, loaded=loaded, device=device, model_files=model_files
+    )
 
 
 def resolve_fast_lane(
@@ -253,77 +608,37 @@ def resolve_fast_lane(
     ValueError
         From :func:`require_lane_arithmetic`, from an incomplete calibration
         directory, from :func:`resolve_lane_spans`, from
-        :func:`weight_file_digests`, or when the selected spans do not share one
-        feature schema.
+        :func:`weight_file_digests`, from :func:`check_loaded_model`, or when the
+        selected spans do not share one feature schema.
     """
     require_lane_arithmetic()
-    extraction, families = native_replay_configs(preset)
-    positional_means, pca_components, pca_mean = load_calibration(calib_dir, True)
-    if positional_means is None or pca_components is None or pca_mean is None:
-        raise ValueError("complete positional/PCA calibration required")
-    calibration_files = {
-        name: file_sha(Path(calib_dir) / name) for name in CALIBRATION_ARTIFACT_NAMES
-    }
-    calibration_sha256 = digest_of_shas(calibration_files)
+    calibration = read_lane_calibration(preset, calib_dir)
     spans = resolve_lane_spans(
-        entries, gen_ids, positions_calibrated=int(positional_means.shape[1])
+        entries, gen_ids, positions_calibrated=calibration.positions_calibrated
     )
     model_files = weight_file_digests(model_path) if require_local_weights else None
-
-    from anamnesis.extraction.fast.schema import resolve_gpu_schema
-
-    schemas = {
-        span.gen_id: resolve_gpu_schema(
-            preset.num_layers, span.n_steps, extraction, families, pca_components
-        )
-        for span in spans
-    }
+    schemas = {span.gen_id: calibration.schema(span.n_steps) for span in spans}
     names = {schema.feature_names for schema in schemas.values()}
     if len(names) != 1:
         raise ValueError("selected spans have different feature schemas; do not mix")
     feature_names = names.pop()
 
-    from anamnesis.extraction.fast.features import GpuFeatureLane
-    from anamnesis.extraction.model_loader import load_model
-
-    # This lane banks features and no raw tensors, so it hooks exactly the surfaces its
-    # reducers read: pre-RoPE keys, values, queries and gate activations at
-    # ``preset.sampled_layers``. No consumer here reads o_proj outputs, so no attention-output
-    # hook is registered — a capture nothing reads costs device memory every step and buys
-    # nothing. :mod:`anamnesis.extraction.replay.cell` banks the tensors themselves and so
-    # must keep every layer available instead.
-    sampled = list(preset.sampled_layers)
-    loaded = load_model(
-        ModelConfig.from_preset(preset, model_id=model_path, device_map=device),
-        sampled_layers=preset.sampled_layers,
-        register_gate_hooks=True,
-        key_layers=sampled,
-        value_layers=sampled,
-        query_layers=sampled,
+    prepared = _bind(
+        calibration, load_lane_model(preset, model_path, device), device, model_files
     )
-    lane = GpuFeatureLane(
-        extraction,
-        families,
-        list(feature_names),
-        positional_means,
-        pca_components,
-        pca_mean,
-        device=device,
-        calibration_sha256=calibration_sha256,
-        replay_path="full",
-    )
+    lane, _ = prepared.lane(spans[0].n_steps)
     return FastLaneRuntime(
-        extraction=extraction,
-        families=families,
+        extraction=calibration.extraction,
+        families=calibration.families,
         spans=spans,
         schemas=schemas,
         feature_names=feature_names,
-        positional_means=positional_means,
-        pca_components=pca_components,
-        pca_mean=pca_mean,
-        calibration_files=calibration_files,
-        calibration_sha256=calibration_sha256,
+        positional_means=calibration.positional_means,
+        pca_components=calibration.pca_components,
+        pca_mean=calibration.pca_mean,
+        calibration_files=calibration.calibration_files,
+        calibration_sha256=calibration.calibration_sha256,
         model_files=model_files,
-        loaded=loaded,
+        loaded=prepared.loaded,
         lane=lane,
     )
