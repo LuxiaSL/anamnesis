@@ -91,6 +91,12 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="Refuse to write a calibration whose filled positions do not reach this one",
     )
+    p.add_argument(
+        "--no-chat-template",
+        action="store_true",
+        help="Tokenise each prompt bare rather than as a user turn in the chat template, "
+             "for a base checkpoint whose tokenizer carries one anyway",
+    )
     p.add_argument("--dry-run", action="store_true", help="Print the configuration and stop")
     return p
 
@@ -137,6 +143,10 @@ def describe(
         f"tokens {settings.max_new_tokens}"
     )
     print(f"  prompts: {len(prompts)}")
+    print(
+        f"  prompt encoding: "
+        f"{'bare' if args.no_chat_template else 'chat template where the tokenizer has one'}"
+    )
     print(
         f"  position floor: a mean over more than "
         f"{calibration_fit.POSITION_COUNT_FLOOR} states"
@@ -198,7 +208,11 @@ def main(argv: list[str] | None = None) -> None:
     try:
         fit = calibration_fit.fit_calibration(
             calibration_fit.generate_prompt_states(
-                loaded, prompts, settings, suppress_eos=args.suppress_eos
+                loaded,
+                prompts,
+                settings,
+                suppress_eos=args.suppress_eos,
+                chat_template=not args.no_chat_template,
             ),
             preset=preset,
             settings=settings,
@@ -230,6 +244,7 @@ def main(argv: list[str] | None = None) -> None:
             prompts=prompts,
             settings=settings,
             suppress_eos=args.suppress_eos,
+            chat_template=not args.no_chat_template,
             pooled=args.pooled,
             n_components=n_components,
             means_path=means_path,

@@ -137,6 +137,7 @@ def test_a_written_fit_leaves_a_receipt_naming_its_bytes(tmp_path: Path) -> None
         prompts=prompts,
         settings=settings,
         suppress_eos=True,
+        chat_template=False,
         pooled=True,
         n_components=3,
         means_path=means_path,
@@ -152,6 +153,7 @@ def test_a_written_fit_leaves_a_receipt_naming_its_bytes(tmp_path: Path) -> None
     assert read.files == files and read.calibration_sha256 == digest_of_shas(files)
     assert read.prompt_set_sha256 == prompts_digest(prompts) and read.n_prompts == 2
     assert read.suppress_eos is True and read.max_new_tokens == STEPS
+    assert read.chat_template is False
     assert read.coverage.positions_calibrated == REACHED
     assert read.coverage.table_positions == 64
     assert read.coverage.trailing_zero_rows == 64 - REACHED

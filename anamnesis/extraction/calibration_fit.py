@@ -261,12 +261,20 @@ def generate_prompt_states(
     settings: GenerationConfig,
     *,
     suppress_eos: bool = False,
+    chat_template: bool = True,
 ) -> Iterator[PromptStates]:
     """Generate each prompt under ``settings`` and hand its states back as numpy.
 
-    Seeded by prompt index so a calibration is reproducible, and a checkpoint with
-    no chat template takes the bare prompt — a base model's calibration must match
-    the bare prompts its generations will use.
+    Seeded by prompt index so a calibration is reproducible. Each prompt is one user
+    turn in the checkpoint's chat template; ``chat_template=False``, or a checkpoint
+    with no chat template, takes the bare prompt instead — a base model's
+    calibration must match the bare prompts its generations will use, and a base
+    checkpoint can ship a tokenizer that carries a template it was never trained on.
+
+    The key-value cache is asked for explicitly. A checkpoint whose configuration
+    turns it off otherwise recomputes the whole prefix at every step, which makes a
+    generation quadratic in its length and a long calibration unaffordable; the
+    states agree either way up to floating-point reduction order.
 
     ``suppress_eos`` generates with no stop token, so every generation runs to
     ``settings.max_new_tokens`` and continues past any end-of-turn token it
@@ -294,7 +302,7 @@ def generate_prompt_states(
         )
     device = next(loaded.model.parameters()).device
     for index, text in enumerate(prompts):
-        if loaded.tokenizer.chat_template is None:
+        if not chat_template or loaded.tokenizer.chat_template is None:
             result = loaded.tokenizer(text, return_tensors="pt")["input_ids"]
         else:
             result = loaded.tokenizer.apply_chat_template(
@@ -316,6 +324,7 @@ def generate_prompt_states(
                 output_attentions=settings.output_attentions,
                 output_logits=settings.output_logits,
                 return_dict_in_generate=settings.return_dict_in_generate,
+                use_cache=True,
             )
         hidden = out.hidden_states
         yield PromptStates(
@@ -659,6 +668,10 @@ class CalibrationBuildReceipt(BaseModel):
     do_sample: bool
     eos_token_ids: list[int] = Field(description="The preset's stop tokens")
     suppress_eos: bool = Field(description="Whether generation ignored the stop tokens")
+    chat_template: bool = Field(
+        description="Whether prompts were encoded as a user turn in the tokenizer's chat "
+                    "template where it has one, rather than bare"
+    )
     pooled: bool
     n_components: int
     means_refitted: bool
@@ -687,6 +700,7 @@ def build_receipt(
     prompts: Sequence[str],
     settings: GenerationConfig,
     suppress_eos: bool,
+    chat_template: bool,
     pooled: bool,
     n_components: int,
     means_path: Path,
@@ -718,6 +732,7 @@ def build_receipt(
         do_sample=settings.do_sample,
         eos_token_ids=list(settings.eos_token_ids),
         suppress_eos=suppress_eos,
+        chat_template=chat_template,
         pooled=pooled,
         n_components=n_components,
         means_refitted=fit.means_refitted,
