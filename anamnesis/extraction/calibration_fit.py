@@ -61,9 +61,11 @@ from sklearn.decomposition import PCA
 from anamnesis.config import GenerationConfig, ModelPreset, resolve_preset
 from anamnesis.config.paths import prompts_path
 from anamnesis.extraction.calibration import (
+    POSITION_COUNT_FLOOR,
     POSITION_COUNTS_KEY,
     POSITIONAL_MEANS_KEY,
     load_positional_means,
+    positions_calibrated,
 )
 
 if TYPE_CHECKING:  # the annotation alone, so reading a fit costs no model runtime
@@ -73,10 +75,6 @@ logger = logging.getLogger(__name__)
 
 F32 = NDArray[np.float32]
 I64 = NDArray[np.int64]
-
-POSITION_COUNT_FLOOR = 5
-"""A position whose mean is an average of this many states or fewer is left at
-zero: a mean over one or two prompts is not a mean, it is one of the states."""
 
 PROMPT_HEADROOM = 200
 """Positions reserved above the token budget for the prompt itself, since a
@@ -393,7 +391,10 @@ def fit_per_layer_basis(
     """One basis per layer, over positionally corrected states.
 
     A sample beyond the reach of the means carries no correction and is dropped
-    rather than fitted raw, which would mix two distributions in one basis.
+    rather than fitted raw, which would mix two distributions in one basis. The
+    reach is :func:`anamnesis.extraction.calibration.positions_calibrated`, not the
+    table's width: a zero row past the last filled one subtracts nothing, so a
+    sample there would be fitted raw.
 
     Raises
     ------
@@ -401,8 +402,9 @@ def fit_per_layer_basis(
         When a named layer ends up with no corrected samples.
     """
     corrected: dict[int, list[F32]] = {int(layer): [] for layer in pca_layers}
+    reach = positions_calibrated(means)
     for layer, absolute, state in samples:
-        if absolute < means.shape[1]:
+        if absolute < reach:
             corrected[int(layer)].append(state - means[layer + 1, absolute])
     basis: dict[int, dict[str, Any]] = {}
     for layer in pca_layers:

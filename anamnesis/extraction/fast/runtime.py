@@ -41,7 +41,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from anamnesis.config import ModelConfig, ModelPreset, resolve_preset
-from anamnesis.extraction.calibration import CALIBRATION_ARTIFACT_NAMES, load_calibration
+from anamnesis.extraction.calibration import (
+    CALIBRATION_ARTIFACT_NAMES,
+    load_calibration,
+    load_position_counts,
+    positions_calibrated,
+)
 from anamnesis.extraction.replay_config import native_replay_configs
 from anamnesis.provenance import digest_of_shas, file_sha
 
@@ -171,8 +176,10 @@ def resolve_lane_spans(
     gen_ids
         Which of them to replay, in the order the caller means to run them.
     positions_calibrated
-        Width of the positional-means table: the number of positions calibration
-        covers.
+        How many leading positions the positional means fill, from
+        :func:`anamnesis.extraction.calibration.positions_calibrated`. The table's
+        width is not this number: rows past the last filled one are zeros and
+        correct nothing.
 
     Raises
     ------
@@ -200,7 +207,7 @@ def span_is_supported(span: LaneSpan, positions_calibrated: int) -> bool:
     """Whether the lane can replay ``span`` against a calibration this wide.
 
     A span needs a prompt, at least two generated tokens, and a last replayed
-    position inside the positional-means table.
+    position among the rows the positional means fill.
     """
     return (
         0 < span.prompt_length < span.end - 1 and span.end - 2 < positions_calibrated
@@ -248,11 +255,17 @@ class LaneCalibration:
     pca_mean: Any
     calibration_files: dict[str, str]
     calibration_sha256: str
+    position_counts: NDArray[np.int64] | None = None
 
     @property
     def positions_calibrated(self) -> int:
-        """Width of the positional-means table: the positions a span may reach."""
-        return int(self.positional_means.shape[1])
+        """How many leading positions the means fill: the positions a span may reach.
+
+        :func:`anamnesis.extraction.calibration.positions_calibrated`, read from the
+        fit's counts when the archive carries them. The table's width is not this
+        number: rows past the last filled one are zeros and correct nothing.
+        """
+        return positions_calibrated(self.positional_means, self.position_counts)
 
     def schema(self, n_steps: int) -> GpuFeatureSchema:
         """The feature names and family slices a span of ``n_steps`` resolves to.
@@ -314,6 +327,7 @@ def read_lane_calibration(preset: ModelPreset, calib_dir: Path) -> LaneCalibrati
         pca_mean=pca_mean,
         calibration_files=calibration_files,
         calibration_sha256=digest_of_shas(calibration_files),
+        position_counts=load_position_counts(calib_dir),
     )
 
 

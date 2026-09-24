@@ -34,6 +34,7 @@ import transformers
 from torch import Tensor
 
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig
+from anamnesis.extraction.calibration import positions_calibrated
 from anamnesis.extraction.fast.batch_layout import ReplaySpan, pack_spans
 from anamnesis.extraction.fast.attention import AttentionReducer
 from anamnesis.extraction.fast.families import FamilyReducer
@@ -111,6 +112,9 @@ class GpuFeatureLane:
         self.families = families
         self.names = tuple(feature_names)
         self.pm = positional_means
+        # Coverage is the last filled row, not the table's width: a zero row
+        # corrects nothing, so a span reaching one is refused in _validate_span.
+        self.positions_calibrated = positions_calibrated(positional_means)
         if isinstance(pca_components, dict):
             if (
                 not isinstance(pca_mean, dict)
@@ -518,7 +522,7 @@ class GpuFeatureLane:
             raise ValueError("GPU lane requires eager attention")
         if any(p.device != self.device for p in loaded.model.parameters()):
             raise ValueError("v1 requires a model entirely on the declared device")
-        if end - 2 >= self.pm.shape[1]:
+        if end - 2 >= self.positions_calibrated:
             raise ValueError("positional calibration does not cover span")
         if (
             min(token_ids[:end]) < 0
