@@ -63,6 +63,12 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Replace an existing basis at the target filename",
     )
+    p.add_argument(
+        "--no-chat-template",
+        action="store_true",
+        help="Tokenise each prompt bare rather than as a user turn in the chat template, "
+             "for a base checkpoint whose tokenizer carries one anyway",
+    )
     p.add_argument("--dry-run", action="store_true", help="Print the configuration and stop")
     return p
 
@@ -102,6 +108,10 @@ def describe(
         f"tokens {settings.max_new_tokens}"
     )
     print(f"  prompts: {len(prompts)}")
+    print(
+        f"  prompt encoding: "
+        f"{'bare' if args.no_chat_template else 'chat template where the tokenizer has one'}"
+    )
     print(
         f"  position floor: a mean over more than "
         f"{calibration_fit.POSITION_COUNT_FLOOR} states"
@@ -151,7 +161,9 @@ def main(argv: list[str] | None = None) -> None:
     loaded.disable_hooks()  # calibration reads hidden states from the forward, not from hooks
     try:
         fit = calibration_fit.fit_calibration(
-            calibration_fit.generate_prompt_states(loaded, prompts, settings),
+            calibration_fit.generate_prompt_states(
+                loaded, prompts, settings, chat_template=not args.no_chat_template
+            ),
             preset=preset,
             settings=settings,
             n_components=n_components,

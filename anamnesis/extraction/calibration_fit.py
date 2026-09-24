@@ -218,13 +218,24 @@ class CalibrationFit:
 
 
 def generate_prompt_states(
-    loaded: LoadedModel, prompts: Sequence[str], settings: GenerationConfig
+    loaded: LoadedModel,
+    prompts: Sequence[str],
+    settings: GenerationConfig,
+    *,
+    chat_template: bool = True,
 ) -> Iterator[PromptStates]:
     """Generate each prompt under ``settings`` and hand its states back as numpy.
 
-    Seeded by prompt index so a calibration is reproducible, and a checkpoint with
-    no chat template takes the bare prompt — a base model's calibration must match
-    the bare prompts its generations will use.
+    Seeded by prompt index so a calibration is reproducible. Each prompt is one user
+    turn in the checkpoint's chat template; ``chat_template=False``, or a checkpoint
+    with no chat template, takes the bare prompt instead — a base model's
+    calibration must match the bare prompts its generations will use, and a base
+    checkpoint can ship a tokenizer that carries a template it was never trained on.
+
+    The key-value cache is asked for explicitly. A checkpoint whose configuration
+    turns it off otherwise recomputes the whole prefix at every step, which makes a
+    generation quadratic in its length and a long calibration unaffordable; the
+    states are the same either way.
 
     The model runtime is imported inside this function: everything else in this
     module is numpy and scikit-learn, and a machine with no accelerator reads the
@@ -247,7 +258,7 @@ def generate_prompt_states(
         )
     device = next(loaded.model.parameters()).device
     for index, text in enumerate(prompts):
-        if loaded.tokenizer.chat_template is None:
+        if not chat_template or loaded.tokenizer.chat_template is None:
             result = loaded.tokenizer(text, return_tensors="pt")["input_ids"]
         else:
             result = loaded.tokenizer.apply_chat_template(
@@ -269,6 +280,7 @@ def generate_prompt_states(
                 output_attentions=settings.output_attentions,
                 output_logits=settings.output_logits,
                 return_dict_in_generate=settings.return_dict_in_generate,
+                use_cache=True,
             )
         hidden = out.hidden_states
         yield PromptStates(
