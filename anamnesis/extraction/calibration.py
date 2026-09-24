@@ -14,26 +14,30 @@ put numpy behind every import of a run's description. What lives here is the
 resolution: which of the accepted names a directory answers with, and what each file
 turns into.
 
-Two on-disk shapes for the PCA model are both accepted, because both are banked:
-a plain mapping with ``components`` and ``mean`` keys, and a pickled scikit-learn
-estimator with ``components_`` and ``mean_`` attributes. They are read to the
-same pair of float32 arrays. What is *not* read here is the per-layer basis a
-corrected fit produces, keyed by layer index: that form is consumed only by the
-offline recompute over banked tensors, and
-:mod:`anamnesis.extraction.feature_pipeline` reads it there — the module whose
-arithmetic the feature receipts pin, and therefore the module that keeps its own
-reader. A per-layer basis reaching the reader below is refused by name rather
-than reduced to whichever layer a key happened to hold.
+Three on-disk shapes for the PCA model are banked, and :func:`read_pca_basis` is
+the one reader of all three: a plain mapping with ``components`` and ``mean`` keys,
+a pickled scikit-learn estimator with ``components_`` and ``mean_`` attributes, and
+the per-layer basis a corrected fit writes, a mapping from layer index to one such
+mapping. Every other reader here and elsewhere in the package goes through it, so a
+shape is recognised the same way wherever a basis is read. What differs between
+callers is which shapes they can *use*. :func:`load_pca_model` and
+:func:`load_calibration` project onto one basis, so they refuse the per-layer shape
+by name rather than reducing it to whichever layer a key happened to hold; the
+offline recompute over banked tensors in
+:mod:`anamnesis.extraction.feature_pipeline` takes the per-layer shape as well.
 
-Absence is returned, not raised. A caller that cannot proceed without a
-calibration says so itself — :mod:`anamnesis.scripts.run_gpu_replay` refuses a
-partial one outright, while a pass whose features do not touch the residual PCA
-runs without it. Silently handing back uncorrected features under the name of
-corrected ones is the failure this split avoids, so a missing positional means
-is logged as a warning at the point of reading.
+Absence is returned, not raised, by :func:`load_positional_means` and
+:func:`load_calibration`. A caller that cannot proceed without a calibration says so
+itself — :mod:`anamnesis.scripts.run_gpu_replay` refuses a partial one outright,
+while a pass whose features do not touch the residual PCA runs without it. Silently
+handing back uncorrected features under the name of corrected ones is the failure
+this split avoids, so a missing positional means is logged as a warning at the point
+of reading. A caller that needs both artifacts and a record of which bytes it read
+takes :func:`load_calibration_strict` instead, which refuses either absence with
+:class:`CalibrationMissing` and returns the arrays together with their digests.
 
-This module is pure numpy and pickle. Fitting a basis needs scikit-learn, a model
-runtime and weights on a device, so it sits in a sibling module that the CPU
+This module is pure numpy, pickle and hashing. Fitting a basis needs scikit-learn, a
+model runtime and weights on a device, so it sits in a sibling module that the CPU
 recompute lane and the fast-lane readers never import.
 """
 
@@ -41,7 +45,9 @@ from __future__ import annotations
 
 import logging
 import pickle
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Literal, Mapping
 
 import numpy as np
 from numpy.typing import NDArray
@@ -51,6 +57,7 @@ from anamnesis.config.experiment import (
     PCA_MODEL_NAMES,
     POSITIONAL_MEANS_NAME,
 )
+from anamnesis.provenance import digest_of_shas, file_sha
 
 F32 = NDArray[np.float32]
 
@@ -70,6 +77,161 @@ names the bytes it read, so a directory that answers :func:`resolve_pca_model` u
 the other accepted spelling has no digest under this one and the pass that wanted a
 provenance stamp fails on the missing file rather than stamping a different set.
 """
+
+
+PCAFormat = Literal["pooled", "per_layer", "estimator"]
+"""Which banked shape a basis file holds: one mapping with ``components`` and
+``mean``, one such mapping per layer index, or a fitted scikit-learn estimator."""
+
+
+class CalibrationMissing(FileNotFoundError):
+    """A calibration artifact a strict read needs is not on disk.
+
+    A subclass of :class:`FileNotFoundError`, so a caller that already handles an
+    absent file handles this one.
+    """
+
+
+class CalibrationMalformed(ValueError):
+    """A calibration artifact is on disk but holds no shape this package reads."""
+
+
+@dataclass(frozen=True)
+class BasisArrays:
+    """One basis as stored: components ``[k, units]`` and, when stored, the mean
+    ``[units]`` it was fitted around. The arrays keep the dtype the file holds, so
+    each reader casts to the precision its own arithmetic runs at."""
+
+    components: NDArray[Any]
+    mean: NDArray[Any] | None
+
+
+@dataclass(frozen=True)
+class PCABasis:
+    """What :func:`read_pca_basis` found in one basis file.
+
+    Exactly one of ``pooled`` and ``per_layer`` is populated: ``pooled`` for the
+    mapping and estimator shapes, ``per_layer`` (keyed by layer index) for the
+    corrected fit's shape.
+    """
+
+    path: Path
+    format: PCAFormat
+    pooled: BasisArrays | None = None
+    per_layer: Mapping[int, BasisArrays] = field(default_factory=dict)
+
+    @property
+    def has_every_mean(self) -> bool:
+        """Whether every basis in the file carries the mean it was fitted around."""
+        if self.pooled is not None:
+            return self.pooled.mean is not None
+        return all(basis.mean is not None for basis in self.per_layer.values())
+
+    def float32_arrays(self) -> tuple[F32 | dict[int, F32], F32 | dict[int, F32] | None]:
+        """Components and mean as float32, the precision the projection runs at.
+
+        A pooled basis comes back as two arrays, with the mean ``None`` when the
+        file stores none. A per-layer basis comes back as two mappings keyed by
+        layer index, the form :mod:`anamnesis.extraction.feature_pipeline` takes.
+
+        Raises
+        ------
+        CalibrationMalformed
+            When a per-layer basis leaves out a layer's mean: the recompute
+            centres every layer, so a missing one has no stand-in.
+        """
+        if self.pooled is not None:
+            mean = self.pooled.mean
+            return (
+                np.asarray(self.pooled.components, dtype=np.float32),
+                None if mean is None else np.asarray(mean, dtype=np.float32),
+            )
+        missing = sorted(layer for layer, basis in self.per_layer.items() if basis.mean is None)
+        if missing:
+            raise CalibrationMalformed(
+                f"{self.path} holds a per-layer basis with no mean at layers {missing}"
+            )
+        return (
+            {
+                layer: np.asarray(basis.components, dtype=np.float32)
+                for layer, basis in self.per_layer.items()
+            },
+            {
+                layer: np.asarray(basis.mean, dtype=np.float32)
+                for layer, basis in self.per_layer.items()
+            },
+        )
+
+
+def read_pca_basis(path: Path) -> PCABasis:
+    """The basis in one file, in whichever of the three banked shapes it holds.
+
+    This is the package's one reader of a basis file. A mapping whose first value is
+    itself a mapping with ``components`` is the per-layer shape; any other mapping
+    must carry ``components`` itself; anything else must carry ``components_``. A
+    mean is optional at this level and comes back as ``None`` when the file stores
+    none, since whether a caller can project without one is the caller's rule.
+
+    Raises
+    ------
+    FileNotFoundError
+        When the file is absent — a caller that asked for a basis by path meant
+        that one. The raised type is :class:`CalibrationMissing`.
+    CalibrationMalformed
+        When the file does not unpickle, or holds an object with no components in
+        any of the three shapes. Reading it as "no basis" would compute
+        uncorrected features under the name of corrected ones.
+    """
+    target = Path(path)
+    if not target.is_file():
+        raise CalibrationMissing(f"no PCA model at {target}")
+    try:
+        with open(target, "rb") as handle:
+            model = pickle.load(handle)
+    except (pickle.UnpicklingError, EOFError, AttributeError, ImportError, ValueError) as exc:
+        raise CalibrationMalformed(f"{target} does not unpickle as a PCA model: {exc}") from exc
+
+    if isinstance(model, dict):
+        values = list(model.values())
+        if values and isinstance(values[0], dict) and "components" in values[0]:
+            per_layer: dict[int, BasisArrays] = {}
+            for key, entry in model.items():
+                if not isinstance(entry, dict) or "components" not in entry:
+                    raise CalibrationMalformed(
+                        f"{target} holds a per-layer basis whose entry {key!r} has no components"
+                    )
+                per_layer[int(key)] = BasisArrays(
+                    components=np.asarray(entry["components"]),
+                    mean=None if entry.get("mean") is None else np.asarray(entry["mean"]),
+                )
+            return PCABasis(path=target, format="per_layer", per_layer=per_layer)
+        if model.get("components") is None:
+            raise CalibrationMalformed(
+                f"{target} holds a mapping keyed {sorted(map(str, model))} with no components"
+            )
+        return PCABasis(
+            path=target,
+            format="pooled",
+            pooled=BasisArrays(
+                components=np.asarray(model["components"]),
+                mean=None if model.get("mean") is None else np.asarray(model["mean"]),
+            ),
+        )
+
+    components = getattr(model, "components_", None)
+    if components is None:
+        raise CalibrationMalformed(
+            f"{target} holds a {type(model).__name__} with no components_ attribute"
+        )
+    mean = getattr(model, "mean_", None)
+    return PCABasis(
+        path=target,
+        format="estimator",
+        pooled=BasisArrays(
+            components=np.asarray(components),
+            mean=None if mean is None else np.asarray(mean),
+        ),
+    )
 
 
 def resolve_pca_model(calib_dir: Path) -> Path | None:
@@ -101,7 +263,7 @@ def load_positional_means(calib_dir: Path) -> F32 | None:
 
 
 def load_pca_model(path: Path) -> tuple[F32, F32]:
-    """One pooled PCA basis and its mean, from either banked shape.
+    """One pooled PCA basis and its mean, as float32, read by :func:`read_pca_basis`.
 
     Raises
     ------
@@ -112,31 +274,24 @@ def load_pca_model(path: Path) -> tuple[F32, F32]:
         When the object is a mapping of bases keyed by layer index. A pass that
         loads a model projects onto one basis, so a per-layer basis is refused
         here rather than reduced to whichever layer a key happened to hold; the
-        reader for that shape is :mod:`anamnesis.extraction.feature_pipeline`, and
-        the pooled shape comes from a pooled fit.
-    AttributeError
-        When the object is neither a mapping nor an estimator carrying
-        ``components_`` and ``mean_``.
+        recompute in :mod:`anamnesis.extraction.feature_pipeline` takes that
+        shape, and the pooled shape comes from a pooled fit.
+    CalibrationMalformed
+        When the file holds none of the banked shapes, or a pooled basis with no
+        mean to centre on.
     """
-    target = Path(path)
-    if not target.is_file():
-        raise FileNotFoundError(f"no PCA model at {target}")
-    with open(target, "rb") as f:
-        model = pickle.load(f)
-    if isinstance(model, dict):
-        if "components" not in model:
-            raise KeyError(
-                f"{target} holds a basis per layer, keyed {sorted(model)}, and this reader "
-                "projects onto one basis; the recompute path reads the per-layer shape, and "
-                "a pooled fit writes the shape this reader takes"
-            )
-        return (
-            np.asarray(model["components"], dtype=np.float32),
-            np.asarray(model["mean"], dtype=np.float32),
+    basis = read_pca_basis(path)
+    if basis.pooled is None:
+        raise KeyError(
+            f"{basis.path} holds a basis per layer, keyed {sorted(basis.per_layer)}, and this "
+            "reader projects onto one basis; the recompute path reads the per-layer shape, and "
+            "a pooled fit writes the shape this reader takes"
         )
+    if basis.pooled.mean is None:
+        raise CalibrationMalformed(f"{basis.path} holds a basis with no mean to centre on")
     return (
-        np.asarray(model.components_, dtype=np.float32),
-        np.asarray(model.mean_, dtype=np.float32),
+        np.asarray(basis.pooled.components, dtype=np.float32),
+        np.asarray(basis.pooled.mean, dtype=np.float32),
     )
 
 
@@ -154,7 +309,7 @@ def load_calibration(
 
     Raises
     ------
-    KeyError, AttributeError
+    KeyError, CalibrationMalformed
         From :func:`load_pca_model`, when the resolved file holds a shape this
         reader cannot project onto. A directory that holds no basis at all is the
         ``None`` case; one that holds an unusable basis is a refusal, because a
@@ -170,3 +325,113 @@ def load_calibration(
         components, mean = load_pca_model(pca_path)
         logger.info(f"pca components {components.shape} from {pca_path.name}")
     return positional_means, components, mean
+
+
+@dataclass(frozen=True)
+class Calibration:
+    """Both artifacts of a calibration directory, with the digests of the bytes read.
+
+    ``files`` maps each artifact's filename to the SHA-256 of its bytes, and
+    ``sha256`` is :func:`anamnesis.provenance.digest_of_shas` over that mapping —
+    the same digest :mod:`anamnesis.extraction.fast.runtime` stamps for a
+    directory holding the written names. A result stamped with it names the
+    correction it was computed under, which a path does not: a directory is
+    replaced in place, and two bases of the same shape give features with the same
+    names and different values.
+    """
+
+    directory: Path
+    positional_means: F32
+    basis: PCABasis
+    files: Mapping[str, str]
+    sha256: str
+
+    @property
+    def pca_components(self) -> F32 | dict[int, F32]:
+        """The basis components as float32, per layer for a per-layer basis."""
+        return self.basis.float32_arrays()[0]
+
+    @property
+    def pca_mean(self) -> F32 | dict[int, F32]:
+        """The basis mean as float32, per layer for a per-layer basis."""
+        mean = self.basis.float32_arrays()[1]
+        if mean is None:
+            raise CalibrationMalformed(f"{self.basis.path} holds a basis with no mean")
+        return mean
+
+    def provenance(self) -> dict[str, Any]:
+        """The record a result computed under this calibration carries beside it."""
+        return {
+            "calibration_dir": str(self.directory),
+            "calibration_sha256": self.sha256,
+            "files": dict(self.files),
+            "pca_file": self.basis.path.name,
+            "pca_format": self.basis.format,
+        }
+
+
+def load_calibration_strict(calib_dir: Path) -> Calibration:
+    """Positional means and basis from ``calib_dir``, refusing anything missing.
+
+    For a pass that has no uncorrected fallback. The basis may be any of the three
+    banked shapes and is resolved by :func:`resolve_pca_model`; the digests are
+    taken over the files actually read, under the names they were read by.
+
+    Raises
+    ------
+    CalibrationMissing
+        When the directory, the positional means, or a basis under every accepted
+        name is absent.
+    CalibrationMalformed
+        When the means archive holds no ``positional_means`` array, holds one that
+        is not indexed ``[layer, position, unit]``, or when the basis is
+        unreadable or leaves out a mean.
+    """
+    directory = Path(calib_dir).expanduser()
+    if not directory.is_dir():
+        raise CalibrationMissing(f"calibration directory {directory} is not a directory")
+
+    means_path = directory / POSITIONAL_MEANS_NAME
+    if not means_path.is_file():
+        raise CalibrationMissing(
+            f"no positional means at {means_path}; features that subtract them would be wrong"
+        )
+    try:
+        with np.load(means_path) as archive:
+            held = sorted(archive.files)
+            stored = archive[POSITIONAL_MEANS_KEY] if POSITIONAL_MEANS_KEY in held else None
+    except (OSError, ValueError, EOFError) as exc:
+        raise CalibrationMalformed(f"{means_path} does not read as an archive: {exc}") from exc
+    if stored is None:
+        raise CalibrationMalformed(
+            f"{means_path} holds no {POSITIONAL_MEANS_KEY!r} array (it holds {held})"
+        )
+    positional_means: F32 = stored.astype(np.float32)
+    if positional_means.ndim != 3:
+        raise CalibrationMalformed(
+            f"{means_path} holds positional means of shape {positional_means.shape}; "
+            "they are indexed [layer, position, unit]"
+        )
+
+    pca_path = resolve_pca_model(directory)
+    if pca_path is None:
+        raise CalibrationMissing(
+            f"no PCA model in {directory}; looked for {list(PCA_MODEL_NAMES)}"
+        )
+    basis = read_pca_basis(pca_path)
+    if not basis.has_every_mean:
+        raise CalibrationMalformed(f"{pca_path} holds a basis with no mean to centre on")
+
+    files = {means_path.name: file_sha(means_path), pca_path.name: file_sha(pca_path)}
+    calibration = Calibration(
+        directory=directory,
+        positional_means=positional_means,
+        basis=basis,
+        files=files,
+        sha256=digest_of_shas(files),
+    )
+    logger.info(
+        f"calibration {directory}: positional_means {positional_means.shape}, "
+        f"{basis.format} basis from {pca_path.name}, sha256 {calibration.sha256}"
+    )
+    return calibration
