@@ -18,7 +18,9 @@ generation draws from. The **calibration ruler** carries one flat list: the prom
 model's positional means and residual basis are fitted over. A mean is subtracted
 from every state before every corrected feature, so editing the ruler moves every
 signature downstream of it while no argument anywhere changes — which is exactly why
-its bytes are pinned rather than treated as a list somebody may extend.
+its bytes are pinned. It grows only by appending, and the head the banked artifacts
+were fitted over is pinned on its own, so a fit over that head is still provably a fit
+over the banked ruler.
 """
 
 from __future__ import annotations
@@ -52,9 +54,23 @@ proves. Kept so a copy of a file found elsewhere can be matched to the record.
 
 CALIBRATION_SET_SHA256: dict[str, str] = {
     "calibration_prompts.json": (
-        "817bcff40d91cd849b85308fd3240f04024cbc8f406b5c0baee4410fedd217d1"
+        "4bce267a8ea7ef5ba58a1e02df5c07274b76c8670b9422ac6b9345a839ebc4c8"
     ),
 }
+
+BANKED_RULER_SIZE = 50
+"""The leading prompts the banked positional means and residual bases were fitted over."""
+
+BANKED_RULER_SHA256 = "e5de382609ce936f0e4ad9d7bc3f025d5757c70e50f0b84fab9ba4cbc695265e"
+"""Digest of those prompts as a compact JSON list, so the banked ruler stays provable
+inside the longer one: a fit over the first :data:`BANKED_RULER_SIZE` prompts is a fit
+over exactly the ruler the banked artifacts used."""
+
+CALIBRATION_RECORD_BYTES_SHA256 = "817bcff40d91cd849b85308fd3240f04024cbc8f406b5c0baee4410fedd217d1"
+"""The byte digest of the fifty-prompt file the banked artifacts were fitted from.
+
+Not asserted: the file has since grown by appending. Kept so a copy found elsewhere can
+be matched to the record."""
 
 PROMPT_SET_NAMES: frozenset[str] = frozenset(TOPIC_SET_MEANING_SHA256) | frozenset(CALIBRATION_SET_SHA256)
 """Every prompt-set file the package ships, by name."""
@@ -64,8 +80,8 @@ PROVENANCE_IN_PROSE = re.compile(r"prere[g]|ratifie[d]|addendu[m]|codici[l]|\b20
 
 TOPIC_SET_SIZES = {"set_a": 10, "set_b": 10, "set_c": 20, "set_d": 20}
 
-CALIBRATION_RULER_SIZE = 50
-"""Prompts in the calibration ruler; the count the banked artifacts were fitted at."""
+CALIBRATION_RULER_SIZE = 200
+"""Prompts in the calibration ruler."""
 
 
 def _without_descriptions(node: Any) -> Any:
@@ -159,6 +175,13 @@ def test_the_calibration_ruler_is_a_flat_list_of_distinct_prompts() -> None:
     assert len(set(prompts)) == CALIBRATION_RULER_SIZE
     assert all(isinstance(text, str) and text for text in prompts)
     assert calibration_fit.calibration_prompts() == tuple(prompts)
+
+
+def test_the_banked_ruler_is_the_unchanged_head_of_the_ruler() -> None:
+    """Growing the ruler appended to it: the banked fifty lead it, unchanged and in order."""
+    head = list(calibration_fit.calibration_prompts()[:BANKED_RULER_SIZE])
+    serial = json.dumps(head, ensure_ascii=False, separators=(",", ":")).encode()
+    assert hashlib.sha256(serial).hexdigest() == BANKED_RULER_SHA256
 
 
 def test_the_twenty_mode_topics_are_the_first_two_sets() -> None:

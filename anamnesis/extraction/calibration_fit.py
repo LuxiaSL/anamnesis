@@ -121,6 +121,12 @@ BUILD_RECEIPT_SUFFIX = ".build.json"
 """What replaces the basis file's suffix to name the receipt beside it, so a second
 basis written into one directory under another name keeps its own receipt."""
 
+BASIS_STEPS_PER_PROMPT = 32
+"""Generated positions per prompt a per-layer basis is fitted over, evenly spaced from the
+first generated state to the last. A basis of fifty components over a few thousand
+units needs thousands of samples to pin anything past its leading directions, and
+the replay reads every position anyway, so sampling densely costs no generation."""
+
 TOKENS_SUFFIX = ".tokens.json"
 """What replaces the basis file's suffix to name the replay manifest of the sequences
 the calibration was fitted over, keyed by prompt index."""
@@ -255,6 +261,8 @@ class CalibrationFit:
     position_counts: I64
     basis: dict[str, Any] | dict[int, dict[str, Any]]
     means_refitted: bool
+    basis_steps_per_prompt: int | None = None
+    """Steps per prompt a per-layer basis was fitted over; ``None`` for a pooled fit."""
 
     @property
     def furthest_position(self) -> int:
@@ -463,21 +471,33 @@ def _accumulate_positions(
         counts[:layers, absolute] += 1
 
 
-def _basis_samples(
-    prompt: PromptStates, pca_layers: Sequence[int], pooled: bool
-) -> list[tuple[int, int, F32]]:
-    """``(layer, absolute position, state)`` at the sampled steps of one prompt.
+def basis_steps(n_steps: int, pooled: bool, per_prompt: int = BASIS_STEPS_PER_PROMPT) -> list[int]:
+    """The generated steps, counted from one, that one prompt contributes to a basis.
 
-    A pooled fit keeps the three sample points as they fall, including when a short
-    generation makes two of them the same step; the per-layer fit takes the
-    distinct ones. Both are the shape their banked artifacts were fitted under, so
-    neither is normalised into the other.
+    A pooled fit keeps its three sample points as they fall — first, middle, last —
+    including when a short generation makes two of them the same step, because that
+    is the shape the banked pooled bases were fitted under. A per-layer fit takes
+    ``per_prompt`` distinct steps spread evenly from the first to the last, or every
+    step of a generation shorter than that.
     """
-    n_steps = len(prompt.steps)
     if n_steps <= 0:
         return []
-    midpoint = max(1, n_steps // 2)
-    chosen = [1, midpoint, n_steps] if pooled else sorted({1, midpoint, n_steps})
+    if pooled:
+        return [1, max(1, n_steps // 2), n_steps]
+    if n_steps <= per_prompt:
+        return list(range(1, n_steps + 1))
+    return sorted({int(step) for step in np.linspace(1, n_steps, per_prompt).round()})
+
+
+def basis_samples(
+    prompt: PromptStates,
+    pca_layers: Sequence[int],
+    pooled: bool,
+    per_prompt: int = BASIS_STEPS_PER_PROMPT,
+) -> list[tuple[int, int, F32]]:
+    """``(layer, absolute position, state)`` at the steps :func:`basis_steps` picks."""
+    n_steps = len(prompt.steps)
+    chosen = basis_steps(n_steps, pooled, per_prompt)
     out: list[tuple[int, int, F32]] = []
     for step in chosen:
         if step > n_steps:
@@ -579,6 +599,37 @@ def fit_per_layer_basis(
     return basis
 
 
+def subspace_agreement(components_a: F32, components_b: F32) -> NDArray[np.float64]:
+    """How far two bases agree on their leading ``k`` directions, for every ``k``.
+
+    Entry ``k - 1`` is the smallest principal-angle cosine between the spans of the
+    first ``k`` components of each basis: 1 when the two top-``k`` subspaces coincide,
+    near 0 when one of them holds a direction the other lacks. Components are rows and
+    orthonormal, as a PCA returns them. Comparing two fits over disjoint halves of a
+    prompt set reads how many components the samples actually determine — the leading
+    run of values near 1 — and at half the samples it errs short.
+
+    Raises
+    ------
+    ValueError
+        When the two bases do not have the same width.
+    """
+    a = np.asarray(components_a, dtype=np.float64)
+    b = np.asarray(components_b, dtype=np.float64)
+    if a.shape[1] != b.shape[1]:
+        raise ValueError(f"bases of width {a.shape[1]} and {b.shape[1]} cannot be compared")
+    depth = min(a.shape[0], b.shape[0])
+    return np.array(
+        [np.linalg.svd(a[:k] @ b[:k].T, compute_uv=False).min() for k in range(1, depth + 1)]
+    )
+
+
+def determined_components(agreement: NDArray[np.float64], threshold: float = 0.9) -> int:
+    """The length of the leading run of :func:`subspace_agreement` at or above ``threshold``."""
+    below = np.flatnonzero(np.asarray(agreement) < threshold)
+    return int(below[0]) if below.size else int(len(agreement))
+
+
 def fit_calibration(
     states: Iterable[PromptStates],
     *,
@@ -588,6 +639,7 @@ def fit_calibration(
     pooled: bool = False,
     existing_means: F32 | None = None,
     max_positions: int | None = None,
+    basis_steps_per_prompt: int = BASIS_STEPS_PER_PROMPT,
 ) -> CalibrationFit:
     """Both artifacts, from one pass over a prompt set's states.
 
@@ -625,7 +677,7 @@ def fit_calibration(
     for prompt in states:
         if existing_means is None:
             _accumulate_positions(sums, counts, prompt)
-        samples.extend(_basis_samples(prompt, row.pca_layers, pooled))
+        samples.extend(basis_samples(prompt, row.pca_layers, pooled, basis_steps_per_prompt))
 
     means = means_from_totals(sums, counts) if existing_means is None else existing_means
     basis: dict[str, Any] | dict[int, dict[str, Any]] = (
@@ -638,6 +690,7 @@ def fit_calibration(
         position_counts=counts,
         basis=basis,
         means_refitted=existing_means is None,
+        basis_steps_per_prompt=None if pooled else basis_steps_per_prompt,
     )
 
 
@@ -782,6 +835,11 @@ class CalibrationBuildReceipt(BaseModel):
     coverage: BuildCoverage
     files: dict[str, str] = Field(description="Filename to SHA-256 of each artifact")
     calibration_sha256: str
+    basis_steps_per_prompt: int | None = Field(
+        default=None,
+        description="Generated positions per prompt the per-layer basis was fitted over; "
+                    "absent for a pooled fit, which keeps three",
+    )
     tokens_sha256: str | None = Field(
         default=None,
         description="SHA-256 of the replay manifest the fit was taken over, when one was written",
@@ -864,6 +922,7 @@ def build_receipt(
         files=files,
         calibration_sha256=digest_of_shas(files),
         tokens_sha256=file_sha(tokens_path(basis_path)) if tokens_written else None,
+        basis_steps_per_prompt=fit.basis_steps_per_prompt,
     )
 
 
