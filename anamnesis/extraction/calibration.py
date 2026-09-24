@@ -62,6 +62,14 @@ POSITIONAL_MEANS_KEY = "positional_means"
 POSITION_COUNTS_KEY = "pos_counts"
 """How many states each position's mean was taken over, in the same archive."""
 
+POSITION_COUNT_FLOOR = 5
+"""A position whose mean is an average of this many states or fewer is left at
+zero: a mean over one or two prompts is not a mean, it is one of the states. The fit
+in :mod:`anamnesis.extraction.calibration_fit` writes by it, and
+:func:`positions_calibrated` reads coverage by it."""
+
+I64 = NDArray[np.int64]
+
 CALIBRATION_ARTIFACT_NAMES: tuple[str, ...] = (POSITIONAL_MEANS_NAME, PCA_MODEL_NAME)
 """The pair a provenance digest over a calibration directory hashes.
 
@@ -98,6 +106,69 @@ def load_positional_means(calib_dir: Path) -> F32 | None:
     means: F32 = np.load(path)[POSITIONAL_MEANS_KEY].astype(np.float32)
     logger.info(f"positional_means {means.shape}")
     return means
+
+
+def load_position_counts(calib_dir: Path) -> I64 | None:
+    """How many states each position's mean was taken over, or ``None``.
+
+    ``None`` when the directory holds no positional means or the archive carries no
+    counts; :func:`positions_calibrated` then reads coverage off the means alone.
+    """
+    path = Path(calib_dir) / POSITIONAL_MEANS_NAME
+    if not path.is_file():
+        return None
+    with np.load(path) as archive:
+        if POSITION_COUNTS_KEY not in archive.files:
+            return None
+        counts: I64 = archive[POSITION_COUNTS_KEY].astype(np.int64)
+    return counts
+
+
+def positions_calibrated(positional_means: F32, counts: I64 | None = None) -> int:
+    """How many leading positions the means actually correct: the last filled row, plus one.
+
+    The width of the table is not its coverage. A fit allocates rows for every
+    position it might reach and leaves a row it did not reach, or reached too few
+    times, at exact zeros, so subtracting it corrects nothing. A position past the
+    last filled row is therefore uncalibrated whatever the table's width says, and
+    a pass that treats it as calibrated computes an uncorrected feature under the
+    corrected feature's name.
+
+    A position is filled when every layer's row is. With ``counts`` (the
+    ``pos_counts`` array a fit writes, indexed ``[layer, position]``) that means a
+    count above :data:`POSITION_COUNT_FLOOR`, the rule the fit writes rows by;
+    without it, a row that is not all zeros. Interior gaps do not shorten coverage;
+    only the tail does.
+
+    Returns
+    -------
+    int
+        The index of the last filled position plus one, or 0 when no row is filled.
+        A position ``p`` is covered exactly when ``p < positions_calibrated(...)``.
+
+    Raises
+    ------
+    ValueError
+        When the means are not indexed ``[layer, position, unit]``, or when
+        ``counts`` does not have the means' ``[layer, position]`` shape.
+    """
+    means = np.asarray(positional_means)
+    if means.ndim != 3:
+        raise ValueError(
+            f"positional means of shape {means.shape} are not indexed [layer, position, unit]"
+        )
+    if counts is not None:
+        table = np.asarray(counts)
+        if table.shape != means.shape[:2]:
+            raise ValueError(
+                f"position counts of shape {table.shape} do not match positional means "
+                f"of shape {means.shape}; they are indexed [layer, position]"
+            )
+        filled = (table > POSITION_COUNT_FLOOR).all(axis=0)
+    else:
+        filled = np.any(means != 0, axis=2).all(axis=0)
+    rows = np.flatnonzero(filled)
+    return int(rows[-1]) + 1 if rows.size else 0
 
 
 def load_pca_model(path: Path) -> tuple[F32, F32]:

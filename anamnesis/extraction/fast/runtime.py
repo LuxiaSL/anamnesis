@@ -33,7 +33,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from anamnesis.config import ModelConfig, ModelPreset
-from anamnesis.extraction.calibration import CALIBRATION_ARTIFACT_NAMES, load_calibration
+from anamnesis.extraction.calibration import (
+    CALIBRATION_ARTIFACT_NAMES,
+    load_calibration,
+    load_position_counts,
+    positions_calibrated,
+)
 from anamnesis.extraction.replay_config import native_replay_configs
 from anamnesis.provenance import digest_of_shas, file_sha
 
@@ -161,8 +166,10 @@ def resolve_lane_spans(
     gen_ids
         Which of them to replay, in the order the caller means to run them.
     positions_calibrated
-        Width of the positional-means table: the number of positions calibration
-        covers.
+        How many leading positions the positional means fill, from
+        :func:`anamnesis.extraction.calibration.positions_calibrated`. The table's
+        width is not this number: rows past the last filled one are zeros and
+        correct nothing.
 
     Raises
     ------
@@ -266,7 +273,11 @@ def resolve_fast_lane(
     }
     calibration_sha256 = digest_of_shas(calibration_files)
     spans = resolve_lane_spans(
-        entries, gen_ids, positions_calibrated=int(positional_means.shape[1])
+        entries,
+        gen_ids,
+        positions_calibrated=positions_calibrated(
+            positional_means, load_position_counts(calib_dir)
+        ),
     )
     model_files = weight_file_digests(model_path) if require_local_weights else None
 
