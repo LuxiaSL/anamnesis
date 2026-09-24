@@ -3,15 +3,23 @@
 The per-layer basis is fitted over states sampled from the calibration's own
 sequences. Whether its fiftieth component means anything depends on how many
 samples stand behind it, and that is measurable: fit the basis twice over disjoint
-halves of the prompts, against the same positional means, and compare the two
-layer by layer with :func:`anamnesis.extraction.calibration_fit.subspace_agreement`.
-Components the halves agree on are determined; past the point they diverge, a
-component is a property of the sample rather than of the model.
+halves of the samples, against the same positional means, and count the directions
+the two share (:func:`anamnesis.extraction.calibration_fit.principal_cosines` at or
+above a threshold). Those are determined; the rest are properties of the sample
+rather than of the model. The receipt also carries the leading-run curve
+(:func:`anamnesis.extraction.calibration_fit.subspace_agreement`), which says how far
+the components' *order* is stable — less than what is determined, because
+components of nearly equal variance trade ranks between fits.
 
 The sequences are the ones the calibration was fitted over — the replay manifest
-written beside its basis — so nothing is sampled here: each is replayed once and
-split by prompt index, even against odd. Half the samples understates what the whole
-set determines, so the count reported is a floor.
+written beside its basis — so nothing is sampled here: each is replayed once and split
+one of two ways. ``--split prompts`` puts even-indexed prompts in one half and odd in
+the other, so the halves differ in content and agreement measures what the ruler
+determines. ``--split positions`` gives both halves every prompt, alternating its
+sampled positions, so the halves share their content and agreement measures sampling
+noise alone. A basis that agrees under the second and not the first is a property of
+which prompts it was fitted over. Half the samples understates what the whole set
+determines, so the counts reported are floors.
 
 Writes a JSON receipt with, per layer, the agreement curve and the determined count
 at the stated threshold.
@@ -48,6 +56,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--steps-per-prompt", type=int, default=calibration_fit.BASIS_STEPS_PER_PROMPT)
     p.add_argument("--n-components", type=int, default=None, help="Default: the extraction default")
     p.add_argument("--threshold", type=float, default=0.9)
+    p.add_argument("--split", choices=("prompts", "positions"), default="prompts")
     p.add_argument("--json", type=Path, required=True, help="Where the receipt is written")
     return p
 
@@ -78,11 +87,16 @@ def main(argv: list[str] | None = None) -> None:
         for index, prompt in zip(
             manifest.gen_ids(), calibration_fit.replay_prompt_states(loaded, manifest)
         ):
-            halves[index % 2].extend(
-                calibration_fit.basis_samples(
-                    prompt, preset.pca_layers, False, args.steps_per_prompt
-                )
+            samples = calibration_fit.basis_samples(
+                prompt, preset.pca_layers, False, args.steps_per_prompt
             )
+            if args.split == "prompts":
+                halves[index % 2].extend(samples)
+            else:
+                positions = sorted({absolute for _, absolute, _ in samples})
+                side = {absolute: rank % 2 for rank, absolute in enumerate(positions)}
+                for sample in samples:
+                    halves[side[sample[1]]].append(sample)
     finally:
         loaded.remove_hooks()
 
@@ -95,13 +109,17 @@ def main(argv: list[str] | None = None) -> None:
         curve = calibration_fit.subspace_agreement(
             fits[0][layer]["components"], fits[1][layer]["components"]
         )
+        cosines = calibration_fit.principal_cosines(
+            fits[0][layer]["components"], fits[1][layer]["components"]
+        )
         layers[int(layer)] = dict(
-            determined=calibration_fit.determined_components(curve, args.threshold),
+            determined=calibration_fit.determined_components(cosines, args.threshold),
             agreement=[round(float(value), 6) for value in curve],
+            principal_cosines=[round(float(value), 6) for value in cosines],
         )
         logger.info(
-            f"layer {layer}: {layers[int(layer)]['determined']} of {len(curve)} components "
-            f"agree at >= {args.threshold}"
+            f"layer {layer}: the halves share {layers[int(layer)]['determined']} of "
+            f"{len(curve)} directions at cosine >= {args.threshold}"
         )
     receipt = dict(
         model=args.model,
@@ -114,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
         },
         n_components=n_components,
         threshold=args.threshold,
-        split="prompt index, even against odd",
+        split=args.split,
         layers=layers,
     )
     args.json.parent.mkdir(parents=True, exist_ok=True)

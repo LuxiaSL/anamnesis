@@ -29,6 +29,7 @@ from anamnesis.extraction.calibration_fit import (
     basis_samples,
     basis_steps,
     determined_components,
+    principal_cosines,
     subspace_agreement,
 )
 from anamnesis.scripts import calibration_stability
@@ -80,7 +81,7 @@ def _orthonormal(rows: int, width: int, seed: int) -> np.ndarray:
 def test_a_basis_agrees_with_itself_everywhere() -> None:
     basis = _orthonormal(10, 40, 1)
     np.testing.assert_allclose(subspace_agreement(basis, basis), 1.0, atol=1e-6)
-    assert determined_components(subspace_agreement(basis, basis)) == 10
+    assert determined_components(principal_cosines(basis, basis)) == 10
 
 
 def test_agreement_holds_through_a_shared_head_and_breaks_at_the_first_foreign_direction() -> None:
@@ -92,7 +93,7 @@ def test_agreement_holds_through_a_shared_head_and_breaks_at_the_first_foreign_d
     curve = subspace_agreement(shared, other)
     np.testing.assert_allclose(curve[:6], 1.0, atol=1e-5)
     assert curve[6] < 0.9
-    assert determined_components(curve) == 6
+    assert determined_components(principal_cosines(shared, other)) == 6
 
 
 def test_a_sign_flip_or_a_rotation_inside_the_head_is_agreement() -> None:
@@ -102,10 +103,21 @@ def test_a_sign_flip_or_a_rotation_inside_the_head_is_agreement() -> None:
     rotated = basis.copy()
     c, s = np.cos(0.7), np.sin(0.7)
     rotated[[1, 2]] = np.array([[c, s], [-s, c]], dtype=np.float32) @ basis[[1, 2]]
-    assert determined_components(subspace_agreement(basis, flipped)) == 8
+    assert determined_components(principal_cosines(basis, flipped)) == 8
     curve = subspace_agreement(basis, rotated)
     assert curve[2] > 0.999, "the first three span the same subspace"
     assert curve[1] < 0.9, "the second direction alone differs"
+
+
+def test_a_direction_that_changed_rank_is_still_determined() -> None:
+    """Two components of nearly equal variance trade ranks between fits: the ordered
+    curve drops at the swap, and the count of shared directions does not."""
+    basis = _orthonormal(6, 20, 5)
+    swapped = basis[[0, 2, 1, 3, 4, 5]]
+    curve = subspace_agreement(basis, swapped)
+    assert curve[0] > 0.999 and curve[1] < 0.1 and curve[2] > 0.999
+    np.testing.assert_allclose(principal_cosines(basis, swapped), 1.0, atol=1e-6)
+    assert determined_components(principal_cosines(basis, swapped)) == 6
 
 
 def test_bases_of_different_widths_are_refused() -> None:
@@ -151,4 +163,15 @@ def test_the_stability_command_splits_the_banked_sequences_and_writes_a_receipt(
         assert all(count > 0 for count in halves), layer
     for entry in receipt["layers"].values():
         assert len(entry["agreement"]) == 4
+        assert len(entry["principal_cosines"]) == 4
         assert 0 <= entry["determined"] <= 4
+    assert receipt["split"] == "prompts"
+
+    by_position = tmp_path / "positions.json"
+    calibration_stability.main(
+        ["--model", "tiny-llama", "--model-path", "unused", "--calib-dir", str(calib),
+         "--n-components", "4", "--split", "positions", "--json", str(by_position)]
+    )
+    halves = json.loads(by_position.read_text())["samples_per_half"]
+    for layer, (first, second) in halves.items():
+        assert abs(first - second) <= len(RULER), f"layer {layer}: positions alternate"

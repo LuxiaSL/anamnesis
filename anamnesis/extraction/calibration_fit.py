@@ -605,9 +605,12 @@ def subspace_agreement(components_a: F32, components_b: F32) -> NDArray[np.float
     Entry ``k - 1`` is the smallest principal-angle cosine between the spans of the
     first ``k`` components of each basis: 1 when the two top-``k`` subspaces coincide,
     near 0 when one of them holds a direction the other lacks. Components are rows and
-    orthonormal, as a PCA returns them. Comparing two fits over disjoint halves of a
-    prompt set reads how many components the samples actually determine — the leading
-    run of values near 1 — and at half the samples it errs short.
+    orthonormal, as a PCA returns them.
+
+    This is strict at every cut: two components with nearly equal variance trade
+    ranks between fits, and the curve drops at that ``k`` even when both bases span the
+    same directions. It says where a basis's *ordering* is stable, which is less than
+    what it determines — :func:`determined_components` counts that instead.
 
     Raises
     ------
@@ -624,10 +627,27 @@ def subspace_agreement(components_a: F32, components_b: F32) -> NDArray[np.float
     )
 
 
-def determined_components(agreement: NDArray[np.float64], threshold: float = 0.9) -> int:
-    """The length of the leading run of :func:`subspace_agreement` at or above ``threshold``."""
-    below = np.flatnonzero(np.asarray(agreement) < threshold)
-    return int(below[0]) if below.size else int(len(agreement))
+def principal_cosines(components_a: F32, components_b: F32) -> NDArray[np.float64]:
+    """The principal-angle cosines between the two full bases, largest first.
+
+    Where :func:`subspace_agreement` asks whether each leading run is shared in order,
+    this asks which directions the two bases share at all: a direction that has moved
+    to another rank still counts here.
+    """
+    a = np.asarray(components_a, dtype=np.float64)
+    b = np.asarray(components_b, dtype=np.float64)
+    if a.shape[1] != b.shape[1]:
+        raise ValueError(f"bases of width {a.shape[1]} and {b.shape[1]} cannot be compared")
+    return np.linalg.svd(a @ b.T, compute_uv=False)
+
+
+def determined_components(cosines: NDArray[np.float64], threshold: float = 0.9) -> int:
+    """How many directions two bases share: the :func:`principal_cosines` at or above ``threshold``.
+
+    Over two fits to disjoint halves of a calibration's samples, this is how many
+    components the samples determine — a floor, since each half has half the samples.
+    """
+    return int(np.count_nonzero(np.asarray(cosines) >= threshold))
 
 
 def fit_calibration(
