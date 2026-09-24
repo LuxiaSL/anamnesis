@@ -147,6 +147,37 @@ the code: floating-point reduction order differs across BLAS builds and thread c
 `anamnesis/extraction/equivalence/` holds the evidence checks and
 `anamnesis/scripts/qualify_box.py` is how an operator qualifies their own box.
 
+## What runs on which model
+
+Two paths compute a signature, and they do not accept the same models.
+
+| | Hook path — the numeric anchor | Fast lane |
+|---|---|---|
+| Commands | `run_extraction` (generate and capture), `run_replay` (teacher-force banked ids) | `run_gpu_replay`, `qualify_box`, and in process `prepare_fast_lane` + `harvest_loaded` |
+| Architectures | Dense decoders whose layers sit at `model.model.layers` with k/q/v/o/gate projections (the Llama, Qwen-2 and OLMo-2 families); Gemma-3, whose text decoder nests inside a multimodal wrapper; DeepSeek-V2, whose latent attention and routed experts get their own capture surface | Dense Llama only. Any other `model_type` is refused by `check_loaded_model` once loaded |
+| Placement | Whatever device map the preset's configuration gives | One device holding every parameter |
+| Attention kernel | Eager, which returns weights; a fused kernel is refused at the preset | Eager |
+| How a box checks it | `onboard_model` | `qualify_box`, against the anchor on the same box |
+
+Of the shipped presets, `3b` and `8b` run on both paths; `olmo2-7b`, `qwen-7b`,
+`gemma3-27b` and `dsv2-lite` run on the hook path. A row added through `ANAMNESIS_MODELS`
+runs on whichever path its architecture meets.
+
+Bringing a model up, in order:
+
+1. **A registry row**, then `onboard_model`: the layer plan, the hook targets and the
+   attention kernel, each refused by name if wrong.
+2. **A calibration**, `run_calibration`. `--reach-from` names the replay manifest of the
+   runs the calibration will correct and requires the last position they read, so a
+   calibration never stops short of its corpus; one that would is refused before it is
+   written. The directory it writes holds the positional means, a per-layer basis, the
+   sequences the fit was taken over and a build receipt.
+3. **What the basis determines**, `calibration_stability`: how many directions two fits
+   over disjoint halves of those sequences share. Components past that count are
+   properties of the sample, not of the model.
+4. **The fast lane**, for a dense Llama: `qualify_box` on the machine that will run it.
+5. **Signatures**, by either path.
+
 ## Fail closed
 
 This is the habit most worth taking from the repository, and the quickstart in

@@ -88,10 +88,10 @@ def test_a_calibration_asks_for_hidden_states_only() -> None:
     assert settings.output_attentions is False and settings.output_logits is False
 
 
-def test_the_shipped_ruler_is_fifty_distinct_prompts() -> None:
+def test_the_shipped_ruler_is_two_hundred_distinct_prompts() -> None:
     """The count and the distinctness; the bytes are pinned in test_prompt_sets.py."""
     prompts = calibration_prompts()
-    assert len(prompts) == 50 and len(set(prompts)) == 50
+    assert len(prompts) == 200 and len(set(prompts)) == 200
     assert prompts_path(CALIBRATION_PROMPT_SET).is_file()
 
 
