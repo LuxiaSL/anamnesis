@@ -43,9 +43,11 @@ from numpy.typing import NDArray
 from anamnesis.config import ModelConfig, ModelPreset, resolve_preset
 from anamnesis.extraction.calibration import (
     CALIBRATION_ARTIFACT_NAMES,
-    load_calibration,
     load_position_counts,
+    load_positional_means,
     positions_calibrated,
+    read_pca_basis,
+    resolve_pca_model,
 )
 from anamnesis.extraction.replay_config import native_replay_configs
 from anamnesis.provenance import digest_of_shas, file_sha
@@ -304,17 +306,26 @@ class LaneCalibration:
 def read_lane_calibration(preset: ModelPreset, calib_dir: Path) -> LaneCalibration:
     """The preset's native battery and a complete calibration, digested.
 
+    The basis is read by :func:`anamnesis.extraction.calibration.read_pca_basis`, so
+    either shape the lane projects onto is accepted: the pooled basis the banked
+    calibrations hold, and the per-layer basis
+    :mod:`anamnesis.extraction.calibration_fit` writes by default.
+
     Raises
     ------
     ValueError
-        When the directory lacks the positional means or the residual basis. A lane
-        with either missing would correct its features against nothing and emit
-        them under the corrected names.
+        When the directory lacks the positional means or the residual basis, or the
+        basis stores no mean to centre on. A lane with any of them missing would
+        correct its features against nothing and emit them under the corrected names.
     """
     extraction, families = native_replay_configs(preset)
-    positional_means, pca_components, pca_mean = load_calibration(calib_dir, True)
-    if positional_means is None or pca_components is None or pca_mean is None:
+    positional_means = load_positional_means(Path(calib_dir))
+    pca_path = resolve_pca_model(Path(calib_dir))
+    if positional_means is None or pca_path is None:
         raise ValueError("complete positional/PCA calibration required")
+    pca_components, pca_mean = read_pca_basis(pca_path).float32_arrays()
+    if pca_mean is None:
+        raise ValueError(f"{pca_path} holds a basis with no mean to centre on")
     calibration_files = {
         name: file_sha(Path(calib_dir) / name) for name in CALIBRATION_ARTIFACT_NAMES
     }
