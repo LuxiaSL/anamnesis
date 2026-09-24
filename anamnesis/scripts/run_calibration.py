@@ -15,6 +15,15 @@ silently invalidates every signature computed against it:
   A directory's basis is also the one every consumer of that directory projects
   onto, so a fit of the other shape landing on it changes features without
   changing any argument.
+
+``--required-through`` is a third refusal, on the artifacts this invocation is
+about to write: a fit whose filled positions stop short of it writes nothing. A
+width that cannot hold the position is refused before a model is loaded; a fit that
+does not reach it is refused after generation, since only then is it known how far
+the generations went. ``--suppress-eos`` and ``--max-positions`` are how a
+calibration is made to reach late positions. Every write leaves a build receipt
+beside the basis, ``<basis stem>.build.json``, recording the settings, the coverage
+reached and the digests of both artifacts.
 """
 
 from __future__ import annotations
@@ -63,6 +72,25 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Replace an existing basis at the target filename",
     )
+    p.add_argument(
+        "--suppress-eos",
+        action="store_true",
+        help="Generate past the stop tokens to the full token budget, so positions past "
+             "where answers end get data",
+    )
+    p.add_argument(
+        "--max-positions",
+        type=int,
+        default=None,
+        help=f"Width of the positional-means table; default the token budget plus "
+             f"{calibration_fit.PROMPT_HEADROOM}",
+    )
+    p.add_argument(
+        "--required-through",
+        type=int,
+        default=None,
+        help="Refuse to write a calibration whose filled positions do not reach this one",
+    )
     p.add_argument("--dry-run", action="store_true", help="Print the configuration and stop")
     return p
 
@@ -79,6 +107,13 @@ def resolve_paths(args: argparse.Namespace) -> tuple[ModelPreset, Path, Path]:
         out_dir / POSITIONAL_MEANS_NAME,
         out_dir / (args.pca_name or PCA_MODEL_NAME),
     )
+
+
+def table_width(args: argparse.Namespace, settings: GenerationConfig) -> int:
+    """Width of the means table this invocation allocates."""
+    if args.max_positions is not None:
+        return int(args.max_positions)
+    return settings.max_new_tokens + calibration_fit.PROMPT_HEADROOM
 
 
 def describe(
@@ -106,6 +141,10 @@ def describe(
         f"  position floor: a mean over more than "
         f"{calibration_fit.POSITION_COUNT_FLOOR} states"
     )
+    print(f"  stop tokens honoured: {'no, suppressed' if args.suppress_eos else 'yes'}")
+    print(f"  means table: {table_width(args, settings)} positions")
+    if args.required_through is not None:
+        print(f"  required through position: {args.required_through}")
     print(f"  basis fit: {'pooled, uncorrected' if args.pooled else 'per layer, corrected'}")
     reuse = means_path.exists() and not args.refit_means
     print(f"  positional means -> {'reused from' if reuse else 'written to'} {means_path}")
@@ -125,6 +164,13 @@ def main(argv: list[str] | None = None) -> None:
     settings = calibration_fit.generation_settings(
         preset, max_new_tokens=args.max_new_tokens
     )
+
+    width = table_width(args, settings)
+    if args.required_through is not None and not 0 <= args.required_through < width:
+        raise SystemExit(
+            f"position {args.required_through} is required, and the means table is "
+            f"{width} positions wide; raise --max-positions past it"
+        )
 
     if args.dry_run:
         describe(args, preset, settings, prompts, means_path, basis_path)
@@ -151,12 +197,15 @@ def main(argv: list[str] | None = None) -> None:
     loaded.disable_hooks()  # calibration reads hidden states from the forward, not from hooks
     try:
         fit = calibration_fit.fit_calibration(
-            calibration_fit.generate_prompt_states(loaded, prompts, settings),
+            calibration_fit.generate_prompt_states(
+                loaded, prompts, settings, suppress_eos=args.suppress_eos
+            ),
             preset=preset,
             settings=settings,
             n_components=n_components,
             pooled=args.pooled,
             existing_means=existing_means,
+            max_positions=args.max_positions,
         )
     except calibration_fit.CalibrationFitError as exc:
         raise SystemExit(str(exc)) from exc
@@ -167,7 +216,28 @@ def main(argv: list[str] | None = None) -> None:
             torch.cuda.empty_cache()
         gc.collect()
 
-    calibration_fit.write_calibration(fit, means_path, basis_path)
+    try:
+        calibration_fit.write_calibration(
+            fit, means_path, basis_path, required_through=args.required_through
+        )
+    except calibration_fit.CoverageShortfall as exc:
+        raise SystemExit(str(exc)) from exc
+    calibration_fit.write_build_receipt(
+        calibration_fit.build_receipt(
+            fit,
+            model=args.model,
+            model_id=config.model_id,
+            prompts=prompts,
+            settings=settings,
+            suppress_eos=args.suppress_eos,
+            pooled=args.pooled,
+            n_components=n_components,
+            means_path=means_path,
+            basis_path=basis_path,
+            required_through=args.required_through,
+        ),
+        basis_path,
+    )
     logger.info("calibration complete")
 
 
