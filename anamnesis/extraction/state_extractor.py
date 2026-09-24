@@ -319,11 +319,27 @@ def _correct_hidden_state(
     abs_position: int,
     positional_means: F32 | None,
 ) -> F32:
-    """Subtract positional mean from a hidden state vector."""
+    """Subtract the positional mean at ``(layer_idx, abs_position)`` from ``h``.
+
+    A position past the table is corrected by its last row. A negative position is
+    corrected by row 0: numpy would otherwise read it from the end of the table,
+    which is the mean of a position the token never occupied. A layer outside the
+    table is refused rather than wrapped the same way, since a negative layer index
+    would subtract the last layer's mean from another layer's state.
+
+    Raises
+    ------
+    IndexError
+        When ``layer_idx`` is outside ``[0, positional_means.shape[0])``.
+    """
     if positional_means is None:
         return h
-    max_pos = positional_means.shape[1]
-    pos = min(abs_position, max_pos - 1)
+    n_layers, max_pos = positional_means.shape[0], positional_means.shape[1]
+    if not 0 <= layer_idx < n_layers:
+        raise IndexError(
+            f"layer index {layer_idx} is outside the positional means' {n_layers} layers"
+        )
+    pos = min(max(abs_position, 0), max_pos - 1)
     return h - positional_means[layer_idx, pos]
 
 
