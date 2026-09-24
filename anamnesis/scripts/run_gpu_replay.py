@@ -1,9 +1,12 @@
 """Replay a banked run through the fast lane and write its signatures.
 
-**What this entry point covers.** Dense 3B/8B Llama, one full teacher-forced
-pass per span, the complete probe-free battery, on a single CUDA device. That is
-the configuration the lane tests and the equivalence suite exercise, and it is
-the configuration this script accepts.
+**What this entry point covers.** A dense Llama named by any registry preset
+(``--model`` offers every key :func:`anamnesis.config.preset_names` holds, so a row
+added through ``ANAMNESIS_MODELS`` is accepted as soon as it is readable), one full
+teacher-forced pass per span, the complete probe-free battery, on a single device.
+That is the configuration the lane tests and the equivalence suite exercise. A
+checkpoint whose architecture, depth or widths are not what the preset declares is
+refused once loaded, before any span runs.
 
 **What it does not cover, and refuses rather than approximates.** Adapters,
 activation interventions and batched submission each change what a forward pass
@@ -29,14 +32,20 @@ import argparse
 import json
 from pathlib import Path
 import time
+from typing import Sequence
 
-from anamnesis.extraction.fast.runtime import require_lane_arithmetic, resolve_fast_lane
+from anamnesis.config import preset_names
+from anamnesis.extraction.fast.runtime import (
+    DEFAULT_DEVICE,
+    require_lane_arithmetic,
+    resolve_fast_lane,
+)
 from anamnesis.provenance import file_sha
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(__doc__)
-    p.add_argument("--model", choices=("3b", "8b"), required=True)
+    p.add_argument("--model", choices=preset_names(), required=True)
     p.add_argument("--model-path", required=True)
     p.add_argument("--calib-dir", type=Path, required=True)
     p.add_argument("--manifest", type=Path, required=True)
@@ -51,6 +60,11 @@ def parser() -> argparse.ArgumentParser:
         "--metadata",
         type=Path,
         help="Source generation metadata; defaults to metadata.json beside manifest when present",
+    )
+    p.add_argument(
+        "--device",
+        default=DEFAULT_DEVICE,
+        help="Device the lane and the model run on; every row is about this device",
     )
     return p
 
@@ -87,8 +101,13 @@ def select_ids(entries: dict, requested: list[int] | None) -> list[int]:
     return ids
 
 
-def main():
-    args = parser().parse_args()
+def main(argv: Sequence[str] | None = None) -> None:
+    """Replay the selected generations and bank their signatures.
+
+    ``argv`` is the argument list without the program name; ``None`` reads the
+    process's own command line.
+    """
+    args = parser().parse_args(argv)
     if args.output.exists():
         raise FileExistsError(args.output)
     require_lane_arithmetic()
@@ -111,6 +130,7 @@ def main():
         calib_dir=args.calib_dir,
         entries=entries,
         gen_ids=ids,
+        device=args.device,
         require_local_weights=True,
     )
     lane, loaded = runtime.lane, runtime.loaded
@@ -121,6 +141,7 @@ def main():
         manifest_sha256=file_sha(args.manifest),
         calibration_files=runtime.calibration_files,
         model_path=args.model_path,
+        device=args.device,
         model_files_sha256=runtime.model_files,
         runner_sha256=file_sha(Path(__file__)),
         configuration_source_sha256=file_sha(
@@ -147,12 +168,17 @@ def main():
     (args.output / "deployment.json").write_text(
         json.dumps(provenance, indent=2) + "\n"
     )
+    # Kernel launches return before the kernels finish, so a CUDA timing without a
+    # barrier on each side measures the launch rather than the replay.
+    on_cuda = torch.device(args.device).type == "cuda"
     for span in runtime.spans:
         i = span.gen_id
-        torch.cuda.synchronize()
+        if on_cuda:
+            torch.cuda.synchronize()
         started = time.perf_counter()
         result = lane.replay_span(loaded, span.input_ids, span.prompt_length, span.end)
-        torch.cuda.synchronize()
+        if on_cuda:
+            torch.cuda.synchronize()
         elapsed = time.perf_counter() - started
         converted = ExtractionResult(
             result.features,

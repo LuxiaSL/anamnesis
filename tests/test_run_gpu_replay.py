@@ -1,9 +1,9 @@
 """The replay CLI's qualification boundary, asserted on the argument parser.
 
-`run_gpu_replay.py` is qualified for one configuration: dense 3B/8B Llama, one full
-teacher-forced pass per span, the complete battery, one device. That is what the lane
-tests and the equivalence suite cover, so it is what the entry point accepts without
-ceremony — a covered command line runs.
+`run_gpu_replay.py` is qualified for one configuration: a dense Llama named by a
+registry preset, one full teacher-forced pass per span, the complete battery, one
+device. That is what the lane tests and the equivalence suite cover, so it is what the
+entry point accepts without ceremony — a covered command line runs.
 
 The boundary is the other half, and it is enforced by absence: adapters, activation
 interventions and batched submission each change what a forward pass is, and none of

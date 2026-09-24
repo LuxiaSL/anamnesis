@@ -32,6 +32,9 @@ gains it on both paths or the schema check fails:
   and capture surface a lane pass runs against, resolved once for every entry
   point that runs one. A lane is only worth qualifying if the configuration
   measured is the configuration banked.
+* :mod:`~anamnesis.extraction.fast.harvest` — one span against a model the
+  caller keeps resident, in process: the feature vector, the lane's receipt and,
+  when asked, the per-position logit series, with nothing written to disk.
 
 This module imports none of them: addressing the layout arithmetic should not
 pull in torch.
