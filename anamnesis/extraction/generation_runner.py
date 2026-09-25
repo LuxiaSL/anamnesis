@@ -97,8 +97,8 @@ def run_single_generation(
     spec: GenerationSpec,
     config: ExperimentConfig,
     positional_means: F32 | None = None,
-    pca_components: F32 | None = None,
-    pca_mean: F32 | None = None,
+    pca_components: F32 | dict[int, F32] | None = None,
+    pca_mean: F32 | dict[int, F32] | None = None,
     save_raw: bool = False,
     raw_output_dir: Path | None = None,
 ) -> tuple[ExtractionResult, dict[str, Any]]:
@@ -677,8 +677,8 @@ def run_experiment(
     loaded: LoadedModel,
     config: ExperimentConfig,
     positional_means: F32 | None = None,
-    pca_components: F32 | None = None,
-    pca_mean: F32 | None = None,
+    pca_components: F32 | dict[int, F32] | None = None,
+    pca_mean: F32 | dict[int, F32] | None = None,
     specs: list[GenerationSpec] | None = None,
     save_raw: bool = False,
 ) -> list[dict[str, Any]]:

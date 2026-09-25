@@ -212,7 +212,7 @@ def _source_metadata(run_dir: Path) -> dict[int, dict[str, Any]]:
 
 def replay_cell(
     surface: ReplaySurface,
-    calibration: tuple[F32 | None, F32 | None, F32 | None],
+    calibration: tuple[F32 | None, F32 | dict[int, F32] | None, F32 | dict[int, F32] | None],
     run_dir: Path,
     manifest_path: Path,
     *,
@@ -247,6 +247,7 @@ def replay_cell(
         the message its exception carried. A caller turns that into a refusal
         through :func:`cell_shortfall`; nothing here decides the pass's fate.
     """
+    from anamnesis.extraction.calibration import require_positions_covered
     from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data, save_features
     from anamnesis.extraction.raw_saver import save_raw_tensors_all_layer
     from anamnesis.extraction.replay.extract import replay_extract
@@ -285,6 +286,9 @@ def replay_cell(
             entry = entries[str(gen_id)]
             input_ids = entry["input_ids"]
             prompt_length = int(entry["prompt_length"])
+            require_positions_covered(
+                positional_means, len(input_ids) - 2, what=f"generation {gen_id}"
+            )
             if write_handle is not None:
                 write_handle.spec.start_pos = prompt_length
                 write_handle.reset_stats()

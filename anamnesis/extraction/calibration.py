@@ -19,12 +19,16 @@ the one reader of all three: a plain mapping with ``components`` and ``mean`` ke
 a pickled scikit-learn estimator with ``components_`` and ``mean_`` attributes, and
 the per-layer basis a corrected fit writes, a mapping from layer index to one such
 mapping. Every other reader here and elsewhere in the package goes through it, so a
-shape is recognised the same way wherever a basis is read. What differs between
-callers is which shapes they can *use*. :func:`load_pca_model` and
-:func:`load_calibration` project onto one basis, so they refuse the per-layer shape
-by name rather than reducing it to whichever layer a key happened to hold; the
-offline recompute over banked tensors in
-:mod:`anamnesis.extraction.feature_pipeline` takes the per-layer shape as well.
+shape is recognised the same way wherever a basis is read. Every extraction path —
+the hook path, the fast lane, the offline recompute — projects onto either the
+pooled or the per-layer shape, so :func:`load_calibration` returns whichever the
+file holds. :func:`load_pca_model` is the one reader that promises a single basis,
+and it refuses the per-layer shape by name rather than reducing it to whichever
+layer a key happened to hold.
+
+A calibration corrects only the positions its fit reached. :func:`require_positions_covered`
+is the refusal a pass makes before reading a position past them, since the correction
+there would subtract a row of zeros.
 
 Absence is returned, not raised, by :func:`load_positional_means` and
 :func:`load_calibration`. A caller that cannot proceed without a calibration says so
@@ -355,9 +359,8 @@ def load_pca_model(path: Path) -> tuple[F32, F32]:
     if basis.pooled is None:
         raise KeyError(
             f"{basis.path} holds a basis per layer, keyed {sorted(basis.per_layer)}, and this "
-            "reader projects onto one basis; the recompute path and the fast lane read the "
-            "per-layer shape, and run_calibration --pooled --refit-basis replaces it with the "
-            "pooled shape this reader takes"
+            "reader returns one basis; load_calibration returns either shape, and every "
+            "extraction path projects onto both"
         )
     if basis.pooled.mean is None:
         raise CalibrationMalformed(f"{basis.path} holds a basis with no mean to centre on")
@@ -367,36 +370,84 @@ def load_pca_model(path: Path) -> tuple[F32, F32]:
     )
 
 
+Basis = F32 | dict[int, F32]
+"""A residual basis as the extraction takes it: one array for every layer, or one per layer."""
+
+
 def load_calibration(
     calib_dir: Path, enable_pca: bool = True
-) -> tuple[F32 | None, F32 | None, F32 | None]:
+) -> tuple[F32 | None, Basis | None, Basis | None]:
     """Positional means and, when the residual PCA is on, its basis and mean.
 
     Returns the triple every feature-computing entry point takes: ``(positional
     means, PCA components, PCA mean)``, each of which is ``None`` when the
-    artifact is absent or, for the PCA pair, when it is switched off.
+    artifact is absent or, for the PCA pair, when it is switched off. The basis
+    comes back in the shape it is stored in — one pooled pair of arrays, or a
+    mapping from layer index to each layer's own — because every extraction path
+    projects onto either.
 
     The basis is resolved by :func:`resolve_pca_model`, so :data:`PCA_MODEL_NAME`
     wins over the banked spelling beside it when a directory holds both.
 
     Raises
     ------
-    KeyError, CalibrationMalformed
-        From :func:`load_pca_model`, when the resolved file holds a shape this
-        reader cannot project onto. A directory that holds no basis at all is the
-        ``None`` case; one that holds an unusable basis is a refusal, because a
-        pass that asked for corrected features would otherwise compute
-        uncorrected ones under their name.
+    CalibrationMalformed
+        When the resolved file holds none of the banked shapes, or a basis that
+        stores no mean. A directory that holds no basis at all is the ``None``
+        case; one that holds an unusable basis is a refusal, because a pass that
+        asked for corrected features would otherwise compute uncorrected ones
+        under their name.
     """
     directory = Path(calib_dir)
     positional_means = load_positional_means(directory)
-    components: F32 | None = None
-    mean: F32 | None = None
+    components: Basis | None = None
+    mean: Basis | None = None
     pca_path = resolve_pca_model(directory) if enable_pca else None
     if pca_path is not None:
-        components, mean = load_pca_model(pca_path)
-        logger.info(f"pca components {components.shape} from {pca_path.name}")
+        basis = read_pca_basis(pca_path)
+        components, mean = basis.float32_arrays()
+        if mean is None:
+            raise CalibrationMalformed(f"{pca_path} holds a basis with no mean to centre on")
+        logger.info(f"{basis.format} basis from {pca_path.name}")
     return positional_means, components, mean
+
+
+class PositionsUncovered(ValueError):
+    """A pass would read a position its positional means do not fill."""
+
+
+def require_positions_covered(
+    positional_means: F32 | None,
+    last_position: int,
+    *,
+    what: str,
+    counts: I64 | None = None,
+) -> None:
+    """Refuse a pass whose last read position is past the rows the means fill.
+
+    The correction clamps a position to the table's width, and a row no fit
+    reached is zeros, so a position past :func:`positions_calibrated` is
+    corrected by nothing and its feature is an uncorrected quantity under the
+    corrected name. Nothing to check when there are no means: that pass computes
+    uncorrected features and says so where the means are read.
+
+    Raises
+    ------
+    PositionsUncovered
+        Naming the position, the filled extent, and the calibration that would
+        cover it.
+    """
+    if positional_means is None:
+        return
+    reach = positions_calibrated(positional_means, counts)
+    if last_position >= reach:
+        raise PositionsUncovered(
+            f"{what} reads position {last_position}, and the positional means fill "
+            f"positions 0..{reach - 1}; past that the correction subtracts zeros and the "
+            f"feature is uncorrected under the corrected name. Calibrate with "
+            f"run_calibration --required-through {last_position}, or --reach-from the "
+            f"replay manifest of the runs it will correct"
+        )
 
 
 @dataclass(frozen=True)

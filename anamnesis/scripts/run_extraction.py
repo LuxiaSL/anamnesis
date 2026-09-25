@@ -141,8 +141,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.dry_run:
         return
 
-    from anamnesis.extraction.calibration import load_calibration
-    from anamnesis.extraction.generation_runner import run_experiment
+    from anamnesis.extraction.calibration import (
+        PositionsUncovered,
+        load_calibration,
+        load_position_counts,
+        require_positions_covered,
+    )
+    from anamnesis.extraction.generation_runner import format_prompt, run_experiment
     from anamnesis.extraction.model_loader import load_model
 
     config.ensure_dirs()
@@ -162,6 +167,21 @@ def main(argv: list[str] | None = None) -> None:
             f"the checkpoint has {depth} decoder layers but the preset says "
             f"{config.model.num_layers}; the layer plan would index the wrong sites"
         )
+    # The last state a generation is read at is its prompt plus every generated token but
+    # the last. Refused here, before any sampling, rather than discovered in the features.
+    longest_prompt = max(
+        format_prompt(loaded, spec.system_prompt, spec.user_prompt)[1] for spec in specs
+    )
+    try:
+        require_positions_covered(
+            positional_means,
+            longest_prompt + config.generation.max_new_tokens - 2,
+            what=f"a {longest_prompt}-token prompt generating {config.generation.max_new_tokens} tokens",
+            counts=load_position_counts(config.calibration.positional_means_path.parent),
+        )
+    except PositionsUncovered as exc:
+        loaded.remove_hooks()
+        raise SystemExit(str(exc)) from exc
     try:
         metadata = run_experiment(
             loaded=loaded,
