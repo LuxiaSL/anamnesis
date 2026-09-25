@@ -65,10 +65,13 @@ its elapsed time as it finishes, so the pass is legible while it runs — but a 
 sits for ten minutes on one line is working, not hung.
 
 All eleven sections run. The command then **exits 3, not 0**, and that is the instrument
-working: the sections needing the `geometry` extra cannot measure intrinsic dimension
-without it, so they state that, three scorecard rows read `INSUFFICIENT_DATA` naming the
-reading they lack, and the pass refuses rather than reporting itself complete. Install
-that extra for a full pass, or `--skip` those sections to make the narrowing explicit.
+working. Two sections measure against something the `dev` install does not bring: the
+intrinsic-dimension section needs the `geometry` extra's estimators, and the semantic section
+measures content by sentence embeddings, which the `semantic` extra provides. Without them each
+section states what it lacks, three scorecard rows read `INSUFFICIENT_DATA` naming the reading
+they miss, and the pass refuses rather than reporting itself complete. Install
+`".[dev,geometry,semantic]"` for a full pass — the embedding model downloads on first use — or
+`--skip` those sections to make the narrowing explicit.
 Nothing is silently zero and nothing absent is scored — which is the single habit worth
 taking from this repository.
 
