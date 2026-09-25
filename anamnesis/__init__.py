@@ -24,6 +24,26 @@ one is imported for what it holds:
   refusal a command makes when it produced fewer units than it was asked for,
   which is how a partial corpus stops being reported as a complete one.
 
+The subpackages each open with a docstring that routes their own contents:
+
+* :mod:`anamnesis.extraction` — the write side: what a forward pass is read into,
+  the hook path and the fast lane that read it, and the replay that makes a
+  signature a fact about a span of text rather than about a generation.
+* :mod:`anamnesis.analysis` — the read side: the gauntlet's eleven standing
+  analyses, the battery's metrology, and the analyses that each answer one question.
+* :mod:`anamnesis.steering` — whether a direction in the residual stream can make a
+  pass run a given way: construction, screens, gates and readouts.
+* :mod:`anamnesis.judging` — the behavioural channel: blind forced choices and
+  ratings from a model provider, the one part that talks to one.
+* :mod:`anamnesis.orchestration` — which device a worker gets and how work is
+  partitioned; nothing in it computes a feature.
+* :mod:`anamnesis.scripts` — the command-line entry points, in the order a run moves
+  through them.
+
+One more module sits beside them. :mod:`anamnesis.synthetic_bank` writes a bank of
+the right shape drawn from a seed, so the read side runs before there is a model to
+run it on.
+
 The package directory also ships :mod:`anamnesis.config`'s run registry and the
 prompt-set data, so a checkout is enough to describe a run without reaching for
 a data store.

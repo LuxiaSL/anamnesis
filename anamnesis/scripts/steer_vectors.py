@@ -1,11 +1,12 @@
-"""Build, screen and gate a steering vector — the entry point for golden path 6.
+"""Build, screen and gate a steering vector: every leg from a contrast to a lever readout.
 
 The path is: contrast → vectors → screens → on-policy gate → lever readout →
 judge. This script is every leg up to the judge, one subcommand each, and it is a
 shim: it parses arguments and calls :mod:`anamnesis.steering`. Every decision
 about what a construction means lives in the package, so a different front end
 over the same capability cannot disagree with this one about the science. The
-judge leg is :mod:`anamnesis.judging`, which lands separately.
+judge leg is :mod:`anamnesis.judging`, driven by ``judge_2afc.py`` and
+``judge_likert.py``.
 
 ``sweep``
     Per-layer held-out Cohen's d between two banks of per-prompt mean residuals.

@@ -1,10 +1,10 @@
-"""The steering CLI: golden path 6's entry point, and the shim rule it obeys.
+"""The steering CLI: the path from a contrast to a lever readout, and the shim rule it obeys.
 
-A script may parse arguments and call into the package. It may not hold
-capability, because two front ends over one capability must not be able to
-disagree about the science. The structural check here is the one PR-6's shims
-test generalizes: this module defines no function another module would want to
-import, and every steering module the golden path names is reachable from it.
+A script may parse arguments and call into the package. It may not hold capability,
+because two front ends over one capability must not be able to disagree about the
+science. The structural check here is the one ``tests/test_scripts_are_shims.py``
+generalizes: this module defines no function another module would want to import,
+and every steering module the path names is reachable from it.
 
 ``sweep`` runs end to end on synthetic banks, which is what makes this a caller
 rather than a declaration. The legs that need a checkpoint are exercised through
@@ -34,7 +34,7 @@ def test_every_subcommand_is_reachable_and_dispatches() -> None:
 def test_the_cli_reaches_every_steering_module() -> None:
     """G4's reachability, asserted rather than inferred from the import graph.
 
-    Golden path 6 runs contrast → vectors → screens → on-policy gate → lever
+    The steering path runs contrast → vectors → screens → on-policy gate → lever
     readout → judge, and the first five legs are subcommands here, so all four
     steering modules have a caller on the path rather than only in a test.
     """
