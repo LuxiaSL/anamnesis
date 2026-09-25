@@ -11,9 +11,13 @@ named by ``ANAMNESIS_MODE_SETS`` is offered here the moment it is
 readable. ``--include-prompt-swap`` adds the confound condition — mode A's
 system prompt under a directive that forces mode B's execution — which is how a
 signature that tracked the instruction rather than the execution would be caught.
-``--save-raw`` banks the per-token tensors beside the vectors, which is what makes
-``run_recompute.py`` possible afterwards and is worth the disk on any run whose
-features are not final.
+The vector this pass writes is the four core blocks. The engineered families —
+residual trajectory, attention flow, gate features and the rest — are computed over
+banked tensors, not during generation: ``--save-raw`` banks the per-token tensors
+beside the vectors (in ``raw_tensors``), and ``run_recompute.py --raw-subdir
+raw_tensors --metadata-subdir signatures --out-subdir signatures_families`` writes
+the vector with the families added beside the one this pass wrote. That is worth the
+disk on any run whose features are not final.
 
 For a corpus large enough to want more than one device, generate and replay
 separately instead: ``run_gen_tokens.py`` banks the token ids and
@@ -142,18 +146,25 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     from anamnesis.extraction.calibration import (
+        CalibrationMissing,
         PositionsUncovered,
         load_calibration,
         load_position_counts,
+        require_positional_means,
         require_positions_covered,
     )
     from anamnesis.extraction.generation_runner import format_prompt, run_experiment
     from anamnesis.extraction.model_loader import load_model
 
     config.ensure_dirs()
+    calib_dir = config.calibration.positional_means_path.parent
     positional_means, pca_components, pca_mean = load_calibration(
-        config.calibration.positional_means_path.parent, enable_pca=not args.no_pca
+        calib_dir, enable_pca=not args.no_pca
     )
+    try:
+        require_positional_means(positional_means, calib_dir)
+    except CalibrationMissing as exc:
+        raise SystemExit(str(exc)) from exc
     loaded = load_model(
         config.model,
         sampled_layers=config.extraction.sampled_layers,

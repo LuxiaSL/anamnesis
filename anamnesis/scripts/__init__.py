@@ -93,4 +93,14 @@ reviewer reads for.
 
 from __future__ import annotations
 
+import logging
+
 __all__: tuple[str, ...] = ()
+
+QUIET_LOGGERS: tuple[str, ...] = ("httpx", "httpcore", "huggingface_hub", "urllib3", "filelock")
+"""Client libraries whose INFO lines are one per request. Every command here logs at
+INFO, which would otherwise print a line for each file a model load touches and bury
+the command's own progress; their warnings and errors still print."""
+
+for _name in QUIET_LOGGERS:
+    logging.getLogger(_name).setLevel(logging.WARNING)

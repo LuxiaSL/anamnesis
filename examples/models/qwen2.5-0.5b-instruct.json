@@ -1,0 +1,28 @@
+{
+  "description": "An example registry extension: one small, ungated checkpoint a CPU can run end to end. Name this file in ANAMNESIS_MODELS to add the row. The architecture fields are the checkpoint's own config.json; the layer plan scales the 8b row's depths to 24 layers; temperature and top_p are the checkpoint's generation_config.json.",
+  "presets": {
+    "qwen2.5-0.5b": {
+      "name": "qwen2.5-0.5b",
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "torch_dtype": "bfloat16",
+      "num_layers": 24,
+      "hidden_dim": 896,
+      "num_attention_heads": 14,
+      "num_kv_heads": 2,
+      "head_dim": 64,
+      "sampled_layers": [0, 6, 12, 15, 18, 21, 23],
+      "pca_layers": [6, 12, 15, 18, 21],
+      "trajectory_layers": [6, 12, 15, 18, 21],
+      "contrastive_layers": [6, 12, 15, 18, 21],
+      "early_layer_cutoff": 6,
+      "late_layer_cutoff": 18,
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "max_new_tokens": 512,
+      "eos_token_ids": [151645, 151643],
+      "calibration_root": "outputs",
+      "calibration_dir": "calibration/qwen2.5-0.5b",
+      "notes": "A dense decoder, so the hook path runs it and the fast lane, which reads dense Llama only, does not. The checkpoint's own sampler also applies a repetition penalty of 1.1 and top-k 20, which a registry row does not carry; a pass here samples without them."
+    }
+  }
+}

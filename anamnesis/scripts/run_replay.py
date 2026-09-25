@@ -266,18 +266,26 @@ def replay(args: argparse.Namespace) -> None:
     first one and leaving the rest unattempted.
     """
     from anamnesis.config import resolve_preset
-    from anamnesis.extraction.calibration import load_calibration
+    from anamnesis.extraction.calibration import (
+        CalibrationMissing,
+        load_calibration,
+        require_positional_means,
+    )
     from anamnesis.extraction.interventions import armed_interventions, resolve_injection
     from anamnesis.extraction.replay.cell import cell_shortfall, load_replay_model, replay_cell
     from anamnesis.shortfall import Shortfall, refuse_unless_complete
 
+    calibration = load_calibration(args.calib_dir, enable_pca=not args.no_pca)
+    try:
+        require_positional_means(calibration[0], args.calib_dir)
+    except CalibrationMissing as exc:
+        raise SystemExit(str(exc)) from exc
     surface = load_replay_model(
         resolve_preset(args.model),
         args.model_path,
         enable_pca=not args.no_pca,
         adapter_path=args.adapter_path,
     )
-    calibration = load_calibration(args.calib_dir, enable_pca=not args.no_pca)
 
     def run_one(
         run_dir: Path,

@@ -412,6 +412,26 @@ def load_calibration(
     return positional_means, components, mean
 
 
+def require_positional_means(positional_means: F32 | None, calib_dir: Path) -> F32:
+    """The means a command's features are corrected by, or a refusal naming how to get them.
+
+    Every corrected feature subtracts these means. A command that went on without them
+    would write uncorrected quantities under the corrected names, and nothing
+    downstream could tell, so a missing table stops the command rather than warning.
+
+    Raises
+    ------
+    CalibrationMissing
+        When ``positional_means`` is ``None``.
+    """
+    if positional_means is None:
+        raise CalibrationMissing(
+            f"no positional means in {calib_dir}; every corrected feature subtracts them, so "
+            f"calibrate this model first with run_calibration"
+        )
+    return positional_means
+
+
 class PositionsUncovered(ValueError):
     """A pass would read a position its positional means do not fill."""
 

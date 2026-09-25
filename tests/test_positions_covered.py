@@ -137,3 +137,39 @@ def test_extraction_refuses_before_sampling_when_its_budget_reaches_past_the_cal
         run_extraction.main(
             ["--model", "tiny-llama", "--run-name", "short", "--smoke-test", "--no-pca"]
         )
+
+
+# ── a pass with no calibration at all ─────────────────────────────────────────
+
+
+def test_no_means_is_a_refusal_naming_the_calibration_step(tmp_path: Path) -> None:
+    from anamnesis.extraction.calibration import CalibrationMissing, require_positional_means
+
+    with pytest.raises(CalibrationMissing, match="calibrate this model first with run_calibration"):
+        require_positional_means(None, tmp_path)
+    means = _means(3, 8, 4, filled=8)
+    assert require_positional_means(means, tmp_path) is means
+
+
+def test_extraction_without_a_calibration_refuses_before_loading_a_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Features computed with no means are uncorrected under the corrected names; the
+    command stops rather than warning and writing them."""
+    import json
+
+    from test_loaded_model_seam import TINY_ROW
+    from anamnesis.extraction import model_loader
+    from anamnesis.scripts import run_extraction
+
+    registry = tmp_path / "models.json"
+    registry.write_text(json.dumps({"presets": {"tiny-llama": TINY_ROW}}))
+    monkeypatch.setenv("ANAMNESIS_MODELS", str(registry))
+    monkeypatch.setenv("ANAMNESIS_OUTPUTS", str(tmp_path / "outputs"))
+
+    def loaded(*args, **kwargs):
+        raise AssertionError("a model was loaded for a pass that has no calibration")
+
+    monkeypatch.setattr(model_loader, "load_model", loaded)
+    with pytest.raises(SystemExit, match="no positional means"):
+        run_extraction.main(["--model", "tiny-llama", "--run-name", "x", "--smoke-test"])

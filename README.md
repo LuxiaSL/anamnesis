@@ -65,10 +65,13 @@ its elapsed time as it finishes, so the pass is legible while it runs — but a 
 sits for ten minutes on one line is working, not hung.
 
 All eleven sections run. The command then **exits 3, not 0**, and that is the instrument
-working: the sections needing the `geometry` extra cannot measure intrinsic dimension
-without it, so they state that, three scorecard rows read `INSUFFICIENT_DATA` naming the
-reading they lack, and the pass refuses rather than reporting itself complete. Install
-that extra for a full pass, or `--skip` those sections to make the narrowing explicit.
+working. Two sections measure against something the `dev` install does not bring: the
+intrinsic-dimension section needs the `geometry` extra's estimators, and the semantic section
+measures content by sentence embeddings, which the `semantic` extra provides. Without them each
+section states what it lacks, three scorecard rows read `INSUFFICIENT_DATA` naming the reading
+they miss, and the pass refuses rather than reporting itself complete. Install
+`".[dev,geometry,semantic]"` for a full pass — the embedding model downloads on first use — or
+`--skip` those sections to make the narrowing explicit.
 Nothing is silently zero and nothing absent is scored — which is the single habit worth
 taking from this repository.
 
@@ -78,6 +81,44 @@ deliberately does and does not put in them — read it before quoting anything t
 prints. One consequence catches readers out: the demo still ranks feature blocks against
 each other, and that ranking follows the block widths and the seed. It is a property of
 the fixture, and the pass says so where it prints it.
+
+## A first real run, on a CPU
+
+The quickstart's numbers come from a generator. A real signature needs a real model, and
+[`examples/models/qwen2.5-0.5b-instruct.json`](examples/models/qwen2.5-0.5b-instruct.json)
+adds one a laptop CPU can run: a small, ungated checkpoint, as a registry row the package
+does not ship.
+
+```bash
+uv pip install -e ".[dev,semantic,geometry]"
+export ANAMNESIS_MODELS=examples/models/qwen2.5-0.5b-instruct.json
+export ANAMNESIS_OUTPUTS=$PWD/outputs
+
+# Does the capture path work on this model at all?
+python -m anamnesis.scripts.onboard_model --model qwen2.5-0.5b
+
+# Its calibration, far enough to cover what the extraction below reads.
+python -m anamnesis.scripts.run_calibration --model qwen2.5-0.5b --num-prompts 50 \
+    --required-through 600 --suppress-eos
+
+# Fifty generations, five modes, and the families over their banked tensors.
+python -m anamnesis.scripts.run_extraction --model qwen2.5-0.5b --run-name first \
+    --n-samples 10 --save-raw
+python -m anamnesis.scripts.run_recompute --model qwen2.5-0.5b --run-dir outputs/runs/first \
+    --calib-dir outputs/calibration/qwen2.5-0.5b --raw-subdir raw_tensors \
+    --metadata-subdir signatures --out-subdir signatures_families
+
+python -m anamnesis.scripts.run_gauntlet --run first \
+    --sig-dir outputs/runs/first/signatures_families
+```
+
+Each step refuses rather than guessing. This model's answers mostly end before a late
+position, so too few calibration prompts would reach position 600 on their own and the
+calibration would refuse to write; `--suppress-eos` keeps each one generating to its budget,
+at the cost of the latest positions' means coming partly from text past the end of an
+answer. If the extraction's prompts reach further than position 600, it stops before
+sampling and names the position to calibrate through. On a laptop CPU the whole walk takes
+tens of minutes and most of it is generation.
 
 ## Installing
 
@@ -101,7 +142,9 @@ absence rather than failing the import.
 - [`anamnesis-pl`](https://github.com/LuxiaSL/anamnesis-pl) — the frozen record: the
   instrument exactly as used for the battery era. Every historical citation of a script path
   resolves there, forever.
-- Operational documentation and ratified claims will live in the systema wiki (link to come).
+- The systema — the project's knowledge base of graded claims and operational notes — is not
+  public yet. Until it is, the claims this README states are the ones the repository stands
+  behind, and `CONTRIBUTING.md` says how a new one is raised.
 
 ## License
 

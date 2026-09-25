@@ -73,7 +73,11 @@ def parser() -> argparse.ArgumentParser:
 def replay_worker(args: argparse.Namespace) -> None:
     """Load the base once, wrap it, and walk the series over this worker's share."""
     from anamnesis.config import resolve_preset
-    from anamnesis.extraction.calibration import load_calibration
+    from anamnesis.extraction.calibration import (
+        CalibrationMissing,
+        load_calibration,
+        require_positional_means,
+    )
     from anamnesis.extraction.replay.cell import load_replay_model
     from anamnesis.extraction.replay.checkpoint_series import (
         CheckpointSeries,
@@ -84,11 +88,15 @@ def replay_worker(args: argparse.Namespace) -> None:
 
     series = CheckpointSeries.load(args.checkpoints_json)
     require_pristine_restore(len(series.checkpoints), args.pristine_restore)
+    calibration = load_calibration(args.calib_dir, enable_pca=not args.no_pca)
+    try:
+        require_positional_means(calibration[0], args.calib_dir)
+    except CalibrationMissing as exc:
+        raise SystemExit(str(exc)) from exc
     logger.info(f"[{args.label}] loading the base once: {args.model_path}")
     surface = load_replay_model(
         resolve_preset(args.model), args.model_path, enable_pca=not args.no_pca
     )
-    calibration = load_calibration(args.calib_dir, enable_pca=not args.no_pca)
     surface = wrap_with_first_adapter(surface, series)
     results = replay_series(
         surface,
