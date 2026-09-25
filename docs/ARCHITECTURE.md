@@ -173,8 +173,10 @@ Bringing a model up, in order:
    written. The directory it writes holds the positional means, a per-layer basis, the
    sequences the fit was taken over and a build receipt.
 3. **What the basis determines**, `calibration_stability`: how many directions two fits
-   over disjoint halves of those sequences share. Components past that count are
-   properties of the sample, not of the model.
+   over disjoint halves of those sequences share, per layer. Components past that count
+   are properties of the sample, not of the model. It prints the counts as a
+   `pca_components_by_layer` entry; set in the row, a calibration fits each layer to its
+   own count and the extraction projects each layer onto what its basis holds.
 4. **The fast lane**, for a dense Llama: `qualify_box` on the machine that will run it.
 5. **Signatures**, by either path.
 

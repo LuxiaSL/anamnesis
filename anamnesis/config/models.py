@@ -108,6 +108,16 @@ class ModelPreset(BaseModel):
         description="Layers extraction reads keys, attention and spectral features at"
     )
     pca_layers: tuple[int, ...] = Field(description="Layers the residual-stream PCA projects")
+    pca_components_by_layer: dict[int, int] | None = Field(
+        default=None,
+        description=(
+            "Components the per-layer residual basis keeps at each PCA layer, keyed by every "
+            "layer in pca_layers. A calibration fits each layer to its own count, and the "
+            "extraction projects each layer onto the rows its basis holds, so the count can "
+            "follow what each layer's samples determine. None keeps the extraction's uniform "
+            "count at every layer"
+        ),
+    )
     trajectory_layers: tuple[int, ...] = Field(description="Layers residual trajectories are traced at")
     contrastive_layers: tuple[int, ...] = Field(description="Layers the contrastive projection reads")
     early_layer_cutoff: int = Field(ge=0, description="At or below this a layer counts as early")
@@ -203,6 +213,18 @@ class ModelPreset(BaseModel):
             if getattr(self, field) not in depth:
                 raise ValueError(
                     f"{self.name}: {field}={getattr(self, field)} is outside 0..{self.num_layers - 1}"
+                )
+        if self.pca_components_by_layer is not None:
+            if set(self.pca_components_by_layer) != set(self.pca_layers):
+                raise ValueError(
+                    f"{self.name}: pca_components_by_layer names layers "
+                    f"{sorted(self.pca_components_by_layer)}, and pca_layers is "
+                    f"{list(self.pca_layers)}; a count is given for every PCA layer or none"
+                )
+            if any(count <= 0 for count in self.pca_components_by_layer.values()):
+                raise ValueError(
+                    f"{self.name}: pca_components_by_layer holds a count below one: "
+                    f"{self.pca_components_by_layer}"
                 )
         if self.early_layer_cutoff > self.late_layer_cutoff:
             raise ValueError(
