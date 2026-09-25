@@ -90,7 +90,7 @@ adds one a laptop CPU can run: a small, ungated checkpoint, as a registry row th
 does not ship.
 
 ```bash
-uv pip install -e ".[dev,semantic]"
+uv pip install -e ".[dev,semantic,geometry]"
 export ANAMNESIS_MODELS=examples/models/qwen2.5-0.5b-instruct.json
 export ANAMNESIS_OUTPUTS=$PWD/outputs
 
