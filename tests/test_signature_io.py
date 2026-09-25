@@ -239,6 +239,33 @@ def test_core_only_excludes_swap_modes_from_the_shared_intersection(tmp_path: Pa
     assert "swap_socratic→linear" not in core.unique_modes
 
 
+def test_core_only_says_what_it_set_aside_and_why(
+    two_mode_run: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A count of samples read does not say how many were on disk, so the narrowing is logged."""
+    write_gen(two_mode_run, 5, mode="socratic", mode_idx=1, topic="topic_c", topic_idx=2)
+    write_gen(two_mode_run, 6, mode="swap_socratic→linear", mode_idx=2,
+              topic="topic_a", topic_idx=0)
+    with caplog.at_level("INFO", logger="anamnesis.analysis.gauntlet.signature_io"):
+        core = load_run4(two_mode_run, core_only=True)
+    assert core.n_samples == 4
+    assert (
+        "4 of 7 generations read; set aside 1 further repetitions, 1 on topics some mode "
+        "lacks and 1 prompt-swap generations"
+    ) in caplog.text
+
+
+def test_a_balanced_bank_logs_no_narrowing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    folder = tmp_path / "sig"
+    write_gen(folder, 0, mode="linear", mode_idx=0, topic="topic_a", topic_idx=0)
+    write_gen(folder, 1, mode="socratic", mode_idx=1, topic="topic_a", topic_idx=0)
+    with caplog.at_level("INFO", logger="anamnesis.analysis.gauntlet.signature_io"):
+        load_run4(folder, core_only=True)
+    assert "Balanced core set" not in caplog.text
+
+
 def test_mode_filter_rejects_a_filter_that_selects_nothing(two_mode_run: Path) -> None:
     only = load_run4(two_mode_run, core_only=False, mode_filter=["socratic"])
     assert only.unique_modes == ["socratic"]

@@ -293,11 +293,24 @@ def load_run4(
         # For shared topics with multiple repetitions, take only the first
         seen: set[tuple[str, str]] = set()
         filtered: list[tuple[Path, dict]] = []
+        unshared = 0
         for npz_path, meta in regular_meta:
             key = (meta["mode"], meta["topic"])
-            if meta["topic"] in shared_topics and key not in seen:
+            if meta["topic"] not in shared_topics:
+                unshared += 1
+            elif key not in seen:
                 seen.add(key)
                 filtered.append((npz_path, meta))
+        # The balanced set is a narrowing of the bank, so what it leaves out is said
+        # out loud: a count of samples does not say how many were on disk.
+        repeats = len(regular_meta) - len(filtered) - unshared
+        if len(filtered) < len(all_meta):
+            logger.info(
+                f"Balanced core set: {len(filtered)} of {len(all_meta)} generations read; "
+                f"set aside {repeats} further repetitions, {unshared} on topics some mode "
+                f"lacks and {len(swap_meta)} prompt-swap generations "
+                f"(core_only=False, run_gauntlet's --all-reps, reads every one)"
+            )
         all_meta = filtered
 
     # Apply mode filter if specified
