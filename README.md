@@ -13,6 +13,19 @@ analyses, the steering side and the judging channel, with a test suite and four 
 them. [`CONTRIBUTING.md`](CONTRIBUTING.md) states how code and claims arrive, the
 documentation rule both are held to, and the gates a change passes.
 
+## The question it was built for
+
+The shipped protocol asks a model to write about a topic in one of five *processing
+modes* — linear, analogical, socratic, contrastive, dialectical — each a system prompt such
+as *"Develop your exploration through a sequence of questions and provisional answers"*,
+and all five under one format constraint: flowing paragraphs, no lists, no headers. Four of
+the five produce prose a reader struggles to tell apart. A run asks whether the signatures
+of those forward passes separate the modes anyway, and whether what separates them is the
+computation rather than the words, the length or the topic — which is what the length
+baseline, the semantic section and the prompt-swap test exist to rule out. The prompts are
+rows in [`anamnesis/modes/mode_sets.json`](anamnesis/modes/mode_sets.json); a researcher's
+own modes are a file of the same shape named by `ANAMNESIS_MODE_SETS`.
+
 ## Start here
 
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is the map: what a signature is, the three
@@ -36,6 +49,7 @@ grouped by the order a run moves through the pipeline.
 ## Quickstart
 
 ```bash
+uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"      # or: pip install -e ".[dev]"
 
 # A corpus, drawn from a seed. No model, no accelerator, no network.
@@ -70,6 +84,11 @@ the fixture, and the pass says so where it prints it.
 Artifacts — runs, calibration, analysis results — are written under the XDG data
 directory, never inside the installation. `ANAMNESIS_OUTPUTS` points that elsewhere, and is
 how a corpus on another disk is read.
+
+`torch` is a core dependency, and a default install fetches its CUDA build and the vendor
+libraries beside it — several gigabytes. On a machine with no accelerator,
+`uv pip install --torch-backend=cpu -e ".[dev]"` fetches the CPU build instead; the
+quickstart and everything on the reading side run on it unchanged.
 
 Four extras, each carrying what one part needs and nothing else: `geometry`
 (intrinsic-dimension estimators and persistent homology), `semantic` (sentence

@@ -14,16 +14,21 @@ bad preset row produces:
     does and which would otherwise produce a full-width vector of zeros;
   * a head count or a hidden-state depth that disagrees with the preset.
 
-The probe layers are arithmetic over the sampled plan, so they are checked by value. What
-only real weights can establish — that a checkpoint loads, that its hooks fire, that a
-vector comes out finite — is covered by ``test_runtime_on_a_real_checkpoint.py`` and by this
-command's own run on a box with a model.
+The probe layers are arithmetic over the sampled plan, so they are checked by value.
 
-CPU only; no checkpoint is loaded here.
+The checks are then composed once, end to end: :func:`onboard_model` is run on a
+random-weight Llama saved to disk with a word-level tokenizer beside it, through the real
+loader. The weights mean nothing; what the case pins is that the command assembles — the
+loader places the checkpoint, the hooks fire, and a finite vector comes out. What a trained
+checkpoint adds — that its generate and replay paths agree — is covered by
+``test_runtime_on_a_real_checkpoint.py`` and by this command's own run on a box with a model.
+
+CPU only.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -35,10 +40,12 @@ from anamnesis.extraction.onboarding import (
     DENSE_ATTENTION_MODULES,
     MLA_ATTENTION_MODULES,
     MOE_MLP_MODULES,
+    PROMPT,
     OnboardingError,
     OnboardingReport,
     check_capture_surface,
     check_hook_targets,
+    onboard_model,
     probe_layers,
 )
 
@@ -283,3 +290,46 @@ def test_the_report_reads_as_a_pass_or_a_fail_and_says_which() -> None:
         }
     )
     assert any("router fired on 5/5" in line for line in routed.lines())
+
+
+def save_tiny_tokenizer(directory: Path, vocab_size: int) -> None:
+    """A word-level tokenizer over the smoke prompt, with the chat template the smoke formats by.
+
+    Every id it emits is below the tiny model's vocabulary, and id 0 is the end-of-text
+    token the tiny preset stops on.
+    """
+    from tokenizers import Tokenizer, models, pre_tokenizers
+    from transformers import PreTrainedTokenizerFast
+
+    words = ["<eos>", "<unk>", *dict.fromkeys(PROMPT.replace(".", " .").split())]
+    words += [f"w{i}" for i in range(vocab_size - len(words))]
+    backend = Tokenizer(models.WordLevel({w: i for i, w in enumerate(words)}, unk_token="<unk>"))
+    backend.pre_tokenizer = pre_tokenizers.Whitespace()
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=backend, eos_token="<eos>", unk_token="<unk>", pad_token="<eos>"
+    )
+    tokenizer.chat_template = "{% for m in messages %}{{ m['content'] }} {% endfor %}"
+    tokenizer.save_pretrained(directory)
+
+
+def test_the_command_runs_end_to_end_on_a_saved_checkpoint(tmp_path: Path) -> None:
+    """The composed command on a checkpoint on disk: real loader, real hooks, a finite vector.
+
+    Each check above is driven in isolation; this is the one case that runs them in the
+    order :func:`onboard_model` does, with the configuration it builds for the smoke
+    generation, so a check that cannot be composed with the next fails here.
+    """
+    from test_loaded_model_seam import save_tiny_checkpoint, tiny_preset
+
+    checkpoint = tmp_path / "checkpoint"
+    loaded = save_tiny_checkpoint(checkpoint)
+    save_tiny_tokenizer(checkpoint, loaded.model.config.vocab_size)
+
+    report = onboard_model(tiny_preset(), str(checkpoint))
+
+    assert report.model_id == str(checkpoint)
+    assert report.architecture == "dense"
+    assert report.n_decoder_layers == 3
+    assert report.features_finite
+    assert report.passed
+    assert report.lines()[-1] == "SMOKE PASS"

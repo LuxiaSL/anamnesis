@@ -133,6 +133,19 @@ def test_every_generation_carries_the_synthetic_lane(
     assert bank.lane_id == SYNTHETIC_LANE
 
 
+def test_the_text_carries_the_topic_and_not_the_mode(
+    tmp_path: Path, small_spec: SyntheticBankSpec
+) -> None:
+    """The semantic section measures signatures against the text, so the text holds no label."""
+    bank = write_synthetic_bank(tmp_path / "signatures", small_spec)
+    texts: dict[str, set[str]] = {}
+    for json_path in bank.directory.glob("*.json"):
+        meta = json.loads(json_path.read_text())
+        assert meta["mode"] not in meta["generated_text"]
+        texts.setdefault(meta["topic"], set()).add(meta["generated_text"])
+    assert all(len(on_topic) == 1 for on_topic in texts.values()), texts
+
+
 def test_mode_is_recoverable_and_topic_is_not_a_stand_in(tmp_path: Path) -> None:
     """Structure exists, and it is not the topic axis wearing the mode's label.
 

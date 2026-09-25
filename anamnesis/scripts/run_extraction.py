@@ -28,7 +28,7 @@ import logging
 from typing import Any
 
 from anamnesis.config import preset_names
-from anamnesis.modes import CORE_MODE_SET, mode_set_names
+from anamnesis.modes import CORE_MODE_SET, EXTENDED_MODE_SET, mode_set_names
 from anamnesis.modes import mode_prompts as registry_mode_prompts
 
 logger = logging.getLogger(__name__)
@@ -44,8 +44,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--modes", choices=list(mode_set_names()), default=CORE_MODE_SET,
         help=(
-            "A mode set from the registry: the core five, the eight-mode set, or one "
-            "added in a file named by ANAMNESIS_MODE_SETS"
+            f"A mode set from the registry: {CORE_MODE_SET} is the core five, "
+            f"{EXTENDED_MODE_SET} is those five and three more, or name one added in a "
+            "file named by ANAMNESIS_MODE_SETS"
         ),
     )
     p.add_argument("--n-samples", type=int, default=20, help="Generations per mode")

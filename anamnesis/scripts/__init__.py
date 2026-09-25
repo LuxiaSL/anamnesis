@@ -38,6 +38,9 @@ reviewer reads for.
 * `run_gpu_replay.py` — replay through the fast lane on a single device.
 * `qualify_box.py` — measure whether this machine's fast lane agrees with the
   numeric anchor, and name the lane identity its outputs will carry.
+
+**Judging: the behavioural channel.**
+
 * `judge_2afc.py` — draw a blind two-alternative forced choice over banked text,
   bank the key apart from the packet, and report the rate with its interval.
 * `judge_likert.py` — the other judging paradigm: rate one text on every mode at

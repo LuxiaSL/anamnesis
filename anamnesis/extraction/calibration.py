@@ -355,8 +355,9 @@ def load_pca_model(path: Path) -> tuple[F32, F32]:
     if basis.pooled is None:
         raise KeyError(
             f"{basis.path} holds a basis per layer, keyed {sorted(basis.per_layer)}, and this "
-            "reader projects onto one basis; the recompute path reads the per-layer shape, and "
-            "a pooled fit writes the shape this reader takes"
+            "reader projects onto one basis; the recompute path and the fast lane read the "
+            "per-layer shape, and run_calibration --pooled --refit-basis replaces it with the "
+            "pooled shape this reader takes"
         )
     if basis.pooled.mean is None:
         raise CalibrationMalformed(f"{basis.path} holds a basis with no mean to centre on")
