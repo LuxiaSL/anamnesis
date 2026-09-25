@@ -11,9 +11,12 @@ named by ``ANAMNESIS_MODE_SETS`` is offered here the moment it is
 readable. ``--include-prompt-swap`` adds the confound condition — mode A's
 system prompt under a directive that forces mode B's execution — which is how a
 signature that tracked the instruction rather than the execution would be caught.
-``--save-raw`` banks the per-token tensors beside the vectors, which is what makes
-``run_recompute.py`` possible afterwards and is worth the disk on any run whose
-features are not final.
+The vector this pass writes is the four core blocks. The engineered families —
+residual trajectory, attention flow, gate features and the rest — are computed over
+banked tensors, not during generation: ``--save-raw`` banks the per-token tensors
+beside the vectors (in ``raw_tensors``), and ``run_recompute.py --raw-subdir
+raw_tensors --metadata-subdir signatures`` adds the families over them. That is
+worth the disk on any run whose features are not final.
 
 For a corpus large enough to want more than one device, generate and replay
 separately instead: ``run_gen_tokens.py`` banks the token ids and

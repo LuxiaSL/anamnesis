@@ -116,23 +116,43 @@ def _embed_texts_tfidf(texts: list[str], n_components: int = 100) -> NDArray:
     return out
 
 
-def _embed_texts_sbert(texts: list[str]) -> NDArray | None:
-    """Sentence-BERT embedding (optional dependency; disk-cached by corpus hash)."""
+class YardstickUnavailable(RuntimeError):
+    """The sentence embeddings the section measures content by could not be computed."""
+
+
+def _embed_texts_sbert(texts: list[str]) -> NDArray:
+    """Sentence-BERT embedding (the ``semantic`` extra; disk-cached by corpus hash).
+
+    Raises
+    ------
+    YardstickUnavailable
+        When the package is not installed or its model cannot be loaded. The
+        section's claims are measured against these embeddings, so there is no
+        stand-in for them: a TF-IDF substitute under the same names would report
+        a different quantity as the yardstick.
+    """
     key = _corpus_cache_key(texts, "sbert:all-MiniLM-L6-v2")
     cached = _cached_embedding_load(key)
     if cached is not None:
         return cached
     try:
         from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise YardstickUnavailable(
+            "sentence-transformers is not installed; the semantic section measures content "
+            "by sentence embeddings, which the `semantic` extra provides"
+        ) from exc
+    try:
         model = SentenceTransformer("all-MiniLM-L6-v2")
         embeddings = model.encode(texts, show_progress_bar=False)
-        out = np.array(embeddings, dtype=np.float32)
-        _cached_embedding_save(key, out)
-        return out
-    except ImportError:
-        return None
-    except Exception:
-        return None
+    except Exception as exc:  # noqa: BLE001 — any load or encode failure leaves no yardstick
+        raise YardstickUnavailable(
+            f"the sentence-embedding model could not be loaded or run ({type(exc).__name__}: "
+            f"{exc}); it downloads on first use, so the first pass needs a network"
+        ) from exc
+    out = np.array(embeddings, dtype=np.float32)
+    _cached_embedding_save(key, out)
+    return out
 
 
 def _classify_condition(
@@ -610,16 +630,18 @@ def run_semantic(
     y = data.modes
     topics = data.topics
 
+    # The yardstick first: without it the section has no claim to make, and a pass
+    # that computed the rest would spend its time on numbers it then withholds.
+    print("    Sentence-BERT embeddings...")
+    try:
+        X_sbert = _embed_texts_sbert(data.generated_texts)
+    except YardstickUnavailable as exc:
+        return SemanticResult(error=str(exc))
+    sbert_classification = _classifier_bundle(X_sbert, y, topics, dims=int(X_sbert.shape[1]))
+
     print("    TF-IDF surface baseline...")
     X_tfidf = _embed_texts_tfidf(data.generated_texts)
     tfidf_classification = _classifier_bundle(X_tfidf, y, topics, dims=int(X_tfidf.shape[1]))
-
-    print("    Sentence-BERT embeddings...")
-    X_sbert = _embed_texts_sbert(data.generated_texts)
-    if X_sbert is not None:
-        sbert_classification = _classifier_bundle(X_sbert, y, topics, dims=int(X_sbert.shape[1]))
-    else:
-        sbert_classification = SemanticClassifierBundle(error="sentence-transformers not available")
 
     # ── Per-block semantic orthogonality battery ──
     test_blocks = _get_semantic_test_blocks(data)
@@ -628,8 +650,8 @@ def run_semantic(
     from scipy.spatial.distance import pdist, squareform
 
     X_tfidf_std = StandardScaler().fit_transform(X_tfidf)
-    X_sbert_std = StandardScaler().fit_transform(X_sbert) if X_sbert is not None else None
-    semantic_emb = X_sbert if X_sbert is not None else X_tfidf
+    X_sbert_std = StandardScaler().fit_transform(X_sbert)
+    semantic_emb = X_sbert
 
     per_block_semantic: dict[str, PerBlockSemanticResult] = {}
 
@@ -647,10 +669,8 @@ def run_semantic(
         D_tfidf = squareform(pdist(X_tfidf_std, metric="cosine"))
         mantel_tfidf_cosine = _mantel_test(D_compute, D_tfidf)
 
-        mantel_sbert_cosine: MantelResult | None = None
-        if X_sbert_std is not None:
-            D_sbert = squareform(pdist(X_sbert_std, metric="cosine"))
-            mantel_sbert_cosine = _mantel_test(D_compute, D_sbert)
+        D_sbert = squareform(pdist(X_sbert_std, metric="cosine"))
+        mantel_sbert_cosine = _mantel_test(D_compute, D_sbert)
 
         text_to_compute_r2 = _text_to_compute_r2(semantic_emb, X_compute, topics)
         per_mode = _per_mode_surface_vs_compute(X_tfidf, X_compute, y, topics)
@@ -682,20 +702,17 @@ def run_semantic(
     X_compute_main = data.get_block(ATTENTION_AND_CACHE)
     compute_classification = attention_and_cache_results.classification if attention_and_cache_results is not None else None
 
-    combined_classification: SemanticClassifierBundle | None = None
-    semantic_noise_classification: SemanticClassifierBundle | None = None
-    if X_sbert is not None:
-        X_combined = np.concatenate([X_compute_main, X_sbert], axis=1)
-        combined_classification = _classifier_bundle(
-            X_combined, y, topics, dims=int(X_combined.shape[1]),
-        )
+    X_combined = np.concatenate([X_compute_main, X_sbert], axis=1)
+    combined_classification = _classifier_bundle(
+        X_combined, y, topics, dims=int(X_combined.shape[1]),
+    )
 
-        rng = np.random.default_rng(42)
-        noise = rng.standard_normal((X_sbert.shape[0], X_compute_main.shape[1])).astype(np.float32)
-        X_semantic_noise = np.concatenate([X_sbert, noise], axis=1)
-        semantic_noise_classification = _classifier_bundle(
-            X_semantic_noise, y, topics, dims=int(X_semantic_noise.shape[1]),
-        )
+    rng = np.random.default_rng(42)
+    noise = rng.standard_normal((X_sbert.shape[0], X_compute_main.shape[1])).astype(np.float32)
+    X_semantic_noise = np.concatenate([X_sbert, noise], axis=1)
+    semantic_noise_classification = _classifier_bundle(
+        X_semantic_noise, y, topics, dims=int(X_semantic_noise.shape[1]),
+    )
 
     mantel_tfidf_cosine_top = (
         attention_and_cache_results.mantel_tfidf_cosine if attention_and_cache_results is not None else None
@@ -708,10 +725,8 @@ def run_semantic(
     D_compute_euc = squareform(pdist(X_comp_main_std, metric="euclidean"))
     D_tfidf_euc = squareform(pdist(X_tfidf_std, metric="euclidean"))
     mantel_tfidf_euclidean = _mantel_test(D_compute_euc, D_tfidf_euc)
-    mantel_sbert_euclidean: MantelResult | None = None
-    if X_sbert_std is not None:
-        D_sbert_euc = squareform(pdist(X_sbert_std, metric="euclidean"))
-        mantel_sbert_euclidean = _mantel_test(D_compute_euc, D_sbert_euc)
+    D_sbert_euc = squareform(pdist(X_sbert_std, metric="euclidean"))
+    mantel_sbert_euclidean = _mantel_test(D_compute_euc, D_sbert_euc)
 
     # Backward-compat top-level copies
     text_to_compute_r2_top = (

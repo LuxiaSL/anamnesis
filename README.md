@@ -79,6 +79,39 @@ prints. One consequence catches readers out: the demo still ranks feature blocks
 each other, and that ranking follows the block widths and the seed. It is a property of
 the fixture, and the pass says so where it prints it.
 
+## A first real run, on a CPU
+
+The quickstart's numbers come from a generator. A real signature needs a real model, and
+[`examples/models/qwen2.5-0.5b-instruct.json`](examples/models/qwen2.5-0.5b-instruct.json)
+adds one a laptop CPU can run: a small, ungated checkpoint, as a registry row the package
+does not ship.
+
+```bash
+uv pip install -e ".[dev,semantic]"
+export ANAMNESIS_MODELS=examples/models/qwen2.5-0.5b-instruct.json
+export ANAMNESIS_OUTPUTS=$PWD/outputs
+
+# Does the capture path work on this model at all?
+python -m anamnesis.scripts.onboard_model --model qwen2.5-0.5b
+
+# Its calibration, far enough to cover what the extraction below reads.
+python -m anamnesis.scripts.run_calibration --model qwen2.5-0.5b --num-prompts 50 \
+    --required-through 600
+
+# Fifty generations, five modes, and the families over their banked tensors.
+python -m anamnesis.scripts.run_extraction --model qwen2.5-0.5b --run-name first \
+    --n-samples 10 --save-raw
+python -m anamnesis.scripts.run_recompute --model qwen2.5-0.5b --run-dir outputs/runs/first \
+    --calib-dir outputs/calibration/qwen2.5-0.5b --raw-subdir raw_tensors \
+    --metadata-subdir signatures
+
+python -m anamnesis.scripts.run_gauntlet --run first --sig-dir outputs/runs/first/signatures
+```
+
+Each step refuses rather than guessing. If the extraction's prompts reach further than
+position 600, it stops before sampling and names the position to calibrate through. On a
+laptop CPU the whole walk takes tens of minutes and most of it is generation.
+
 ## Installing
 
 Artifacts — runs, calibration, analysis results — are written under the XDG data
@@ -101,7 +134,9 @@ absence rather than failing the import.
 - [`anamnesis-pl`](https://github.com/LuxiaSL/anamnesis-pl) — the frozen record: the
   instrument exactly as used for the battery era. Every historical citation of a script path
   resolves there, forever.
-- Operational documentation and ratified claims will live in the systema wiki (link to come).
+- The systema — the project's knowledge base of graded claims and operational notes — is not
+  public yet. Until it is, the claims this README states are the ones the repository stands
+  behind, and `CONTRIBUTING.md` says how a new one is raised.
 
 ## License
 

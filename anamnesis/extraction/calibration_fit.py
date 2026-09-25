@@ -74,6 +74,7 @@ import hashlib
 import json
 import logging
 import pickle
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Iterator, Literal, Mapping, Sequence
@@ -330,6 +331,7 @@ def generate_calibration_tokens(
 
     device = next(loaded.model.parameters()).device
     entries = {}
+    started = time.perf_counter()
     for index, text in enumerate(prompts):
         prompt = encode_prompt(loaded.tokenizer, text, chat_template=chat_template)
         input_ids = torch.tensor([prompt], device=device)
@@ -347,8 +349,14 @@ def generate_calibration_tokens(
             )
         sequence = out[0] if torch.is_tensor(out) else out.sequences[0]
         entries[index] = entry_from_ids(sequence.tolist(), len(prompt))
-        if (index + 1) % 10 == 0:
-            logger.info(f"calibration tokens {index + 1}/{len(prompts)}")
+        # Every prompt, with a rate and what is left: on a CPU one prompt can take a
+        # minute, and a pass that reports every tenth one looks hung for ten.
+        elapsed = time.perf_counter() - started
+        left = elapsed / (index + 1) * (len(prompts) - index - 1)
+        logger.info(
+            f"calibration tokens {index + 1}/{len(prompts)}: {entries[index].n_gen} generated, "
+            f"{elapsed:.0f}s elapsed, about {left:.0f}s left"
+        )
     return manifest_from_entries(entries)
 
 

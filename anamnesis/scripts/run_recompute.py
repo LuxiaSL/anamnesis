@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig, preset_names, resolve_preset
@@ -49,14 +50,24 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="A basis other than the one the calibration directory is read by",
     )
-    p.add_argument("--raw-subdir", default="raw_tensors_v3")
+    p.add_argument(
+        "--raw-subdir",
+        default="raw_tensors_v3",
+        help="Tensors to recompute from; `run_extraction --save-raw` writes raw_tensors",
+    )
     p.add_argument("--out-subdir", default="signatures_v3_c5", help="Where the new vectors land")
     p.add_argument(
         "--metadata-subdir",
         default="signatures_v3",
-        help="Signatures whose per-generation metadata the new ones inherit",
+        help="Signatures whose per-generation metadata the new ones inherit; "
+             "`run_extraction` writes signatures",
     )
-    p.add_argument("--workers", type=int, default=48, help="Processes over the tensor files")
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=min(48, os.cpu_count() or 1),
+        help="Processes over the tensor files; default this machine's cores, at most 48",
+    )
     p.add_argument(
         "--allow-partial",
         action="store_true",
@@ -102,6 +113,17 @@ def main(argv: list[str] | None = None) -> None:
         recompute_shortfall,
     )
     from anamnesis.shortfall import refuse_unless_complete
+
+    for flag, subdir, pattern in (
+        ("--raw-subdir", args.raw_subdir, "raw_tensors*"),
+        ("--metadata-subdir", args.metadata_subdir, "signatures*"),
+    ):
+        if not (args.run_dir / subdir).is_dir():
+            present = sorted(d.name for d in args.run_dir.glob(pattern) if d.is_dir())
+            raise SystemExit(
+                f"{args.run_dir / subdir} does not exist; {flag} names a directory in the run, "
+                f"and this one holds {present or 'none matching ' + pattern}"
+            )
 
     extraction, families = configs(args.model)
     positional_means = load_positional_means(args.calib_dir)

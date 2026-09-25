@@ -7,9 +7,10 @@ merges when they pass.
 
 **Claims** are never merged as claims. A contribution that asserts a finding — that a signature
 separates something, that an intervention has an effect, that a number holds — enters as a
-candidate entry in the systema, is evaluated and replicated where warranted, is graded, and only
-then becomes visible. Code that *enables* a claim is welcome in a pull request; the claim itself
-travels the other road.
+candidate entry in the systema, the project's knowledge base of graded claims, is evaluated and
+replicated where warranted, is graded, and only then becomes visible. The systema is not public
+yet; until it is, raise a claim as an issue here, with the runs and receipts behind it. Code that
+*enables* a claim is welcome in a pull request; the claim itself travels the other road.
 
 ## The documentation rule
 
