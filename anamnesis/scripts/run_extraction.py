@@ -15,8 +15,9 @@ The vector this pass writes is the four core blocks. The engineered families —
 residual trajectory, attention flow, gate features and the rest — are computed over
 banked tensors, not during generation: ``--save-raw`` banks the per-token tensors
 beside the vectors (in ``raw_tensors``), and ``run_recompute.py --raw-subdir
-raw_tensors --metadata-subdir signatures`` adds the families over them. That is
-worth the disk on any run whose features are not final.
+raw_tensors --metadata-subdir signatures --out-subdir signatures_families`` writes
+the vector with the families added beside the one this pass wrote. That is worth the
+disk on any run whose features are not final.
 
 For a corpus large enough to want more than one device, generate and replay
 separately instead: ``run_gen_tokens.py`` banks the token ids and

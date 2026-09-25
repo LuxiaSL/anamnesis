@@ -106,9 +106,10 @@ python -m anamnesis.scripts.run_extraction --model qwen2.5-0.5b --run-name first
     --n-samples 10 --save-raw
 python -m anamnesis.scripts.run_recompute --model qwen2.5-0.5b --run-dir outputs/runs/first \
     --calib-dir outputs/calibration/qwen2.5-0.5b --raw-subdir raw_tensors \
-    --metadata-subdir signatures
+    --metadata-subdir signatures --out-subdir signatures_families
 
-python -m anamnesis.scripts.run_gauntlet --run first --sig-dir outputs/runs/first/signatures
+python -m anamnesis.scripts.run_gauntlet --run first \
+    --sig-dir outputs/runs/first/signatures_families
 ```
 
 Each step refuses rather than guessing. This model's answers mostly end before a late
