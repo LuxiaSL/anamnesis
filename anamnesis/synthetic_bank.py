@@ -20,7 +20,7 @@ that construction and both matter:
 * generation length is drawn independently of mode, so the length controls have nothing
   to find. A real corpus is not so obliging, which is why those controls exist.
 
-Two more things the construction is careful about, both so that reading the demo teaches
+Three more things the construction is careful about, all so that reading the demo teaches
 the instrument rather than an artefact of the fixture:
 
 * **no block is staged as more informative than another.** Each block's slice of the mode
@@ -37,6 +37,10 @@ the instrument rather than an artefact of the fixture:
   was exactly a claim that one bin was load-bearing.
 * every block is written, so no union is short and no section has to state an absence
   it would only be stating about the fixture.
+* **the text says nothing about the mode.** Every mode on a topic writes the same text,
+  so the semantic section's text baseline has nothing to read and the signatures are set
+  against a text channel at chance. A fixture whose text named the mode would score that
+  baseline at ceiling, and the demo would then teach that the text gives the mode away.
 
 The bank carries a lane identifier naming itself as synthetic, because the read side
 gates on lane identity and an unstamped bank is indistinguishable from one whose
@@ -260,7 +264,11 @@ def write_synthetic_bank(
                     "mode_idx": mode_idx,
                     # Drawn independently of mode, so the length controls find nothing.
                     "num_generated_tokens": int(rng.integers(180, 420)),
-                    "generated_text": f"synthetic generation {index} for {mode} on {topic}",
+                    # Names the topic and not the mode, and is the same text for every
+                    # mode on a topic, so the text baseline the semantic section measures
+                    # signatures against finds nothing to read: a fixture whose text
+                    # carried the label would score the text channel at ceiling.
+                    "generated_text": f"synthetic generation on {topic}",
                     "system_prompt": f"synthetic system prompt for {mode}",
                     "user_prompt": f"synthetic user prompt for {topic}",
                     STORED_BLOCK_SLICES_KEY: slices,

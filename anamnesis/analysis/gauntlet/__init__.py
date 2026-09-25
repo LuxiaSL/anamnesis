@@ -582,14 +582,21 @@ def _print_summary(results: dict) -> None:
     sc = results.get("scorecard")
     if isinstance(sc, ScorecardResult):
         summary = sc.summary
+        # Every outcome is counted, so the tally closes on the rows beneath it: a row
+        # left unscored is as much a part of the answer as a row scored WRONG.
         print(f"\n  Prediction scorecard: "
               f"{summary.confirmed} confirmed, "
               f"{summary.partial} partial, "
-              f"{summary.wrong} wrong")
+              f"{summary.wrong} wrong, "
+              f"{summary.noted} noted, "
+              f"{summary.insufficient} unscored "
+              f"of {summary.total}")
         if sc.corpus_caveat is not None:
             print_caveat(sc.corpus_caveat, indent="    ")
         for pred in sc.predictions:
             print(f"    {pred.prediction}: {pred.outcome}")
+            if pred.unscorable_because is not None:
+                print_caveat(pred.unscorable_because, indent="      ")
             if pred.caveat is not None:
                 print_caveat(pred.caveat, indent="      ")
 
