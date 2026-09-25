@@ -175,10 +175,22 @@ def test_load_calibration_reads_the_banked_spelling_when_it_is_the_only_one(
     assert read_mean is not None and read_mean.shape == (4,)
 
 
-def test_a_per_layer_basis_names_the_reader_that_takes_it(tmp_path: Path) -> None:
+def test_a_per_layer_basis_comes_back_per_layer(tmp_path: Path) -> None:
+    """Every extraction path projects onto the per-layer shape, so the directory reader
+    hands it over as a mapping rather than refusing it."""
+    path = tmp_path / PCA_MODEL_NAME
+    with open(path, "wb") as f:
+        pickle.dump({14: {"components": np.eye(4)[:2], "mean": np.ones(4)}}, f)
+    _, components, mean = load_calibration(tmp_path)
+    assert isinstance(components, dict) and isinstance(mean, dict)
+    assert components[14].shape == (2, 4) and components[14].dtype == np.float32
+    np.testing.assert_array_equal(mean[14], np.ones(4, dtype=np.float32))
+
+
+def test_the_single_basis_reader_names_the_reader_that_takes_a_per_layer_one(tmp_path: Path) -> None:
     """The refusal carries where to go, because the shape is legitimate elsewhere."""
     path = tmp_path / PCA_MODEL_NAME
     with open(path, "wb") as f:
         pickle.dump({14: {"components": np.eye(4)[:2], "mean": np.ones(4)}}, f)
-    with pytest.raises(KeyError, match="per layer"):
-        load_calibration(tmp_path)
+    with pytest.raises(KeyError, match="load_calibration returns either shape"):
+        load_pca_model(path)

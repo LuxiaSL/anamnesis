@@ -178,12 +178,13 @@ Bringing a model up, in order:
    `pca_components_by_layer` entry; set in the row, a calibration fits each layer to its
    own count and the extraction projects each layer onto what its basis holds.
 4. **The fast lane**, for a dense Llama: `qualify_box` on the machine that will run it.
-5. **Signatures**, by either path. The fast lane and `run_recompute` read the per-layer
-   basis step 2 writes. The hook-path commands — `run_extraction`, `run_replay` and the
-   replays built on it — project onto one pooled basis and refuse a per-layer one, so a
-   model that runs only on the hook path is calibrated a second time with
-   `run_calibration --pooled --refit-basis`, which replaces the basis with that shape and
-   reuses the positional means.
+5. **Signatures**, by either path. Both read the per-layer basis step 2 writes, and both
+   refuse, before computing anything, a sequence that reaches past the positions the
+   calibration fills: `run_extraction` from its longest prompt and its token budget, the
+   replays and the fast lane from each banked sequence. Extraction prompts carry a mode's
+   system prompt and calibration prompts do not, so a calibration at the same budget ends
+   short of an extraction; `--reach-from` or `--required-through` on step 2 is what
+   closes that gap.
 
 ## Fail closed
 
