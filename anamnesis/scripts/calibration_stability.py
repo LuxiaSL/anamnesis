@@ -21,8 +21,10 @@ noise alone. A basis that agrees under the second and not the first is a propert
 which prompts it was fitted over. Half the samples understates what the whole set
 determines, so the counts reported are floors.
 
-Writes a JSON receipt with, per layer, the agreement curve and the determined count
-at the stated threshold.
+Writes a JSON receipt with, per layer, the agreement curves and the determined count
+at the stated threshold, and prints those counts as a ``pca_components_by_layer`` entry
+for the model's registry row. A floor measured on halves is a conservative count; the
+row is where it is decided, so the extraction's schema moves only when the row does.
 """
 
 from __future__ import annotations
@@ -134,10 +136,13 @@ def main(argv: list[str] | None = None) -> None:
         threshold=args.threshold,
         split=args.split,
         layers=layers,
+        suggested_pca_components_by_layer={
+            str(layer): max(1, entry["determined"]) for layer, entry in layers.items()
+        },
     )
     args.json.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(receipt, indent=2) + "\n")
-    print(json.dumps({str(k): v["determined"] for k, v in layers.items()}))
+    print(json.dumps({"pca_components_by_layer": receipt["suggested_pca_components_by_layer"]}))
 
 
 if __name__ == "__main__":

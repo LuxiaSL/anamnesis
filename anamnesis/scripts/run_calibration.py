@@ -129,6 +129,32 @@ def resolve_paths(args: argparse.Namespace) -> tuple[ModelPreset, Path, Path]:
     )
 
 
+def component_counts(
+    args: argparse.Namespace, preset: ModelPreset, ceiling: int
+) -> int | dict[int, int]:
+    """The components the basis keeps: ``--n-components`` for every layer when given,
+    else the row's per-layer counts for a per-layer fit, else the extraction's count.
+
+    Raises
+    ------
+    SystemExit
+        When a per-layer count is above ``ceiling``, the extraction's own count: the
+        extraction projects at most that many components per layer, so the rows past
+        it would be fitted and never read.
+    """
+    if args.n_components is not None:
+        return int(args.n_components)
+    if preset.pca_components_by_layer is None or args.pooled:
+        return ceiling
+    over = {layer: count for layer, count in preset.pca_components_by_layer.items() if count > ceiling}
+    if over:
+        raise SystemExit(
+            f"{preset.name}: pca_components_by_layer asks for {over}, above the extraction's "
+            f"{ceiling} components per layer, which is all a projection reads"
+        )
+    return dict(preset.pca_components_by_layer)
+
+
 def table_width(
     args: argparse.Namespace, settings: GenerationConfig, required_through: int | None = None
 ) -> int:
@@ -203,6 +229,10 @@ def describe(
             print("  token budget: sized once the prompts are tokenised, so every prompt reaches it")
     print(f"  means table: {table_width(args, settings, required)} positions at the budget above")
     print(f"  basis fit: {'pooled, uncorrected' if args.pooled else 'per layer, corrected'}")
+    from anamnesis.config import ExtractionConfig
+
+    counts = component_counts(args, preset, ExtractionConfig.from_preset(preset).pca_components)
+    print(f"  components kept: {counts} {'at every layer' if isinstance(counts, int) else 'by layer'}")
     reuse = means_path.exists() and not args.refit_means
     print(f"  positional means -> {'reused from' if reuse else 'written to'} {means_path}")
     held = basis_path.exists() and not args.refit_basis
@@ -246,7 +276,7 @@ def main(argv: list[str] | None = None) -> None:
     from anamnesis.config import ExtractionConfig, ModelConfig
     from anamnesis.extraction.model_loader import load_model
 
-    n_components = args.n_components or ExtractionConfig.from_preset(preset).pca_components
+    n_components = component_counts(args, preset, ExtractionConfig.from_preset(preset).pca_components)
     existing_means = calibration_fit.read_existing_means(means_path, args.refit_means)
 
     config = ModelConfig.from_preset(preset, model_id=args.model_path or preset.model_id)

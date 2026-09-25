@@ -166,6 +166,9 @@ def test_the_stability_command_splits_the_banked_sequences_and_writes_a_receipt(
         assert len(entry["principal_cosines"]) == 4
         assert 0 <= entry["determined"] <= 4
     assert receipt["split"] == "prompts"
+    suggested = receipt["suggested_pca_components_by_layer"]
+    assert set(suggested) == set(receipt["layers"])
+    assert all(1 <= count <= 4 for count in suggested.values())
 
     by_position = tmp_path / "positions.json"
     calibration_stability.main(
