@@ -350,9 +350,9 @@ def test_main_runs_from_argv_on_a_registered_preset_and_banks_what_harvest_retur
 ) -> None:
     """The command end to end, except the loader, which is handed the saved model.
 
-    ``load_model`` places weights through a device map, which needs ``accelerate``,
-    and the suite does not install it; the loader's own behaviour is covered where
-    a checkpoint is reachable. What this pins is everything around it: the argument
+    ``load_lane_model`` is replaced so the case reads back the exact model it saved;
+    ``load_model`` under it is run on a saved checkpoint in
+    ``tests/test_onboarding.py``. What this pins is everything around it: the argument
     list, the registry lookup, the calibration and checkpoint digests, the lane and
     the bank it writes.
     """

@@ -44,8 +44,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from anamnesis.config import (
     ExperimentConfig,
-    ExtractionConfig,
-    GenerationConfig,
     GenerationSpec,
     ModelConfig,
     ModelPreset,
@@ -341,16 +339,16 @@ def onboard_model(preset: ModelPreset, model_path: str | None = None) -> Onboard
     attention_shape, depth = check_capture_surface(loaded, preset)
     routing = check_routing_surface(loaded, preset) if architecture != "dense" else None
 
-    experiment = ExperimentConfig(
-        model=config,
-        generation=GenerationConfig(
-            max_new_tokens=EXTRACT_MAX_NEW_TOKENS,
-            temperature=preset.temperature,
-            top_p=0.95,
-            eos_token_ids=list(preset.eos_token_ids),
-            do_sample=True,
-        ),
-        extraction=ExtractionConfig.from_preset(preset),
+    # The smoke reads only the model, decode and extraction sections and writes nothing,
+    # so the run paths from_preset derives are never created.
+    experiment = ExperimentConfig.from_preset(
+        preset,
+        model_overrides={"model_id": model_id},
+        generation_overrides={
+            "max_new_tokens": EXTRACT_MAX_NEW_TOKENS,
+            "top_p": 0.95,
+            "do_sample": True,
+        },
     )
     spec = GenerationSpec(
         generation_id=0,

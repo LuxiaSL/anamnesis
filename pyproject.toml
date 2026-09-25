@@ -33,6 +33,12 @@ dependencies = [
     # AttributeError rather than degrading, so this floor is a requirement and not a
     # preference.
     "transformers>=4.54",
+    # ``load_model`` places a checkpoint through the preset's device map
+    # (anamnesis/extraction/model_loader.py), and transformers hands any device map to
+    # accelerate, raising ValueError when it is absent. So every command that loads a
+    # model needs it. Transformers 5 requires accelerate 1.1 and 4.54 requires 0.26,
+    # so 1.1 satisfies every transformers this project accepts.
+    "accelerate>=1.1",
     "tqdm>=4.66",
 ]
 
