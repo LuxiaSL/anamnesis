@@ -129,7 +129,7 @@ def tiny_loaded():
 
 @pytest.mark.parametrize("continuation", [2, 3, 4, 17, 65])
 @pytest.mark.parametrize("replay_path", ["cached", "full"])
-@pytest.mark.parametrize("per_layer_pca", [False, True])
+@pytest.mark.parametrize("per_layer_pca", [False, True, "ragged"])
 def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
     continuation, replay_path, per_layer_pca
 ):
@@ -141,7 +141,10 @@ def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
     components = rng.normal(size=(5, 32)).astype(np.float32)
     mean = rng.normal(0, 0.01, size=32).astype(np.float32)
     if per_layer_pca:
-        components = {0: components, 1: components * 0.3}
+        # A ragged basis keeps a different number of components per layer; the lane and
+        # the anchor must both project each layer onto exactly the rows it holds.
+        second = components[:3] if per_layer_pca == "ragged" else components
+        components = {0: components, 1: second * 0.3}
         mean = {0: mean, 1: mean + 0.1}
     extraction = ExtractionConfig(
         sampled_layers=[0, 1, 2], pca_layers=[0, 1], pca_components=5,
@@ -177,6 +180,13 @@ def test_full_lane_matches_reference_and_repeats_with_fresh_cache(
     schema = resolve_gpu_schema(3, continuation - 1, extraction, families, components)
     assert schema.feature_names == tuple(ref.feature_names)
     assert schema.family_slices == ref.block_slices
+    if per_layer_pca == "ragged":
+        components_at = {
+            layer: {name.rsplit("_c", 1)[1] for name in ref.feature_names
+                    if name.startswith(f"pca_L{layer}_")}
+            for layer in (0, 1)
+        }
+        assert components_at == {0: {"0", "1", "2", "3", "4"}, 1: {"0", "1", "2"}}
     original_hooks = [
         tuple(module.self_attn._forward_hooks) for module in loaded.model.model.layers
     ]

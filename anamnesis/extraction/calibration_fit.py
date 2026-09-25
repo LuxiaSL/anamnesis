@@ -76,7 +76,7 @@ import logging
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, Literal, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, Literal, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -558,13 +558,39 @@ def fit_pooled_basis(
     return basis
 
 
+ComponentCounts = int | Mapping[int, int]
+"""Components a per-layer basis keeps: one count for every layer, or a count per layer."""
+
+
+def components_at(n_components: ComponentCounts, layer: int) -> int:
+    """The count ``n_components`` sets for ``layer``.
+
+    Raises
+    ------
+    CalibrationFitError
+        When a per-layer mapping has no count for ``layer``.
+    """
+    if isinstance(n_components, int):
+        return n_components
+    if int(layer) not in n_components:
+        raise CalibrationFitError(
+            f"no component count for layer {layer}; the per-layer counts name "
+            f"{sorted(n_components)}"
+        )
+    return int(n_components[int(layer)])
+
+
 def fit_per_layer_basis(
     samples: Sequence[tuple[int, int, F32]],
     means: F32,
     pca_layers: Sequence[int],
-    n_components: int,
+    n_components: ComponentCounts,
 ) -> dict[int, dict[str, Any]]:
     """One basis per layer, over positionally corrected states.
+
+    ``n_components`` is one count for every layer or a count per layer; each layer
+    keeps its own, and the extraction projects each layer onto the rows its basis
+    holds.
 
     A sample beyond the reach of the means carries no correction and is dropped
     rather than fitted raw, which would mix two distributions in one basis. The
@@ -590,7 +616,7 @@ def fit_per_layer_basis(
                 f"no corrected samples at layer {layer}; the fit would be empty"
             )
         matrix = np.stack(rows).astype(np.float64)
-        basis[int(layer)] = _fit_one(matrix, n_components)
+        basis[int(layer)] = _fit_one(matrix, components_at(n_components, layer))
         logger.info(
             f"layer {layer}: {matrix.shape[0]} corrected samples -> "
             f"{basis[int(layer)]['components'].shape}, explaining "
@@ -655,7 +681,7 @@ def fit_calibration(
     *,
     preset: str | ModelPreset,
     settings: GenerationConfig,
-    n_components: int,
+    n_components: ComponentCounts,
     pooled: bool = False,
     existing_means: F32 | None = None,
     max_positions: int | None = None,
@@ -674,7 +700,8 @@ def fit_calibration(
     given, the position accumulator is skipped entirely.
 
     ``n_components`` is an upper bound: a fit over fewer samples or narrower states
-    than that keeps what it can.
+    than that keeps what it can. A per-layer mapping sets each layer's own bound, and
+    only a per-layer basis can hold one.
 
     Raises
     ------
@@ -683,6 +710,11 @@ def fit_calibration(
         ``max_positions`` is not a positive width.
     """
     row = resolve_preset(preset)
+    if pooled and not isinstance(n_components, int):
+        raise CalibrationFitError(
+            "a pooled basis is one basis for every layer, so it takes one component count, "
+            "not a count per layer"
+        )
     depth = row.num_layers + 1
     if max_positions is None:
         max_positions = settings.max_new_tokens + PROMPT_HEADROOM
@@ -850,7 +882,9 @@ class CalibrationBuildReceipt(BaseModel):
                     "template where it has one, rather than bare"
     )
     pooled: bool
-    n_components: int
+    n_components: int | dict[int, int] = Field(
+        description="Components kept: one count for every layer, or a count per PCA layer"
+    )
     means_refitted: bool
     coverage: BuildCoverage
     files: dict[str, str] = Field(description="Filename to SHA-256 of each artifact")
@@ -893,7 +927,7 @@ def build_receipt(
     suppress_eos: bool,
     chat_template: bool,
     pooled: bool,
-    n_components: int,
+    n_components: ComponentCounts,
     means_path: Path,
     basis_path: Path,
     required_through: int | None = None,
@@ -930,7 +964,7 @@ def build_receipt(
         suppress_eos=suppress_eos,
         chat_template=chat_template,
         pooled=pooled,
-        n_components=n_components,
+        n_components=n_components if isinstance(n_components, int) else dict(n_components),
         means_refitted=fit.means_refitted,
         coverage=BuildCoverage(
             table_positions=width,

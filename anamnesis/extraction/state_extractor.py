@@ -1113,9 +1113,12 @@ def extract_residual_pca(
             positionally-corrected calibration states.
         pca_mean: matching mean — [hidden_dim] array (pooled) or {layer_idx: [hidden_dim]} (per-layer).
 
-    Returns (feature_vector, feature_names), both of length
-    ``len(config.pca_layers) * config.pca_temporal_samples * config.pca_components``
-    — 500 at the default two PCA layers, 5 temporal samples and 50 components.
+    Returns (feature_vector, feature_names). Each layer contributes
+    ``config.pca_temporal_samples`` projections onto ``min(config.pca_components, rows)``
+    components, ``rows`` being how many its basis holds — so a per-layer basis fitted to a
+    different count at each layer gives each layer its own width, and a basis at least
+    ``config.pca_components`` deep gives ``len(config.pca_layers) *
+    config.pca_temporal_samples * config.pca_components`` in all.
 
     This block does NOT zero-fill. With no generation steps, or with no fitted basis
     passed, it returns an empty vector and an empty name list: a projection onto a
