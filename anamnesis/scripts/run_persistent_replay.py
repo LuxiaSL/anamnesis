@@ -76,11 +76,20 @@ def _resident_worker_command(args: argparse.Namespace, worker: int) -> list[str]
 
 def _surface(args: argparse.Namespace):
     from anamnesis.config import resolve_preset
-    from anamnesis.extraction.calibration import load_calibration
+    from anamnesis.extraction.calibration import (
+        CalibrationMissing,
+        load_calibration,
+        require_positional_means,
+    )
     from anamnesis.extraction.replay.cell import load_replay_model
 
+    calibration = load_calibration(args.calib_dir, enable_pca=True)
+    try:
+        require_positional_means(calibration[0], args.calib_dir)
+    except CalibrationMissing as exc:
+        raise SystemExit(str(exc)) from exc
     surface = load_replay_model(resolve_preset(args.model), args.model_path)
-    return surface, load_calibration(args.calib_dir, enable_pca=True)
+    return surface, calibration
 
 
 def serve(args: argparse.Namespace) -> None:

@@ -145,18 +145,25 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     from anamnesis.extraction.calibration import (
+        CalibrationMissing,
         PositionsUncovered,
         load_calibration,
         load_position_counts,
+        require_positional_means,
         require_positions_covered,
     )
     from anamnesis.extraction.generation_runner import format_prompt, run_experiment
     from anamnesis.extraction.model_loader import load_model
 
     config.ensure_dirs()
+    calib_dir = config.calibration.positional_means_path.parent
     positional_means, pca_components, pca_mean = load_calibration(
-        config.calibration.positional_means_path.parent, enable_pca=not args.no_pca
+        calib_dir, enable_pca=not args.no_pca
     )
+    try:
+        require_positional_means(positional_means, calib_dir)
+    except CalibrationMissing as exc:
+        raise SystemExit(str(exc)) from exc
     loaded = load_model(
         config.model,
         sampled_layers=config.extraction.sampled_layers,

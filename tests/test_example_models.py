@@ -1,7 +1,7 @@
 """The example registry files load, and every row in them is a valid preset.
 
-An example is what a newcomer copies first, so one that no longer validates is the
-first thing they would hit. Each file is loaded through ``ANAMNESIS_MODELS`` exactly as
+An example is what a newcomer copies first, so an example that fails to validate is
+the first thing they would hit. Each file is loaded through ``ANAMNESIS_MODELS`` exactly as
 the README's recipe loads it.
 """
 

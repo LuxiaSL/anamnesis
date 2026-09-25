@@ -99,7 +99,7 @@ python -m anamnesis.scripts.onboard_model --model qwen2.5-0.5b
 
 # Its calibration, far enough to cover what the extraction below reads.
 python -m anamnesis.scripts.run_calibration --model qwen2.5-0.5b --num-prompts 50 \
-    --required-through 600
+    --required-through 600 --suppress-eos
 
 # Fifty generations, five modes, and the families over their banked tensors.
 python -m anamnesis.scripts.run_extraction --model qwen2.5-0.5b --run-name first \
@@ -111,9 +111,13 @@ python -m anamnesis.scripts.run_recompute --model qwen2.5-0.5b --run-dir outputs
 python -m anamnesis.scripts.run_gauntlet --run first --sig-dir outputs/runs/first/signatures
 ```
 
-Each step refuses rather than guessing. If the extraction's prompts reach further than
-position 600, it stops before sampling and names the position to calibrate through. On a
-laptop CPU the whole walk takes tens of minutes and most of it is generation.
+Each step refuses rather than guessing. This model's answers mostly end before a late
+position, so too few calibration prompts would reach position 600 on their own and the
+calibration would refuse to write; `--suppress-eos` keeps each one generating to its budget,
+at the cost of the latest positions' means coming partly from text past the end of an
+answer. If the extraction's prompts reach further than position 600, it stops before
+sampling and names the position to calibrate through. On a laptop CPU the whole walk takes
+tens of minutes and most of it is generation.
 
 ## Installing
 
