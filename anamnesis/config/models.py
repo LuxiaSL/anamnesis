@@ -28,7 +28,16 @@ Merging is **additive and refuses collisions.** A row cannot redefine a shipped
 preset, alias or depth, because a banked corpus's label means the shipped row and
 silently reshaping it would change what every stored vector was produced under.
 A variant of a shipped model is a new key, and the refusal names the key and the
-two files it came from. A file named in the environment that cannot be read is an
+two files it came from.
+
+A variant row may say ``"extends": "<key>"`` and give only what differs: it
+starts from that row as merged so far (shipped, or an earlier file's) and its
+own fields replace the base's. It always takes its own key, so ``extends`` adds
+a row and never renames or redefines one: a key is hashed into generation
+seeds, so a renamed key would orphan every banked population generated under
+it. Two fields are not inherited because they belong to the base model's
+identity rather than its architecture: ``run_prefixes`` (a run directory's
+prefix resolves to one model) and ``stage0_dir`` (the base model's floors). A file named in the environment that cannot be read is an
 error rather than a fall-through: a registry that quietly ignored it would resolve
 the shipped name and run the wrong model.
 
@@ -55,7 +64,15 @@ import os
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from anamnesis.config.paths import DataRoot, resolve_data_path
 
@@ -290,6 +307,7 @@ class ModelRegistryFile(BaseModel):
         default_factory=dict,
         description="Run-name prefix to layer count, for models with no preset row",
     )
+    _extending: dict[str, dict[str, Any]] = PrivateAttr(default_factory=dict)
 
     @field_validator("run_depths")
     @classmethod
@@ -399,16 +417,54 @@ def _read_file(path: Path) -> ModelRegistryFile:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ModelRegistryError(f"{path}: invalid JSON at line {exc.lineno} ({exc.msg})") from exc
+    extending: dict[str, dict[str, Any]] = {}
+    if isinstance(payload, dict) and isinstance(payload.get("presets"), dict):
+        rows = payload["presets"]
+        extending = {k: v for k, v in rows.items() if isinstance(v, dict) and EXTENDS_KEY in v}
+        payload = dict(payload, presets={k: v for k, v in rows.items() if k not in extending})
     try:
         parsed = ModelRegistryFile.model_validate(payload)
     except ValidationError as exc:
         raise ModelRegistryError(f"{path}: not a model registry ({exc})") from exc
+    for key, row in extending.items():
+        if row.get("name", key) != key:
+            raise ModelRegistryError(
+                f"{path}: preset {key!r} carries name {row['name']!r}; the key and the name are one thing"
+            )
+    parsed._extending = extending
     for key, row in parsed.presets.items():
         if row.name != key:
             raise ModelRegistryError(
                 f"{path}: preset {key!r} carries name {row.name!r}; the key and the name are one thing"
             )
     return parsed
+
+
+EXTENDS_KEY = "extends"
+_NOT_INHERITED = ("run_prefixes", "stage0_dir")
+
+
+def _extended_row(path: Path, key: str, row: dict[str, Any],
+                  presets: dict[str, ModelPreset]) -> ModelPreset:
+    """A row that starts from the merged row it names and replaces what it gives."""
+    base_key = row[EXTENDS_KEY]
+    if base_key == key:
+        raise ModelRegistryError(f"{path}: preset {key!r} extends itself")
+    base = presets.get(base_key)
+    if base is None:
+        raise ModelRegistryError(
+            f"{path}: preset {key!r} extends {base_key!r}, which no registry file read so far "
+            f"defines; presets: {', '.join(sorted(presets))}"
+        )
+    data = base.model_dump()
+    for field in _NOT_INHERITED:
+        data.pop(field, None)
+    data.update({k: v for k, v in row.items() if k != EXTENDS_KEY})
+    data["name"] = key
+    try:
+        return ModelPreset.model_validate(data)
+    except ValidationError as exc:
+        raise ModelRegistryError(f"{path}: preset {key!r} extending {base_key!r} ({exc})") from exc
 
 
 def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
@@ -438,6 +494,15 @@ def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
         for key, row in parsed.presets.items():
             claim("preset", key, path)
             presets[key] = row
+        pending = dict(parsed._extending)
+        while pending:
+            ready = [k for k, r in pending.items() if r[EXTENDS_KEY] in presets or r[EXTENDS_KEY] == k]
+            if not ready:
+                key = next(iter(pending))
+                presets[key] = _extended_row(path, key, pending[key], presets)
+            for key in ready:
+                claim("preset", key, path)
+                presets[key] = _extended_row(path, key, pending.pop(key), presets)
         for alias, target in parsed.aliases.items():
             claim("alias", alias, path)
             aliases[alias] = target
