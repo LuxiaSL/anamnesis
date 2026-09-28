@@ -33,10 +33,10 @@ from anamnesis.config.models import (
     resolve_preset,
 )
 
-MODELS_SHA256 = "4d441d5f3ffaa27e2cd4d39e22b0312854d386c6cc7a0c3bc3b4c3bec8921e6c"
+MODELS_SHA256 = "a808adb8e06cd8c16168f1a910ab6818e0d215a7d00e40192d1514ada3d93a38"
 """The shipped registry's bytes; an edit to a row fails here."""
 
-SHIPPED_PRESETS = ("8b", "3b", "olmo2-7b", "gemma3-27b", "qwen-7b", "dsv2-lite")
+SHIPPED_PRESETS = ("8b", "70b", "3b", "olmo2-7b", "gemma3-27b", "qwen-7b", "dsv2-lite")
 
 ADDED_ROW: dict[str, Any] = {
     "name": "tiny-probe",
@@ -238,3 +238,64 @@ def test_an_edit_to_a_registry_file_is_seen_without_restarting(
         {"presets": {"tiny-probe": {**ADDED_ROW, "num_layers": 16, "sampled_layers": [0, 8, 15]}}},
     )
     assert resolve_preset("tiny-probe").num_layers == 16
+
+
+def test_the_70b_row_shares_the_8b_depth_rule() -> None:
+    row = resolve_preset("70b")
+    assert row.num_layers == 80
+    assert row.sampled_layers == (0, 20, 40, 50, 60, 70, 79)
+    assert row.kv_group_size == 8
+
+
+def _extending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: dict[str, Any]) -> Path:
+    path = write_registry(tmp_path / "variants.json", {"presets": rows})
+    monkeypatch.setenv(MODELS_ENV, str(path))
+    return path
+
+
+def test_a_row_extends_a_shipped_row_and_keeps_its_own_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fine-tune of a shipped model restates only what differs."""
+    _extending(tmp_path, monkeypatch, {"70b-variant": {
+        "extends": "70b", "model_id": "/models/variant", "eos_token_ids": [128001],
+        "calibration_dir": "calibration/variant"}})
+    base, row = resolve_preset("70b"), resolve_preset("70b-variant")
+    assert row.name == "70b-variant"
+    assert (row.model_id, row.eos_token_ids, row.calibration_dir) == (
+        "/models/variant", (128001,), "calibration/variant")
+    assert row.sampled_layers == base.sampled_layers and row.num_layers == base.num_layers
+    assert resolve_preset("70b") == base
+
+
+def test_identity_fields_are_not_inherited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _extending(tmp_path, monkeypatch, {"8b-variant": {"extends": "8b"}})
+    row = resolve_preset("8b-variant")
+    assert resolve_preset("8b").stage0_dir is not None
+    assert row.stage0_dir is None and row.run_prefixes == ()
+
+
+def test_extends_cannot_redefine_a_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _extending(tmp_path, monkeypatch, {"8b": {"extends": "70b"}})
+    with pytest.raises(ModelRegistryError, match="already defined"):
+        load_registry()
+
+
+def test_extends_names_its_missing_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _extending(tmp_path, monkeypatch, {"orphan": {"extends": "nope"}})
+    with pytest.raises(ModelRegistryError, match="extends 'nope'"):
+        load_registry()
+
+
+def test_extends_resolves_chains_within_a_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _extending(tmp_path, monkeypatch, {
+        "b": {"extends": "a", "temperature": 0.7},
+        "a": {"extends": "8b", "model_id": "/models/a"}})
+    assert resolve_preset("b").model_id == "/models/a"
+    assert resolve_preset("b").temperature == 0.7
+
+
+def test_an_extending_row_may_not_rename_itself(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _extending(tmp_path, monkeypatch, {"x": {"extends": "8b", "name": "y"}})
+    with pytest.raises(ModelRegistryError, match="key and the name are one thing"):
+        load_registry()
