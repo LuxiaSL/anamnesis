@@ -33,8 +33,10 @@ from anamnesis.extraction.vllm.transfer import (
     BASE_MAX_FLOOR,
     ORDINARY_RULE,
     RULES,
+    UNRANKED,
     TransferReceipt,
     extension_lane_id,
+    ordinary_rows,
     path_ruler,
     select_strata,
 )
@@ -87,6 +89,8 @@ def test_a_sample_inside_the_base_regime_passes_with_fixtures_and_a_tolerance():
     assert tolerance.families == base_tolerance().families
     assert tolerance.discrete == base_tolerance().discrete
     assert tolerance.median_gate_stratum == ORDINARY_RULE
+    assert [r.generation_id for r in fixtures.rows if r.selected_by == ORDINARY_RULE] \
+        == list(ordinary_rows(s.ids)) == list(receipt.ordinary_rows)
     by_name = {c.name: c for c in tolerance.components}
     ratios = [r.component_ratios["attention"] for r in receipt.rows]
     assert by_name["attention"].max_ratio == pytest.approx(max(ratios))
@@ -154,15 +158,32 @@ def test_the_ordinary_median_over_the_base_p90_refuses():
     assert not any("outside the recorded ceiling" in r for r in reasons)
 
 
-def test_one_ordinary_row_over_the_base_p99_refuses_though_under_the_ceiling():
+def test_one_ordinary_row_over_the_base_p99_passes_and_is_counted():
+    """An in-regime fine-tune puts about one row in a hundred over the base's p99."""
     s = sample()
     tolerance = base_tolerance(**LOOSE_RESIDUAL)
     strata = select_strata(s, tolerance)
     gid = ORDINARY_OF(strata)[0]
-    reasons = run(with_candidate(s, {gid: _shift(s, gid, NAMES.index("res_2"), 4.5)}),
-                  tolerance, strata=strata).receipt.reasons
-    assert any(f"row {gid}: substrate ratio" in r and "p99" in r for r in reasons)
-    assert not any("outside the recorded ceiling" in r or "median" in r for r in reasons)
+    result = run(with_candidate(s, {gid: _shift(s, gid, NAMES.index("res_2"), 4.5)}),
+                 tolerance, strata=strata)
+    assert result.receipt.verdict == "pass", result.receipt.reasons
+    assert result.receipt.ordinary_over_p99 == {"substrate": 1, "attention": 0}
+    assert result.receipt.ordinary_over_p90["substrate"] == 1
+
+
+def test_two_ordinary_rows_over_the_base_p99_refuse_though_under_the_ceiling():
+    s = sample()
+    tolerance = base_tolerance(**LOOSE_RESIDUAL)
+    strata = select_strata(s, tolerance)
+    first, second = ORDINARY_OF(strata)[:2]
+    shifted = {g: _shift(s, g, NAMES.index("res_2"), 4.5) for g in (first, second)}
+    receipt = run(with_candidate(s, shifted), tolerance, strata=strata).receipt
+    assert receipt.verdict == "refuse"
+    assert any("substrate: 2 of 16 ordinary rows exceed the recorded p99" in r
+               for r in receipt.reasons)
+    assert not any("outside the recorded ceiling" in r or "median" in r
+                   for r in receipt.reasons)
+    assert receipt.ordinary_over_p99["substrate"] == 2
 
 
 def test_a_lane_that_disagrees_with_itself_refuses():
@@ -209,6 +230,16 @@ def test_a_sample_below_the_minimum_refuses():
     strata = {g: ORDINARY_RULE for g in s.ids}
     reasons = run(s, strata=strata).receipt.reasons
     assert any("the sample holds 43 rows" in r for r in reasons)
+
+
+def test_strata_whose_ordinary_rows_are_not_the_id_stride_refuse():
+    s = sample()
+    strata = select_strata(s, base_tolerance())
+    ordinary = ORDINARY_OF(strata)
+    ranked = next(g for g, v in strata.items() if v != ORDINARY_RULE)
+    strata[ordinary[0]], strata[ranked] = strata[ranked], ORDINARY_RULE
+    reasons = run(s, strata=strata).receipt.reasons
+    assert any("ordinary stratum must be the rows evenly spaced" in r for r in reasons)
 
 
 def test_strata_must_cover_the_sample():
@@ -270,14 +301,71 @@ def test_a_row_whose_paths_agree_exactly_has_no_floor_to_divide_by():
         path_ruler(replay, incremental)
 
 
-def test_the_strata_follow_the_selection_rules_and_leave_the_rest_ordinary():
+def test_the_ordinary_rows_are_evenly_spaced_ids_and_the_rest_are_ranked():
     s = sample(n_rows=50)
     strata = select_strata(s, base_tolerance())
+    ids = sorted(s.ids)
+    expected = [ids[round((i + 0.5) * 50 / 16 - 0.5)] for i in range(16)]
+    assert ORDINARY_OF(strata) == expected == list(ordinary_rows(s.ids))
     for rule, count in RULES:
         assert sum(v == rule for v in strata.values()) == count
-    assert len(ORDINARY_OF(strata)) == 50 - sum(c for _, c in RULES)
-    top = max(s.ids, key=lambda g: (np.linalg.norm(s.standardized(g)[:len(ATTENTION)]), -g))
+    assert sum(v == UNRANKED for v in strata.values()) == 50 - 16 - sum(c for _, c in RULES)
+    pool = [g for g in s.ids if g not in expected]
+    top = max(pool, key=lambda g: (np.linalg.norm(s.standardized(g)[:len(ATTENTION)]), -g))
     assert strata[top] == "largest-attention-shift"
+
+
+def test_the_ordinary_stratum_does_not_depend_on_the_deviations():
+    """Permuting which row carries which deviation changes the ranked labels, never
+    which rows are ordinary."""
+    s = sample()
+    ids = list(s.ids)
+    deviations = [s.candidate[g] - s.reference[g] for g in ids]
+    rng = np.random.default_rng(7)
+    order = rng.permutation(len(ids))
+    permuted = with_candidate(s, {g: s.reference[g] + deviations[j]
+                                  for g, j in zip(ids, order)})
+    before, after = select_strata(s, base_tolerance()), select_strata(permuted, base_tolerance())
+    assert ORDINARY_OF(before) == ORDINARY_OF(after)
+    assert before != after
+    boosted = with_candidate(s, {g: _shift(s, g, NAMES.index("attn_flow_0"), 0.9)
+                                 for g in ORDINARY_OF(before)})
+    assert ORDINARY_OF(select_strata(boosted, base_tolerance())) == ORDINARY_OF(before)
+
+
+def _ratio_sample(ratios: np.ndarray, seed: int):
+    """A sample whose substrate ratio on row i is ``ratios[i]`` (floors are 1)."""
+    s = sample(seed=seed, scale=0.01)
+    residual = [NAMES.index(n) for n in ("res_0", "res_1", "res_2", "res_3")]
+    updates = {}
+    for g, ratio in zip(s.ids, ratios):
+        vector = s.candidate[g].copy()
+        vector[residual] = s.reference[g][residual] + np.float32(ratio / 2.0)
+        updates[g] = vector
+    return with_candidate(s, updates)
+
+
+def test_a_sample_drawn_from_the_base_ratio_distribution_passes():
+    """The base's ceilings are read from 190 draws of a ratio distribution, as a
+    qualification reads them from its rows; a fine-tune drawing its rows from the same
+    distribution passes, and does so across most draws."""
+    rng = np.random.default_rng(11)
+    population = rng.lognormal(mean=0.0, sigma=0.35, size=190)
+    from anamnesis.extraction.vllm.conformance import RowComponent
+    from synthetic_extension import SUBSTRATE
+
+    base = base_tolerance(**LOOSE_RESIDUAL)
+    substrate = RowComponent(name="substrate", feature_names=SUBSTRATE,
+                             max_ratio=float(population.max()),
+                             p90_ratio=float(np.percentile(population, 90)),
+                             p99_ratio=float(np.percentile(population, 99)), source="draws")
+    tolerance = base.model_copy(update=dict(components=(substrate, base.components[1])))
+    verdicts = []
+    for seed in range(60):
+        draw = np.random.default_rng(1000 + seed).lognormal(0.0, 0.35, size=44)
+        verdicts.append(run(_ratio_sample(draw, seed), tolerance).receipt.verdict)
+    assert verdicts[0] == "pass"
+    assert verdicts.count("pass") / len(verdicts) >= 0.7
 
 
 def test_a_rule_under_which_every_row_ties_is_refused():

@@ -26,8 +26,10 @@ What it does (:func:`anamnesis.extraction.vllm.transfer_run.run_transfer`):
    numeric anchor's two execution paths for the fine-tune's own σ_cal and each
    row's path floor.
 3. Scores each row's vLLM deviation from the fast lane against the base's
-   ceilings, family maxima, median and tail gates. Rows whose path floor exceeds
-   the base's limit are named and left out of the scoring.
+   ceilings and family maxima, and 16 ordinary rows, fixed from the generation ids
+   before anything is measured, against the base's p90 (median) and p99 (at most
+   one row over it). Rows whose path floor exceeds the base's limit are named and
+   left out of the scoring.
 
 Written into ``--out`` (:func:`anamnesis.extraction.vllm.transfer_run.write_transfer`):
 the transfer receipt always; on a pass also the fine-tune's fixture set and

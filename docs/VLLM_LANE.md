@@ -152,8 +152,12 @@ way the install check scores a host:
 
 - each row's covered-substrate and attention distance over its path floor, under the base's
   ceilings, and each continuous coordinate under its family's recorded maximum;
-- the ordinary rows' median ratio under the base's 90th percentile, and every ordinary row
-  under its 99th;
+- the ordinary rows' median ratio under the base's 90th percentile, and at most one ordinary row
+  over its 99th. The 16 ordinary rows are evenly spaced over the sample's generation ids, chosen
+  before anything is measured: the median and tail gates compare the sample with population
+  quantiles of the base, which only means something over rows drawn without regard to how far
+  they deviate. The other rows are labelled by the deviation-ranked selection rules for the
+  fixture set, and those labels feed no gate;
 - the path floor is the fine-tune's own: how far the numeric anchor's one-forward replay and
   its token-by-token path disagree on the row, over a σ_cal fitted on the sample. A row whose
   floor exceeds the base's limit (`BASE_MAX_FLOOR` in
@@ -161,6 +165,18 @@ way the install check scores a host:
   fragile reference the deviation measures the reference rather than the lane;
 - every row is also captured again one at a time and in batches of eight, and all three
   vectors must be byte-identical.
+
+The tail rule is deliberately looser than the install check's, which bounds every ordinary
+row by the 99th percentile. A host reproducing a qualified lane deviates from its fixtures by
+far less than the qualification's own deviations, so a single row over the 99th percentile is
+already a sign the host is somewhere else. A fine-tune's deviation is a full vLLM-versus-fast-lane
+deviation on new weights, expected to be distributed like the base's own: each ordinary row then
+lands over the base's 99th percentile about one time in a hundred even when the fine-tune is
+exactly in regime, and bounding all 16 would refuse such a fine-tune about 15% of the time.
+Allowing one keeps that false refusal near 1% while still refusing a heavy tail. The receipt
+records how many ordinary rows exceeded the 90th and the 99th percentile. The fine-tune's own
+fixtures keep the same id-chosen ordinary rows, and its hosts' install checks apply the install
+check's own rules to them.
 
 A fine-tune inside the base's regime inherits the base's evidence that effects survive the
 lane, for the same reason a conformant host does. One outside it needs a qualification of its

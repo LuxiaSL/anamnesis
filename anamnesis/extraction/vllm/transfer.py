@@ -21,19 +21,37 @@ on a sample of the fine-tune's own rows:
 * the fine-tune's own ruler: a per-coordinate scale σ_cal and each row's path floor,
   how far the numeric anchor's full replay and its incremental path disagree
   (:func:`path_ruler` computes both from the two paths' vectors);
-* each row's stratum (:func:`select_strata` assigns it the way the shipped fixtures
-  were selected);
+* each row's stratum (:func:`select_strata`): 16 ordinary rows fixed from the
+  generation ids alone, before anything is measured, and the rest labelled for
+  the fixture set by the shipped selection rules;
 * captures of the rows repeated one at a time and batched in eights.
 
 :func:`check_transfer` scores the deviation with the **base's** tolerance, reusing
 the install check's scoring (:func:`anamnesis.extraction.vllm.conformance.score_rows`,
 :func:`~anamnesis.extraction.vllm.conformance.tolerance_reasons`): every row's
 component ratios under the base's ceilings and every family under the base's
-maxima, the ordinary stratum's median under the base's p90 and each ordinary row
-under its p99. Rows whose path floor exceeds the base's :data:`BASE_MAX_FLOOR` are
-named and left out of that scoring, because on a fragile reference the deviation
-measures the reference rather than the lane. The lane must also reproduce itself
-byte for byte across the repeat and the batch.
+maxima, and the ordinary stratum's median under the base's p90. Rows whose path
+floor exceeds the base's :data:`BASE_MAX_FLOOR` are named and left out of that
+scoring, because on a fragile reference the deviation measures the reference
+rather than the lane. The lane must also reproduce itself byte for byte across
+the repeat and the batch.
+
+**The ordinary stratum is chosen from ids, never from deviations.** The median
+and tail gates compare a sample statistic with a population quantile of the
+base, and that comparison only means something over rows drawn without regard to
+how far they deviate. Rows ranked by deviation are the sample's largest movers,
+so the rows left after them would be its calmest, and a median over those would
+pass a fine-tune that drifts everywhere.
+
+**The tail rule is a count, not a bound on every row.** The install check bounds
+every ordinary row by the base's p99 because a host reproducing the qualified
+lane deviates from its fixtures by far less than the qualification's own
+deviations. Here the deviation *is* a full engine-versus-hook deviation on new
+weights, expected to be distributed like the base's, so each ordinary row
+exceeds the base's p99 with probability about 0.01 even when the fine-tune is
+exactly in regime, and requiring all 16 under it would refuse such a fine-tune
+about 15% of the time. At most :data:`TAIL_ALLOWANCE` ordinary rows may exceed
+it; an in-regime fine-tune has two or more above it with probability about 1%.
 
 A pass returns a :class:`TransferReceipt` together with the fine-tune's own
 fixture set and tolerance, built from the sample by :func:`build_extension_fixtures`
@@ -98,15 +116,25 @@ SPECTRAL_FAMILY = "attn-spectral"
 COVERAGE_COORDINATE = re.compile(r"^cache_cache_coverage_")
 GATE_SPARSITY_COORDINATE = re.compile(r"^gate_L\d+_sparsity_")
 ORDINARY_RULE = "evenly-spaced"
+ORDINARY_ROWS = 16
+"""How many rows the ordinary stratum holds."""
+
+UNRANKED = "unranked"
+"""The label of a row neither ordinary nor taken by a ranked rule: it is a fixture,
+gated by the ceilings and family maxima, and read by no stratum gate."""
+
+TAIL_ALLOWANCE = 1
+"""How many ordinary rows may exceed the base's p99 ratio, per component."""
+
 RULES: tuple[tuple[str, int], ...] = (
     ("largest-attention-shift", 8),
     ("largest-coverage-shift", 8),
     ("largest-gate-sparsity-displacement", 8),
     ("largest-spectral-deviation", 4),
 )
-"""The ranked selection rules, in order, with how many rows each takes. Every row
-none of them takes belongs to :data:`ORDINARY_RULE`, the stratum the median and
-tail gates read."""
+"""The ranked selection rules, in order, with how many rows each takes from the
+rows outside the ordinary stratum. Their labels shape the fixture set and never
+feed a gate."""
 
 SUBSTRATE_LABEL = "transfer check: fast lane vs vLLM lane distance / path floor"
 
@@ -221,6 +249,14 @@ class TransferReceipt(BaseModel):
     fragile_rows: tuple[int, ...] = Field(description="Rows over the limit, left out of the "
                                                       "scoring")
     determinism_rows: int = Field(ge=0)
+    ordinary_rows: tuple[int, ...] = Field(
+        default=(), description="The id-chosen rows the median and tail gates read")
+    ordinary_over_p90: dict[str, int] = Field(
+        default_factory=dict, description="Per component, scored ordinary rows over the "
+                                          "base's p90 ratio")
+    ordinary_over_p99: dict[str, int] = Field(
+        default_factory=dict, description="Per component, scored ordinary rows over the "
+                                          "base's p99 ratio")
     rows: tuple[RowResult, ...]
     family_report: dict[str, float] = Field(
         description="Per family, the worst |δ|/σ over the scored rows, over the base's maximum")
@@ -299,21 +335,38 @@ def _rank(scores: Mapping[int, float], rule: str) -> list[int]:
     return sorted(scores, key=lambda g: (-scores[g], g))
 
 
-def select_strata(sample: TransferSample, base_tolerance: Tolerance) -> dict[int, str]:
-    """Each sampled row's stratum, chosen the way the shipped fixtures were.
+def evenly_spaced(ids: Sequence[int], k: int) -> list[int]:
+    """``k`` of ``ids`` at even strides through them, in order: position
+    ``round((i + 0.5) · n / k − 0.5)`` for i < k; all of them when there are at most k."""
+    n = len(ids)
+    if n <= k:
+        return list(ids)
+    return [ids[round((i + 0.5) * n / k - 0.5)] for i in range(k)]
 
-    The rules in :data:`RULES` take, in order, the rows with the largest attention
-    distance, the largest coverage shift, the largest gate-sparsity displacement
-    (summed |δ|/σ_cal over the discrete gate-sparsity coordinates) and the largest
-    spectral-family deviation, all read from the candidate's deviation from the
-    reference. A row already taken is skipped and the next rank taken; ties break
-    by generation id. Every remaining row is :data:`ORDINARY_RULE`.
+
+def ordinary_rows(ids: Collection[int]) -> tuple[int, ...]:
+    """The ordinary stratum of a sample: :data:`ORDINARY_ROWS` rows evenly spaced
+    over its sorted generation ids, fixed before anything is measured."""
+    return tuple(evenly_spaced(sorted(ids), ORDINARY_ROWS))
+
+
+def select_strata(sample: TransferSample, base_tolerance: Tolerance) -> dict[int, str]:
+    """Each sampled row's stratum: ordinary rows from ids, the rest ranked for the fixtures.
+
+    The ordinary stratum is :func:`ordinary_rows`, a function of the sampled ids
+    alone. From the other rows, the rules in :data:`RULES` take, in order, the rows
+    with the largest attention distance, the largest coverage shift, the largest
+    gate-sparsity displacement (summed |δ|/σ_cal over the discrete gate-sparsity
+    coordinates) and the largest spectral-family deviation, all read from the
+    candidate's deviation from the reference. A row already taken is skipped and
+    the next rank taken; ties break by generation id. A row left over is
+    :data:`UNRANKED`.
 
     Raises
     ------
     ValueError
         When the sample is outside :data:`SAMPLE_ROWS`, the base tolerance lacks a
-        coordinate a rule reads, or every row scores the same under a rule.
+        coordinate a rule reads, or every candidate row scores the same under a rule.
     """
     ids = sample.ids
     low, high = SAMPLE_ROWS
@@ -333,15 +386,16 @@ def select_strata(sample: TransferSample, base_tolerance: Tolerance) -> dict[int
     for name, ix in (("coverage", coverage), ("gate-sparsity", gate), ("spectral", spectral)):
         if not ix.size:
             raise ValueError(f"the schema has no {name} coordinate to rank by")
+    taken: dict[int, str] = {gid: ORDINARY_RULE for gid in ordinary_rows(ids)}
+    pool = [gid for gid in ids if gid not in taken]
     scores: dict[str, dict[int, float]] = {rule: {} for rule, _ in RULES}
-    for gid in ids:
+    shift, cov, gates, spec = (rule for rule, _ in RULES)
+    for gid in pool:
         z = sample.standardized(gid)
-        shift, cov, gates, spec = (rule for rule, _ in RULES)
         scores[shift][gid] = float(np.sqrt(np.sum(sample.weights[attention] * z[attention] ** 2)))
         scores[cov][gid] = float(np.abs(z[coverage]).max())
         scores[gates][gid] = float(np.abs(z[gate]).sum())
         scores[spec][gid] = float(np.abs(z[spectral]).max())
-    taken: dict[int, str] = {}
     for rule, count in RULES:
         added = 0
         for gid in _rank(scores[rule], rule):
@@ -350,7 +404,7 @@ def select_strata(sample: TransferSample, base_tolerance: Tolerance) -> dict[int
             if gid not in taken:
                 taken[gid] = rule
                 added += 1
-    return {gid: taken.get(gid, ORDINARY_RULE) for gid in ids}
+    return {gid: taken.get(gid, UNRANKED) for gid in ids}
 
 
 def _determinism_reasons(sample: TransferSample,
@@ -392,7 +446,8 @@ def build_extension_fixtures(
 
     Every sampled row is a fixture, carrying its stratum and its path floor, and
     its vector is the vLLM lane's. The tolerance keeps the base's components,
-    families, discrete coordinates and median-gate stratum; its ceilings are the
+    families, discrete coordinates and median-gate stratum, so a host's install
+    check gates its median and tail on the same id-chosen ordinary rows; its ceilings are the
     maximum, 90th and 99th percentile of the sample's own ratios, and its family
     maxima the sample's own largest |δ|/σ_cal, each over the rows not in
     ``fragile``, which it names as excluded.
@@ -476,6 +531,9 @@ def check_transfer(
         raise ValueError(f"{key!r} is a shipped lane; an extension takes a key of its own")
     if base_tolerance.model != extends:
         raise ValueError(f"the tolerance given is {base_tolerance.model!r}'s, not {extends!r}'s")
+    if base_tolerance.median_gate_stratum != ORDINARY_RULE:
+        raise ValueError(f"the {extends} tolerance gates stratum "
+                         f"{base_tolerance.median_gate_stratum!r}, not {ORDINARY_RULE!r}")
     reasons: list[str] = []
     if tuple(sample.feature_names) != tuple(base_feature_names):
         reasons.append(f"the sample's feature schema is not the {extends} lane's")
@@ -483,13 +541,19 @@ def check_transfer(
     if not low <= len(sample.rows) <= high:
         reasons.append(f"the sample holds {len(sample.rows)} rows; a transfer sample holds "
                        f"{low} to {high}")
+    ordinary = ordinary_rows(sample.ids)
     if set(strata) != set(sample.ids):
         reasons.append("the strata must name every sampled row and no other")
+    elif {g for g, s in strata.items() if s == ORDINARY_RULE} != set(ordinary):
+        reasons.append("the ordinary stratum must be the rows evenly spaced over the sampled "
+                       "ids, chosen before any deviation is read")
     reasons += _determinism_reasons(sample, determinism)
     fragile = tuple(sorted(g for g, f in sample.floors.items()
                            if max_floor is not None and f > max_floor))
     rows: list[RowResult] = []
     family_report: dict[str, float] = {}
+    over_p90: dict[str, int] = {}
+    over_p99: dict[str, int] = {}
     if not reasons:
         if len(fragile) == len(sample.rows):
             reasons.append(f"every sampled row's path floor exceeds {max_floor}")
@@ -498,7 +562,22 @@ def check_transfer(
                 sample.feature_names, sample.sigma_cal, sample.weights, sample.floors,
                 sample.reference, sample.candidate, base_tolerance,
                 exclude_from_report=fragile)
-            reasons += tolerance_reasons(rows, base_tolerance, strata, exclude=fragile)
+            no_row_tail = base_tolerance.model_copy(update=dict(components=tuple(
+                c.model_copy(update=dict(p99_ratio=None)) for c in base_tolerance.components)))
+            reasons += tolerance_reasons(rows, no_row_tail, strata, exclude=fragile)
+            scored = [r for r in rows
+                      if r.generation_id in set(ordinary) and r.generation_id not in fragile]
+            for component in base_tolerance.components:
+                ratios = [r.component_ratios[component.name] for r in scored]
+                over_p90[component.name] = sum(x > component.p90_ratio for x in ratios)
+                if component.p99_ratio is None:
+                    continue
+                over_p99[component.name] = sum(x > component.p99_ratio for x in ratios)
+                if over_p99[component.name] > TAIL_ALLOWANCE:
+                    reasons.append(
+                        f"{component.name}: {over_p99[component.name]} of {len(scored)} "
+                        f"ordinary rows exceed the recorded p99 {component.p99_ratio:.3g}; "
+                        f"at most {TAIL_ALLOWANCE} may")
     fixtures = tolerance = None
     if not reasons:
         fixtures, tolerance = build_extension_fixtures(
@@ -512,7 +591,9 @@ def check_transfer(
         lane_id=extension_lane_id(extends, checkpoint_sha256),
         checkpoint_sha256=checkpoint_sha256, calibration_sha256=calibration_sha256,
         sample_sha256=sample.digest, max_floor=max_floor, fragile_rows=fragile,
-        determinism_rows=len({c.generation_id for c in determinism}), rows=tuple(rows),
+        determinism_rows=len({c.generation_id for c in determinism}),
+        ordinary_rows=ordinary, ordinary_over_p90=over_p90, ordinary_over_p99=over_p99,
+        rows=tuple(rows),
         family_report=family_report,
         fixture_digest=None if fixtures is None else fixtures.digest,
         tolerance_digest=None if tolerance is None else tolerance.digest)
