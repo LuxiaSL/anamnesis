@@ -57,6 +57,8 @@ from anamnesis.extraction.vllm.envelope import (
     engine_settings,
     enforce_lane_envelope,
     lane_id,
+    lane_model,
+    lane_preset,
     request_groups,
     require_environment,
     require_pinned_packages,
@@ -105,7 +107,14 @@ def fixtures_dir(model: str) -> Path:
 
 
 def load_fixtures(model: str) -> tuple[FixtureSet, Tolerance]:
-    """The shipped fixture set and tolerance for ``model``, digest-checked."""
+    """The fixture set and tolerance for ``model``, digest-checked: shipped, or an
+    extension lane's through its guard, :func:`anamnesis.extraction.vllm.extensions.admit`."""
+    if model not in LANE_MODELS:
+        from anamnesis.extraction.vllm.extensions import admit, declared_lane
+
+        if declared_lane(model) is not None:
+            admitted = admit(model)
+            return admitted.fixtures, admitted.tolerance
     path = fixtures_dir(model)
     fixtures = FixtureSet.load(path)
     tolerance = Tolerance.model_validate_json((path / "tolerance.json").read_text())
@@ -242,11 +251,11 @@ def capture_rows(spec: Mapping[str, Any]) -> None:
               .driver_worker.worker.model_runner)
     if type(runner.model).__name__ != "LlamaForCausalLM":
         raise ValueError("the engine did not resolve the model to its native Llama")
-    if LANE_MODELS[model]["logprob_wrapper"] == "explicit-fp32-input":
+    if lane_model(model)["logprob_wrapper"] == "explicit-fp32-input":
         promote_logprob_inputs(runner.sampler)
     sampling = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=0, logprobs=0,
                               detokenize=False, seed=settings["seed"])
-    preset = resolve_preset(model)
+    preset = resolve_preset(lane_preset(model))
     out = Path(spec["out"])
     out.mkdir(parents=True, exist_ok=False)
     for index in range(int(spec["passes"])):
@@ -288,7 +297,7 @@ def readout_lane(model: str, calib_dir: Path, feature_names: Sequence[str],
     from anamnesis.extraction.fast.features import GpuFeatureLane
     from anamnesis.extraction.replay_config import native_replay_configs
 
-    extraction, families = native_replay_configs(resolve_preset(model))
+    extraction, families = native_replay_configs(resolve_preset(lane_preset(model)))
     positional_means, components, mean = load_calibration(Path(calib_dir), True)
     return GpuFeatureLane(extraction, families, list(feature_names), positional_means,
                           components, mean, device=device,
@@ -419,9 +428,22 @@ def check_install(model: str, model_path: Path, calib_dir: Path, work_dir: Path,
                          f"were produced from: its config and weights digest to "
                          f"{fingerprint.checkpoint_sha256}, the fixtures to "
                          f"{fixtures.checkpoint_sha256}")
+    captured = capture_repeats(model, model_path, calib_dir, fixture_rows(fixtures),
+                               fixtures.feature_names, work_dir)
+    receipt = decide(fixtures, tolerance, fingerprint, captured)
+    cache.store(receipt)
+    return receipt, False
+
+
+def capture_repeats(model: str, model_path: Path, calib_dir: Path,
+                    rows: Sequence[Mapping[str, Any]], feature_names: Sequence[str],
+                    work_dir: Path) -> list[CapturedFixture]:
+    """Each row's vectors captured twice under ``full-b1-order0`` and once under
+    ``full-b8-order0`` into ``work_dir`` (which must not exist); a row missing from
+    any pass is left out."""
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=False)
-    rows = fixture_rows(fixtures)
+    rows = list(rows)
     for label, condition_id, passes in (("single", "full-b1-order0", 2),
                                         ("batched", "full-b8-order0", 1)):
         run_step("capture", dict(model=model, model_path=str(model_path),
@@ -429,18 +451,15 @@ def check_install(model: str, model_path: Path, calib_dir: Path, work_dir: Path,
                                  out=str(work_dir / label), rows=rows),
                  work_dir / f"{label}.capture.json")
         run_step("reduce", dict(model=model, calib_dir=str(calib_dir),
-                                feature_names=list(fixtures.feature_names),
+                                feature_names=list(feature_names),
                                 captures=str(work_dir / label), rows=rows),
                  work_dir / f"{label}.reduce.json")
     first = pass_vectors(work_dir / "single" / "pass-0")
     repeat = pass_vectors(work_dir / "single" / "pass-1")
     batched = pass_vectors(work_dir / "batched" / "pass-0")
     common = sorted(set(first) & set(repeat) & set(batched))
-    captured = [CapturedFixture(generation_id=g, first=first[g], repeat=repeat[g],
-                                batched=batched[g]) for g in common]
-    receipt = decide(fixtures, tolerance, fingerprint, captured)
-    cache.store(receipt)
-    return receipt, False
+    return [CapturedFixture(generation_id=g, first=first[g], repeat=repeat[g],
+                            batched=batched[g]) for g in common]
 
 
 def usable_receipt(model: str, model_path: Path, cache_dir: Path) -> ConformanceReceipt:
@@ -536,7 +555,7 @@ def span_schemas(model: str, calib_dir: Path, rows: Sequence[Mapping[str, Any]],
     from anamnesis.extraction.fast.schema import resolve_gpu_schema
     from anamnesis.extraction.replay_config import native_replay_configs
 
-    preset = resolve_preset(model)
+    preset = resolve_preset(lane_preset(model))
     extraction, families = native_replay_configs(preset)
     _, components, _ = load_calibration(Path(calib_dir), True)
     schemas, by_steps = {}, {}

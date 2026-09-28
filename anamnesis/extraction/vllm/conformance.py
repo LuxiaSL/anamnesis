@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Literal, Self
 
@@ -282,8 +282,134 @@ def conformant_lane_id(qualified_lane_id: str, fingerprint: HostFingerprint) -> 
     return f"{qualified_lane_id}+host-{fingerprint.digest[:16]}"
 
 
-def _standardized(delta: NDArray[np.float64], fixtures: FixtureSet) -> NDArray[np.float64]:
-    return delta / fixtures.sigma_cal
+def check_coordinates(feature_names: Sequence[str], tolerance: Tolerance) -> dict[str, int]:
+    """Each feature name's index, after refusing a tolerance that names others.
+
+    Raises
+    ------
+    ValueError
+        When a component, family or discrete coordinate of ``tolerance`` is not
+        one of ``feature_names``.
+    """
+    index = {name: i for i, name in enumerate(feature_names)}
+    unknown = [n for c in tolerance.components for n in c.feature_names if n not in index]
+    unknown += [n for n in (*tolerance.families, *tolerance.discrete) if n not in index]
+    if unknown:
+        raise ValueError(f"tolerance names coordinates the fixtures lack: {unknown[:5]}")
+    return index
+
+
+def score_rows(
+    feature_names: Sequence[str],
+    sigma_cal: NDArray[np.float64],
+    weights: NDArray[np.float64],
+    floors: Mapping[int, float],
+    reference: Mapping[int, NDArray[np.float32]],
+    candidate: Mapping[int, NDArray[np.float32]],
+    tolerance: Tolerance,
+    *,
+    exclude_from_report: Collection[int] = (),
+) -> tuple[list[RowResult], dict[str, float]]:
+    """Score each row's deviation of ``candidate`` from ``reference`` under ``tolerance``.
+
+    Per row, in generation-id order: whether the vectors are byte-identical, each
+    component's distance d = sqrt(Σ w·(δ/σ_cal)²) over the row's floor, whether every
+    component stays within its ``max_ratio``, the family whose largest continuous
+    |δ|/σ_cal is furthest over its recorded maximum, and the discrete coordinates that
+    changed. Also returns, per family, the worst excess over the rows not in
+    ``exclude_from_report``.
+
+    ``reference`` and ``candidate`` must hold the same generation ids, each a float32
+    vector over ``feature_names``; ``floors`` holds a positive floor for each.
+    """
+    index = check_coordinates(feature_names, tolerance)
+    component_ix = {c.name: np.asarray([index[n] for n in c.feature_names])
+                    for c in tolerance.components}
+    members: dict[str, list[int]] = {}
+    for name, family in tolerance.families.items():
+        members.setdefault(family, []).append(index[name])
+    family_ix = {f: np.asarray(ix, dtype=np.int64) for f, ix in members.items()}
+    discrete_ix = np.asarray([index[n] for n in tolerance.discrete], dtype=np.int64)
+    excluded = set(exclude_from_report)
+
+    rows: list[RowResult] = []
+    family_report: dict[str, float] = {f: 0.0 for f in family_ix}
+    for gid in sorted(reference):
+        fixture = reference[gid]
+        vector = candidate[gid]
+        identical = vector.tobytes() == fixture.tobytes()
+        z = (vector.astype(np.float64) - fixture.astype(np.float64)) / sigma_cal
+        ratios = {}
+        within = True
+        for component in tolerance.components:
+            ix = component_ix[component.name]
+            distance = float(np.sqrt(np.sum(weights[ix] * z[ix] ** 2)))
+            ratios[component.name] = distance / floors[gid]
+            within &= ratios[component.name] <= component.max_ratio
+        worst_family, worst_excess = None, 0.0
+        for family, ix in family_ix.items():
+            excess = float(np.abs(z[ix]).max()) / tolerance.family_max_abs_sigma[family] \
+                if tolerance.family_max_abs_sigma[family] > 0 \
+                else (0.0 if not np.abs(z[ix]).any() else float("inf"))
+            if gid not in excluded:
+                family_report[family] = max(family_report[family], excess)
+            if excess > worst_excess:
+                worst_family, worst_excess = family, excess
+        crossings = int(np.count_nonzero(vector[discrete_ix] != fixture[discrete_ix])) \
+            if discrete_ix.size else 0
+        rows.append(RowResult(generation_id=gid, byte_identical=identical,
+                              component_ratios=ratios, components_within=within,
+                              worst_family=worst_family, worst_family_excess=worst_excess,
+                              discrete_crossings=crossings))
+    return rows, family_report
+
+
+def tolerance_reasons(
+    rows: Sequence[RowResult],
+    tolerance: Tolerance,
+    selected_by: Mapping[int, str],
+    *,
+    exclude: Collection[int] = (),
+) -> list[str]:
+    """Every way scored ``rows`` fall outside ``tolerance``; empty when none does.
+
+    Each row not in ``exclude`` must keep every component within its ceiling and
+    every family within its maximum. When the tolerance names a median-gate stratum,
+    the rows ``selected_by`` that stratum (``exclude`` left out) must keep each
+    component's median ratio at or below its p90 and, where a p99 is recorded, every
+    one of their ratios at or below it.
+    """
+    skip = set(exclude)
+    kept = [r for r in rows if r.generation_id not in skip]
+    reasons: list[str] = []
+    for r in kept:
+        if not r.components_within:
+            reasons.append(f"row {r.generation_id}: row distance outside the recorded ceiling "
+                           f"{r.component_ratios}")
+        if r.worst_family_excess > 1:
+            reasons.append(f"row {r.generation_id}: family {r.worst_family} at "
+                           f"{r.worst_family_excess:.3g}× its recorded maximum")
+    if tolerance.median_gate_stratum is not None:
+        ordinary = [r for r in kept if selected_by[r.generation_id]
+                    == tolerance.median_gate_stratum]
+        if not ordinary:
+            reasons.append("no fixture row carries the median gate's stratum")
+        for component in tolerance.components:
+            median = float(np.median([r.component_ratios[component.name] for r in ordinary])) \
+                if ordinary else float("inf")
+            if median > component.p90_ratio:
+                reasons.append(f"{component.name}: median ratio {median:.3g} over the "
+                               f"ordinary rows exceeds the recorded p90 "
+                               f"{component.p90_ratio:.3g}")
+            if component.p99_ratio is None:
+                continue
+            for r in ordinary:
+                if r.component_ratios[component.name] > component.p99_ratio:
+                    reasons.append(f"row {r.generation_id}: {component.name} ratio "
+                                   f"{r.component_ratios[component.name]:.3g} in the "
+                                   f"ordinary stratum exceeds the recorded p99 "
+                                   f"{component.p99_ratio:.3g}")
+    return reasons
 
 
 def decide(
@@ -304,11 +430,7 @@ def decide(
             or fingerprint.tolerance_digest != tolerance.digest:
         raise ValueError("fingerprint was taken against other fixtures or tolerance")
     names = fixtures.feature_names
-    index = {name: i for i, name in enumerate(names)}
-    unknown = [n for c in tolerance.components for n in c.feature_names if n not in index]
-    unknown += [n for n in (*tolerance.families, *tolerance.discrete) if n not in index]
-    if unknown:
-        raise ValueError(f"tolerance names coordinates the fixtures lack: {unknown[:5]}")
+    check_coordinates(names, tolerance)
 
     reasons: list[str] = []
     if fingerprint.checkpoint_sha256 != fixtures.checkpoint_sha256:
@@ -328,76 +450,16 @@ def decide(
                                   reasons=tuple(reasons), fingerprint=fingerprint,
                                   rows=(), family_report={})
 
-    component_ix = {c.name: np.asarray([index[n] for n in c.feature_names])
-                    for c in tolerance.components}
-    members: dict[str, list[int]] = {}
-    for name, family in tolerance.families.items():
-        members.setdefault(family, []).append(index[name])
-    family_ix = {f: np.asarray(ix, dtype=np.int64) for f, ix in members.items()}
-    discrete_ix = np.asarray([index[n] for n in tolerance.discrete], dtype=np.int64)
-
-    rows: list[RowResult] = []
-    family_report: dict[str, float] = {f: 0.0 for f in family_ix}
-    floors = {r.generation_id: r.floor_b for r in fixtures.rows}
-    selected_by = {r.generation_id: r.selected_by for r in fixtures.rows}
-    for gid in sorted(fixtures.vectors):
-        fixture = fixtures.vectors[gid]
-        vector = by_gid[gid].first
-        identical = vector.tobytes() == fixture.tobytes()
-        z = _standardized(vector.astype(np.float64) - fixture.astype(np.float64), fixtures)
-        ratios = {}
-        within = True
-        for component in tolerance.components:
-            ix = component_ix[component.name]
-            distance = float(np.sqrt(np.sum(fixtures.weights[ix] * z[ix] ** 2)))
-            ratios[component.name] = distance / floors[gid]
-            within &= ratios[component.name] <= component.max_ratio
-        worst_family, worst_excess = None, 0.0
-        for family, ix in family_ix.items():
-            excess = float(np.abs(z[ix]).max()) / tolerance.family_max_abs_sigma[family] \
-                if tolerance.family_max_abs_sigma[family] > 0 \
-                else (0.0 if not np.abs(z[ix]).any() else float("inf"))
-            family_report[family] = max(family_report[family], excess)
-            if excess > worst_excess:
-                worst_family, worst_excess = family, excess
-        crossings = int(np.count_nonzero(vector[discrete_ix] != fixture[discrete_ix])) \
-            if discrete_ix.size else 0
-        rows.append(RowResult(generation_id=gid, byte_identical=identical,
-                              component_ratios=ratios, components_within=within,
-                              worst_family=worst_family, worst_family_excess=worst_excess,
-                              discrete_crossings=crossings))
-
+    rows, family_report = score_rows(
+        names, fixtures.sigma_cal, fixtures.weights,
+        {r.generation_id: r.floor_b for r in fixtures.rows}, fixtures.vectors,
+        {gid: by_gid[gid].first for gid in fixtures.vectors}, tolerance)
     if all(r.byte_identical for r in rows):
         tier: Tier = "identical"
         lane_id: str | None = qualified
     else:
-        for r in rows:
-            if not r.components_within:
-                reasons.append(f"row {r.generation_id}: row distance outside the recorded ceiling "
-                               f"{r.component_ratios}")
-            if r.worst_family_excess > 1:
-                reasons.append(f"row {r.generation_id}: family {r.worst_family} at "
-                               f"{r.worst_family_excess:.3g}× its recorded maximum")
-        if tolerance.median_gate_stratum is not None:
-            ordinary = [r for r in rows if selected_by[r.generation_id]
-                        == tolerance.median_gate_stratum]
-            if not ordinary:
-                reasons.append("no fixture row carries the median gate's stratum")
-            for component in tolerance.components:
-                median = float(np.median([r.component_ratios[component.name] for r in ordinary])) \
-                    if ordinary else float("inf")
-                if median > component.p90_ratio:
-                    reasons.append(f"{component.name}: median ratio {median:.3g} over the "
-                                   f"ordinary rows exceeds the recorded p90 "
-                                   f"{component.p90_ratio:.3g}")
-                if component.p99_ratio is None:
-                    continue
-                for r in ordinary:
-                    if r.component_ratios[component.name] > component.p99_ratio:
-                        reasons.append(f"row {r.generation_id}: {component.name} ratio "
-                                       f"{r.component_ratios[component.name]:.3g} in the "
-                                       f"ordinary stratum exceeds the recorded p99 "
-                                       f"{component.p99_ratio:.3g}")
+        reasons = tolerance_reasons(rows, tolerance,
+                                    {r.generation_id: r.selected_by for r in fixtures.rows})
         tier = "refused" if reasons else "conformant"
         lane_id = None if reasons else conformant_lane_id(qualified, fingerprint)
     return ConformanceReceipt(tier=tier, lane_id=lane_id, qualified_lane_id=qualified,

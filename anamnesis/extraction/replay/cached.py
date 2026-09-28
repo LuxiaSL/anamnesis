@@ -190,3 +190,89 @@ def replay_extract_cached(
         queries=queries,
         attn_outputs=attn_outputs,
     )
+
+
+def replay_extract_incremental(
+    loaded: LoadedModel,
+    full_token_ids: list[int] | NDArray | Tensor,
+    prompt_length: int,
+    positional_means: F32 | None = None,
+) -> RawGenerationData:
+    """:func:`anamnesis.extraction.replay.extract.replay_extract`'s states and alignment,
+    computed the generate path's way: prompt prefill, then one cached forward per
+    generated position. The distance between the two paths' vectors is a row's path
+    floor. Dense models only: a router surface is refused, not dropped.
+
+    Raises
+    ------
+    ValueError
+        On a batch other than one sequence, or a span with no prompt or fewer than
+        two generated tokens.
+    NotImplementedError
+        When the loaded model captures a router surface.
+    """
+    device = next(loaded.model.parameters()).device
+    if isinstance(full_token_ids, Tensor):
+        ids = full_token_ids.to(device=device, dtype=torch.long)
+    else:
+        ids = torch.as_tensor(np.asarray(full_token_ids), dtype=torch.long, device=device)
+    if ids.ndim == 1:
+        ids = ids.unsqueeze(0)
+    if ids.shape[0] != 1:
+        raise ValueError(f"replay_extract_incremental expects one sequence, got {ids.shape[0]}")
+    length, start = int(ids.shape[1]), int(prompt_length)
+    if not 0 < start < length - 1:
+        raise ValueError(f"prompt_length {start} leaves fewer than two generated tokens "
+                         f"of {length}")
+    hidden: list[F32] = []
+    attentions: list[F32] = []
+    logits: list[F32] = []
+    stores: dict[str, dict[int, list[F32]]] = {
+        name: {} for name in ("pre_rope_keys", "v_proj_values", "queries",
+                              "gate_activations", "attn_outputs")}
+    loaded.clear_hook_state()
+    loaded.disable_hooks()
+    try:
+        with torch.no_grad():
+            prefill = loaded.model(ids[:, :start], use_cache=True, return_dict=True)
+        cache = prefill.past_key_values
+        del prefill
+        for position in range(start, length - 1):
+            loaded.clear_hook_state()
+            loaded.enable_hooks()
+            with torch.no_grad():
+                out = loaded.model(
+                    ids[:, position:position + 1], past_key_values=cache, use_cache=True,
+                    output_hidden_states=True, output_attentions=True, return_dict=True,
+                    position_ids=torch.tensor([[position]], device=device),
+                    cache_position=torch.tensor([position], device=device),
+                )
+            if loaded.hook_state.router_dist or loaded.hook_state.router_logit_norm:
+                raise NotImplementedError("the incremental path captures dense-model "
+                                          "surfaces only; this model routes to experts")
+            cache = out.past_key_values
+            hidden.append(np.stack([h[0, 0].float().cpu().numpy() for h in out.hidden_states]))
+            attentions.append(np.stack([a[0, :, 0, :].float().cpu().numpy()
+                                        for a in out.attentions]))
+            logits.append(out.logits[0, 0].float().cpu().numpy())
+            for name, dest in stores.items():
+                slicer = _slice_seq_hook if name in ("gate_activations", "attn_outputs") \
+                    else _slice_head_hook
+                for layer, values in (slicer(getattr(loaded.hook_state, name), 1) or {}).items():
+                    dest.setdefault(layer, []).extend(values)
+            del out
+    finally:
+        loaded.clear_hook_state()
+    return RawGenerationData(
+        hidden_states=hidden,
+        attentions=attentions,
+        logits=logits,
+        chosen_token_ids=ids[0, start + 1:length].float().cpu().numpy(),
+        pre_rope_keys=stores["pre_rope_keys"],
+        prompt_length=start,
+        positional_means=positional_means,
+        gate_activations=stores["gate_activations"] or None,
+        v_proj_values=stores["v_proj_values"] or None,
+        queries=stores["queries"] or None,
+        attn_outputs=stores["attn_outputs"] or None,
+    )

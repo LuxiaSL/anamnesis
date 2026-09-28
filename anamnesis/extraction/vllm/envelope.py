@@ -26,6 +26,10 @@ and refused by name when a run asks for anything else:
 :func:`lane_id` is the lane id a model's fixtures carry: a digest of the
 facts above that are fixed per model. :func:`enforce_lane_envelope` is the gate
 every engine construction passes first.
+
+A lane key is also an **extension lane** (:mod:`anamnesis.extraction.vllm.extensions`),
+a declared fine-tune of a shipped model: it inherits its base's facts and settings
+and has its own lane id. A shipped key never reads the extension file.
 """
 
 from __future__ import annotations
@@ -117,30 +121,62 @@ def canonical_digest(value: Any) -> str:
                                      allow_nan=False).encode()).hexdigest()
 
 
+def _extension(model: str):
+    """The extension lane declared as ``model``; see :mod:`anamnesis.extraction.vllm.extensions`.
+
+    Raises
+    ------
+    ValueError
+        When ``model`` names no lane.
+    """
+    from anamnesis.extraction.vllm.extensions import declared_lane, lane_keys
+
+    entry = declared_lane(model)
+    if entry is None:
+        raise ValueError(f"{model!r} has no vLLM lane (declared: {', '.join(lane_keys())})")
+    return entry
+
+
 def lane_model(model: str) -> dict[str, str]:
-    """The declared facts for ``model``.
+    """The declared facts for ``model``: its own, or for an extension its base's.
 
     Raises
     ------
     ValueError
         When ``model`` has no vLLM lane.
     """
-    if model not in LANE_MODELS:
-        raise ValueError(f"{model!r} has no vLLM lane (declared: "
-                         f"{', '.join(sorted(LANE_MODELS))})")
-    return LANE_MODELS[model]
+    return LANE_MODELS[model if model in LANE_MODELS else _extension(model).extends]
+
+
+def lane_preset(model: str) -> str:
+    """The registry preset ``model``'s lane reads its layer plan from."""
+    return model if model in LANE_MODELS else _extension(model).preset
+
+
+def extension_lane_id(extends: str, checkpoint_sha256: str) -> str:
+    """An extension's lane id: the digest of its base's identity, the base's key and
+    the checkpoint digest, a shape no shipped identity has."""
+    return canonical_digest(dict(base=lane_identity(extends), extends=extends,
+                                 checkpoint_sha256=checkpoint_sha256))
 
 
 def lane_identity(model: str) -> dict[str, Any]:
-    """The facts a model's lane fixes, as its lane id digests them."""
-    facts = lane_model(model)
+    """The facts a shipped model's lane fixes, as its lane id digests them."""
+    if model not in LANE_MODELS:
+        raise ValueError(f"{model!r} has no vLLM lane of its own; an extension's identity "
+                         "is extension_lane_id's")
+    facts = LANE_MODELS[model]
     return dict(model=model, dtype=facts["dtype"], invariant_mode=True,
                 attention_backend="TRITON_ATTN", tensor_parallel_size=1,
                 logprob_wrapper=facts["logprob_wrapper"])
 
 
 def lane_id(model: str) -> str:
-    """The lane id ``model``'s fixtures carry: the digest of its identity."""
+    """The lane id ``model``'s fixtures carry: the digest of its identity, or for an
+    extension :func:`extension_lane_id`."""
+    if model not in LANE_MODELS:
+        entry = _extension(model)
+        return extension_lane_id(entry.extends, entry.checkpoint_sha256)
     return canonical_digest(lane_identity(model))
 
 
@@ -264,11 +300,19 @@ def enforce_lane_envelope(settings: Mapping[str, Any], environment: Mapping[str,
     if not isinstance(lane, str) or not lane:
         raise ValueError("a lane id is required before any engine construction")
     if model not in LANE_MODELS:
-        _refuse(lane, f"model {model!r} has no vLLM lane")
+        from anamnesis.extraction.vllm.extensions import admit, declared_lane
+
+        if declared_lane(model) is None:
+            _refuse(lane, f"model {model!r} has no vLLM lane")
+        try:
+            admit(model)
+        except ValueError as exc:
+            _refuse(lane, str(exc))
+    declared = lane_model(model)["dtype"]
     dtype = settings.get("dtype")
-    if dtype != LANE_MODELS[model]["dtype"]:
+    if dtype != declared:
         _refuse(lane, f"dtype {dtype!r} for model {model} "
-                      f"(declared: {LANE_MODELS[model]['dtype']})")
+                      f"(declared: {declared})")
     if environment.get("VLLM_BATCH_INVARIANT") != "1":
         _refuse(lane, "non-invariant mode (VLLM_BATCH_INVARIANT must be 1)")
     if environment.get("VLLM_PLUGINS") != "":
