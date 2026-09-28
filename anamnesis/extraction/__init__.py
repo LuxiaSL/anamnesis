@@ -18,7 +18,7 @@ Three layers, kept apart on purpose:
 reason the families can run without a model: what a generation was is banked once
 and re-read as often as the feature set changes.
 
-The model-facing side is three more modules and a subpackage:
+The model-facing side is three more modules and two subpackages:
 
 * :mod:`anamnesis.extraction.model_loader` — the checkpoint on a device with hooks
   on it. Keys, values and queries are captured pre-RoPE from the projection
@@ -34,6 +34,9 @@ The model-facing side is three more modules and a subpackage:
 * :mod:`anamnesis.extraction.replay` — the determinism core. Teacher-forcing a
   realized token sequence reproduces the states that produced it, which is what
   makes a signature an object about a span of text rather than about a generation.
+* :mod:`anamnesis.extraction.vllm` — the vLLM lane: the fast lane's features
+  computed from a vLLM engine, with the install check that decides which lane a
+  host's outputs belong to.
 
 Two more are about a capture's edges rather than its middle:
 

@@ -81,6 +81,16 @@ judge = [
     "anthropic>=0.40",
     "requests>=2.31",
 ]
+# The vLLM lane computes the fast lane's features from a vLLM engine. Its attention
+# backend subclasses the engine's Triton attention and its capture wraps private
+# model-runner methods, so the engine, torch and Triton are pinned to the releases
+# the lane was written against, and anamnesis/extraction/vllm/envelope.py refuses any
+# other version before an engine is built. Only that lane needs them.
+vllm = [
+    "vllm==0.16.0",
+    "torch==2.9.1",
+    "triton==3.5.1",
+]
 
 [tool.hatch.build.targets.wheel]
 # ``tools`` is the gate tooling: it checks this repository rather than forming part

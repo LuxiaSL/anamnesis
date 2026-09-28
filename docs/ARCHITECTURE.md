@@ -147,17 +147,38 @@ the code: floating-point reduction order differs across BLAS builds and thread c
 `anamnesis/extraction/equivalence/` holds the evidence checks and
 `anamnesis/scripts/qualify_box.py` is how an operator qualifies their own box.
 
+## The vLLM lane
+
+`anamnesis/extraction/vllm/` computes the fast lane's named vector from a vLLM engine
+instead of an eager forward: an instrumented attention backend gathers the attention
+statistics inside the engine's own kernel, the model runner is hooked for the rest of the
+substrate, and a separate process reduces each capture with the fast lane's reducers. It
+exists for three models (`3b`, `8b`, `70b`), on one GPU, inside the envelope
+`anamnesis/extraction/vllm/envelope.py` declares, with the engine, torch and Triton
+pinned; everything else is refused by name before an engine is built.
+
+Its identity works differently from the fast lane's, because a vLLM lane is checked
+against its own recorded output rather than against the anchor. Each model's fixtures are
+what its lane produced on a set of rows when it was compared with the numeric anchor, and
+they ship with the package beside the tolerance that comparison found harmless.
+`qualify_vllm` checks a host against those fixtures and caches a receipt: a host that
+reproduces every fixture vector byte for byte carries the lane's recorded id; a host within
+the tolerance is a lane of its own, with an id derived from its fingerprint; anything else
+is refused. `run_vllm_replay` banks only on a host with a receipt that did not refuse it,
+and stamps each row with that lane id, so `lane_guard` keeps vLLM rows, fast-lane rows and
+two hosts' conformant rows apart. `docs/VLLM_LANE.md` is the operator's guide.
+
 ## What runs on which model
 
-Two paths compute a signature, and they do not accept the same models.
+Three paths compute a signature, and they do not accept the same models.
 
-| | Hook path — the numeric anchor | Fast lane |
-|---|---|---|
-| Commands | `run_extraction` (generate and capture), `run_replay` (teacher-force banked ids) | `run_gpu_replay`, `qualify_box`, and in process `prepare_fast_lane` + `harvest_loaded` |
-| Architectures | Dense decoders whose layers sit at `model.model.layers` with k/q/v/o/gate projections (the Llama, Qwen-2 and OLMo-2 families); Gemma-3, whose text decoder nests inside a multimodal wrapper; DeepSeek-V2, whose latent attention and routed experts get their own capture surface | Dense Llama only. Any other `model_type` is refused by `check_loaded_model` once loaded |
-| Placement | Whatever device map the preset's configuration gives | One device holding every parameter |
-| Attention kernel | Eager, which returns weights; a fused kernel is refused at the preset | Eager |
-| How a box checks it | `onboard_model` | `qualify_box`, against the anchor on the same box |
+| | Hook path — the numeric anchor | Fast lane | vLLM lane |
+|---|---|---|---|
+| Commands | `run_extraction` (generate and capture), `run_replay` (teacher-force banked ids) | `run_gpu_replay`, `qualify_box`, and in process `prepare_fast_lane` + `harvest_loaded` | `run_vllm_replay`, `qualify_vllm` |
+| Architectures | Dense decoders whose layers sit at `model.model.layers` with k/q/v/o/gate projections (the Llama, Qwen-2 and OLMo-2 families); Gemma-3, whose text decoder nests inside a multimodal wrapper; DeepSeek-V2, whose latent attention and routed experts get their own capture surface | Dense Llama only. Any other `model_type` is refused by `check_loaded_model` once loaded | The presets with shipped fixtures: `3b`, `8b`, `70b` |
+| Placement | Whatever device map the preset's configuration gives | One device holding every parameter | One GPU holding every parameter |
+| Attention kernel | Eager, which returns weights; a fused kernel is refused at the preset | Eager | The engine's Triton kernel, instrumented |
+| How a box checks it | `onboard_model` | `qualify_box`, against the anchor on the same box | `qualify_vllm`, against the shipped fixtures |
 
 Of the shipped presets, `3b` and `8b` run on both paths; `olmo2-7b`, `qwen-7b`,
 `gemma3-27b` and `dsv2-lite` run on the hook path. A row added through `ANAMNESIS_MODELS`
@@ -178,13 +199,15 @@ Bringing a model up, in order:
    `pca_components_by_layer` entry; set in the row, a calibration fits each layer to its
    own count and the extraction projects each layer onto what its basis holds.
 4. **The fast lane**, for a dense Llama: `qualify_box` on the machine that will run it.
-5. **Signatures**, by either path. Both read the per-layer basis step 2 writes, and both
-   refuse, before computing anything, a sequence that reaches past the positions the
+   For a model with a vLLM lane, `qualify_vllm` is the same step for that lane.
+5. **Signatures**, by the hook path or the fast lane. Both read the per-layer basis step 2
+   writes, and both refuse, before computing anything, a sequence that reaches past the positions the
    calibration fills: `run_extraction` from its longest prompt and its token budget, the
    replays and the fast lane from each banked sequence. Extraction prompts carry a mode's
    system prompt and calibration prompts do not, so a calibration at the same budget ends
    short of an extraction; `--reach-from` or `--required-through` on step 2 is what
-   closes that gap.
+   closes that gap. The vLLM lane reduces with the calibration its fixtures pin rather than
+   the one step 2 fits.
 
 ## Fail closed
 
