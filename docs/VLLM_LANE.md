@@ -40,6 +40,23 @@ fitted on the host, so banks from any host running the lane share one calibratio
 downloaded once into the output root; a copy elsewhere is named with `--calib-dir` and
 verified against the sizes and digests in `anamnesis/extraction/vllm/hub.py`.
 
+## Where the fixtures and tolerance come from
+
+Each model's fixtures and tolerance come from one comparison of the lane with the numeric
+anchor, the hook path (`anamnesis/extraction/state_extractor.py`), on the same populations,
+per engine release. The **fixture vectors** are what the lane produced on 44 rows of that
+comparison, chosen for where a host is likeliest to move: the largest attention shifts,
+coverage shifts and gate-sparsity displacements, the largest spectral deviations, and 16
+rows evenly spaced over the rest. The **tolerance** is the largest deviation from the anchor
+that comparison measured while the lane's effects were retained. Its row ceilings are
+ratios of a row's **distance** (its standardized L2 difference over one component of the
+vector: the **covered substrate**, which is every coordinate outside the attention
+families, or the **attention** families) to the row's **path floor** (how far the anchor's
+own two execution paths disagree on that row). A few rows whose path floor is too fragile to
+divide by are left out of the ceilings and named in the file. The records the tolerance was
+read from belong to that comparison and are not published; the file names each by its role
+and pins it by sha256.
+
 ## Before first use on a host: the install check
 
 ```
