@@ -2,7 +2,7 @@
 
 A vLLM lane is only the lane it claims to be inside the configuration it declares in
 :mod:`anamnesis.extraction.vllm.envelope`. These cases pin that declaration: the lane
-ids the shipped fixtures carry, the exact engine settings each execution condition
+ids each model's fixtures carry, the exact engine settings each execution condition
 produces, how rows are split into engine batches, and the guard every engine
 construction passes first. Each guard case perturbs exactly one axis of an otherwise
 declared configuration and requires a refusal that names the lane, so a failure

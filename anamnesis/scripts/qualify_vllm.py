@@ -1,10 +1,9 @@
 """Check this host's vLLM lane install against the shipped fixtures, and cache the result.
 
-**What the check asks.** Not whether vLLM preserves the science (that was
-measured once per engine version and model, against the numeric anchor, and is
-what the shipped fixtures and tolerance record) but the smaller question a host
-can answer on its own: does *this* install compute what the qualified lane
-computes? It needs no second model and no reference bank, only the checkpoint,
+**What the check asks.** Not whether the vLLM lane agrees with the numeric anchor
+(one comparison per engine release and model measured that, and its result is the
+shipped fixtures and tolerance) but the smaller question a host can answer on its
+own: does *this* install compute what the fixtures record? It needs no second model and no reference bank, only the checkpoint,
 its calibration and one GPU. The calibration is the one the fixtures were reduced
 with; without ``--calib-dir`` it is fetched once and verified against its pinned
 digests.
@@ -18,8 +17,8 @@ What it does, per model:
    that disagrees with itself cannot be compared with anything.
 3. **Deviation.** The vectors are compared with the fixtures:
 
-   * **identical** — every vector byte-identical. The host runs the qualified lane
-     and its outputs carry the qualified lane id.
+   * **identical** — every vector byte-identical. The host runs the fixtures' lane
+     and its outputs carry that lane id.
    * **conformant** — within the recorded tolerance: every row's distance under
      its recorded ceiling, every continuous coordinate within its family's
      recorded maximum, and the ordinary rows' median and tail within the recorded

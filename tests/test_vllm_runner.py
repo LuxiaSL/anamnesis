@@ -8,8 +8,8 @@ whole or in chunks of a chosen size, and can be told to change its output when
 hooked or to return outputs out of submission order. That is enough to exercise
 every refusal the runner makes before, during and after a group, the files it
 writes, and the schedule proof :func:`~anamnesis.extraction.vllm.runner.validate_schedule`
-derives from the recorded trace. Whether a real engine schedules this way is a
-property of the engine release the envelope pins, checked on a device.
+derives from the recorded trace. Whether a real engine schedules this way is proved
+from its recorded trace by ``validate_schedule`` on every real capture.
 """
 
 from __future__ import annotations

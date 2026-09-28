@@ -149,8 +149,9 @@ def child_environment(step: str, base: Mapping[str, str] | None = None) -> dict[
     """The environment a step's process starts in.
 
     ``capture`` adds :data:`anamnesis.extraction.vllm.envelope.REQUIRED_ENV`;
-    ``reduce`` removes every engine variable and fixes the readout workspace.
-    Everything else, device visibility included, passes through unchanged.
+    ``reduce`` removes every ``VLLM_`` variable, fixes the readout workspace and
+    pins the BLAS thread pools to one. Everything else, device visibility
+    included, passes through unchanged.
     """
     env = dict(os.environ if base is None else base)
     if step == "capture":

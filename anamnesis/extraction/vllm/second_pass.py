@@ -13,10 +13,11 @@ raises instead of renormalizing silently.
 
 Selected rows write their per-head probability rows into a bounded scratch
 of shape [selected rows, query heads, keys] — the correctness-first layout:
-reduce to the head mean, count coverage, reuse the scratch. The head mean
-and the strict threshold are :func:`coverage_reference`, the fast lane's
-coverage definition stated once, so the engine's coverage and the banked one
-cannot drift apart.
+reduce to the head mean, count coverage, reuse the scratch. The head mean and
+the strict threshold are :func:`coverage_reference`, which restates the coverage
+expression of :class:`anamnesis.extraction.fast.attention.AttentionReducer` term
+for term; ``tests/test_vllm_readout.py`` holds the two lanes' vectors to
+identical bytes on the same rows.
 
 The rounding switch: with ``round_to_model_dtype`` each head's normalized
 probability is rounded to the model dtype before it is stored (promoted

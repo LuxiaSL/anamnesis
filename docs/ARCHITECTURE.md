@@ -158,9 +158,9 @@ exists for three models (`3b`, `8b`, `70b`), on one GPU, inside the envelope
 pinned; everything else is refused by name before an engine is built.
 
 Its identity works differently from the fast lane's, because a vLLM lane is checked
-against its own recorded output rather than against the anchor. Each model's lane was
-compared once, per engine release, with the numeric anchor, and what it produced on a set
-of fixture rows ships with the package, beside the tolerance that comparison measured.
+against its own recorded output rather than against the anchor. Each model's fixtures are
+what its lane produced on a set of rows when it was compared with the numeric anchor, and
+they ship with the package beside the tolerance that comparison found harmless.
 `qualify_vllm` checks a host against those fixtures and caches a receipt: a host that
 reproduces every fixture vector byte for byte carries the lane's recorded id; a host within
 the tolerance is a lane of its own, with an id derived from its fingerprint; anything else
@@ -170,7 +170,7 @@ two hosts' conformant rows apart. `docs/VLLM_LANE.md` is the operator's guide.
 
 ## What runs on which model
 
-Two paths compute a signature, and they do not accept the same models.
+Three paths compute a signature, and they do not accept the same models.
 
 | | Hook path — the numeric anchor | Fast lane | vLLM lane |
 |---|---|---|---|
@@ -200,13 +200,14 @@ Bringing a model up, in order:
    own count and the extraction projects each layer onto what its basis holds.
 4. **The fast lane**, for a dense Llama: `qualify_box` on the machine that will run it.
    For a model with a vLLM lane, `qualify_vllm` is the same step for that lane.
-5. **Signatures**, by either path. Both read the per-layer basis step 2 writes, and both
-   refuse, before computing anything, a sequence that reaches past the positions the
+5. **Signatures**, by the hook path or the fast lane. Both read the per-layer basis step 2
+   writes, and both refuse, before computing anything, a sequence that reaches past the positions the
    calibration fills: `run_extraction` from its longest prompt and its token budget, the
    replays and the fast lane from each banked sequence. Extraction prompts carry a mode's
    system prompt and calibration prompts do not, so a calibration at the same budget ends
    short of an extraction; `--reach-from` or `--required-through` on step 2 is what
-   closes that gap.
+   closes that gap. The vLLM lane reduces with the calibration its fixtures pin rather than
+   the one step 2 fits.
 
 ## Fail closed
 

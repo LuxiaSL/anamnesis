@@ -18,23 +18,23 @@ sha256 ``8e8d393c4d551547de397859462ad7c3750230841458e658d73381dbf3f59005``
 and its launch arithmetic. The instrumented kernel keeps the upstream structure, names and
 update order exactly, with these changes:
 
-- REMOVED upstream modes outside the lane scope, refused at launch instead of
-  silently diverging: sinks, alibi (both variants), query-query bias,
+- OMITS upstream modes outside the lane's scope, refused before launch instead
+  of silently diverging: sinks, alibi (both variants), query-query bias,
   softcap, sliding window, multimodal prefix ranges, fp8 KV cache and fp8
   output quantization, cascade and encoder paths, and the 3D split-KV kernel
-  entirely. The launcher accepts only the causal 16/32-bit decoder
-  configuration the lane runs; every removed branch was constexpr-dead
-  under that configuration, so the compiled arithmetic of the retained path
-  is the upstream arithmetic.
-- ADDED per-lane accumulators E and one mass per fixed key region, updated
+  entirely. Only the causal 16-bit (float16, bfloat16) decoder configuration
+  the lane runs is launched; every omitted branch is constexpr-dead under that
+  configuration, so the compiled arithmetic of the kept path is the upstream
+  arithmetic.
+- ADDS per-lane accumulators E and one mass per fixed key region, updated
   with the tile's own m_j and alpha between their computation and the L/M
   update, with guarded arithmetic: the rescale term is zero while no mass has
   been seen (M still -inf) and masked entries contribute exactly zero instead
-  of 0 * (-inf). ADDED a statistics epilogue storing (M, L, E, regions) per
+  of 0 * (-inf). ADDS a statistics epilogue storing (M, L, E, regions) per
   query token and head under the same validity masks as the output store;
   padding lanes are never stored, and the launcher pre-fills the statistics
   tensor with NaN so an unwritten entry can never read as a statistic.
-- ADDED per-token metadata inputs: the absolute prompt boundary and the
+- ADDS per-token metadata inputs: the absolute prompt boundary and the
   recency cutoff, from which the generated-region thirds are derived in-kernel
   by the reference rule (floor division, clamped to at least one position,
   remainder in the final third).
@@ -335,10 +335,10 @@ def unified_attention_stats(q: Tensor, k_cache: Tensor, v_cache: Tensor, *,
                             recency_cutoffs: Tensor) -> None:
     """Launch the instrumented 2D kernel on the lane's supported shapes.
 
-    Only the causal decoder configuration the lane runs is accepted:
-    16-bit model dtype, unquantized KV cache in the unified layout, no sinks,
-    no alibi, no softcap, no sliding window, no bias. Anything else is
-    refused here rather than computed differently from the reference.
+    The backend refuses sinks, alibi, softcap, sliding windows, a quantized KV
+    cache and cascade metadata before launching; this refuses any other dtype
+    than the 16-bit model dtypes, a KV cache in another layout or dtype, and
+    malformed metadata, rather than computing differently from the reference.
     ``stats`` is pre-filled with NaN so entries the kernel never writes
     (padding) can never be mistaken for statistics.
     """

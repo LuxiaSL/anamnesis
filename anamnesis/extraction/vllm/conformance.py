@@ -1,32 +1,30 @@
-"""Install conformance: is this host computing what the qualified lane computes?
+"""Install conformance: does this host compute what the lane's fixtures record?
 
-Lane qualification asks whether an engine, version and model preserve the
-science, and it needs the HF reference. Install conformance asks a smaller
-question that needs neither HF nor a second model: does *this* install
-reproduce the qualified lane's feature vectors on a small fixture set, and if
-not exactly, does it stay inside the perturbation regime where qualification
-showed effects are preserved?
+Each model's fixtures and tolerance come from one comparison of the vLLM lane
+with the numeric anchor (the hook path), per engine release: the fixture vectors
+are what the lane produced on a set of rows, and the tolerance is the largest
+deviation from them that comparison found harmless. Install conformance asks a
+smaller question that needs neither the anchor nor a second model: does *this*
+install reproduce those vectors, and if not exactly, does it stay inside that
+tolerance?
 
 The decision has three outcomes:
 
-* **identical** — every fixture vector is byte-identical to the qualified
-  lane's. The host runs the qualified lane itself and keeps its lane id.
-* **conformant** — the vectors differ, but every row stays within the
-  qualification's recorded row-distance ceilings, every continuous
-  coordinate within its family's recorded maximum, the host's median
-  ratio over the ordinary (unselected) fixture rows within the
-  qualification's p90, and every ordinary row within its p99 — so a host
-  sitting at the worst recorded ratio on every row, or on a heavy tail of
-  rows, outside the regime qualification tested, is refused. The host is its own lane
-  with its own id: fully usable, and never row-joined with another lane's
-  data.
+* **identical** — every fixture vector is byte-identical. The host runs the
+  fixtures' lane itself and keeps its lane id.
+* **conformant** — the vectors differ, but every row stays within its
+  component's recorded row-distance ceiling, every continuous coordinate within
+  its family's recorded maximum, and the ordinary (unselected) fixture rows'
+  median ratio within the recorded p90 and each of them within the recorded
+  p99. The median and tail gates refuse a host that sits near the ceiling on
+  many rows even though no single row crosses it. The host is its own lane, with
+  its own id: fully usable, and never row-joined with another lane's data.
 * **refused** — a checkpoint mismatch, a lane that disagrees with itself
   across repeats or batching, or a deviation outside the tolerance.
 
 This module is the decision alone. It takes vectors already captured and
 never touches an engine, so every rule here is testable without a GPU. The
-tolerance it applies is read from qualification records and frozen before
-it is used; nothing here fits or chooses a number.
+tolerance it applies is the shipped one; nothing here fits or chooses a number.
 """
 
 from __future__ import annotations
@@ -64,7 +62,8 @@ class FixtureRow(BaseModel):
     input_ids: tuple[int, ...] = Field(min_length=2)
     prompt_length: int = Field(gt=0)
     end: int
-    floor_b: float = Field(gt=0, description="The row's frozen path floor, in σ_cal units")
+    floor_b: float = Field(gt=0, description="The row's reference noise floor, in σ_cal "
+                                              "units; a row's ratio is its distance d over it")
     selected_by: str = Field(min_length=1, description="The selection rule that took the row")
 
     @model_validator(mode="after")
@@ -84,14 +83,17 @@ class FixtureSet(BaseModel):
     lane_id: str = Field(min_length=1)
     checkpoint_sha256: str = Field(pattern="^[0-9a-f]{64}$")
     calibration_sha256: str = Field(pattern="^[0-9a-f]{64}$")
-    ruler_sha256: str = Field(pattern="^[0-9a-f]{64}$")
+    ruler_sha256: str = Field(pattern="^[0-9a-f]{64}$",
+                              description="Digest of the standardizer and floors the rows carry")
     authority: dict[str, str] = Field(
         default_factory=dict,
         description="What the vectors were produced under: the digests of the records "
                     "and the capture configuration behind them")
     feature_names: tuple[str, ...] = Field(min_length=1)
-    sigma_cal: NDArray[np.float64]
-    weights: NDArray[np.float64]
+    sigma_cal: NDArray[np.float64] = Field(
+        description="Per-coordinate scale every deviation is standardized by")
+    weights: NDArray[np.float64] = Field(
+        description="Per-coordinate weight in the row distance d = sqrt(Σ w·(δ/σ_cal)²)")
     rows: tuple[FixtureRow, ...] = Field(min_length=1)
     vectors: dict[int, NDArray[np.float32]]
 
@@ -152,7 +154,7 @@ class FixtureSet(BaseModel):
 
 
 class RowComponent(BaseModel):
-    """A slice of the vector whose row distance has its own qualification ceiling."""
+    """A slice of the vector whose row distance has its own recorded ceiling."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -163,11 +165,13 @@ class RowComponent(BaseModel):
     p99_ratio: float | None = Field(
         default=None, gt=0,
         description="Tail gate: every ordinary-stratum row's ratio stays at or below it")
-    source: str = Field(min_length=1, description="The record the ratios were read from")
+    source: str = Field(min_length=1, description="A provenance label for where the ratios "
+                                                  "were read; not a path this package opens")
 
 
 class Tolerance(BaseModel):
-    """The perturbation regime qualification showed harmless, read from records."""
+    """The largest deviations from the fixtures the anchor comparison found harmless,
+    per row component and per feature family."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -176,7 +180,7 @@ class Tolerance(BaseModel):
     components: tuple[RowComponent, ...] = Field(min_length=1)
     families: dict[str, str] = Field(description="Continuous feature name → its family")
     family_max_abs_sigma: dict[str, float] = Field(
-        description="Per family, the qualification's largest continuous |δ|/σ_cal")
+        description="Per family, the largest continuous |δ|/σ_cal the comparison measured")
     discrete: tuple[str, ...] = Field(
         default=(), description="Threshold, count or rank coordinates: crossings reported")
     median_gate_stratum: str | None = Field(
@@ -185,8 +189,12 @@ class Tolerance(BaseModel):
                     "selection bias; the host's median ratio over them, per component, must "
                     "stay at or below that component's recorded p90")
     excluded_rows: tuple[int, ...] = Field(
-        default=(), description="Rows left out of the ceilings (fragile reference floors)")
-    sources: dict[str, str] = Field(description="Every record read, path → sha256")
+        default=(), description="Rows whose reference floor is too fragile to divide by, "
+                                "left out when the ceilings and family maxima were computed; "
+                                "decide still gates every fixture row, these included")
+    sources: dict[str, str] = Field(description="Provenance labels of every record read, "
+                                                "each with its sha256; not paths this package "
+                                                "opens")
 
     @model_validator(mode="after")
     def _families_resolve(self) -> Self:
@@ -270,7 +278,7 @@ class ConformanceReceipt(BaseModel):
 
 
 def conformant_lane_id(qualified_lane_id: str, fingerprint: HostFingerprint) -> str:
-    """A within-tolerance host's own lane: the qualified id plus the host's."""
+    """A within-tolerance host's own lane: the fixtures' lane id plus the host's."""
     return f"{qualified_lane_id}+host-{fingerprint.digest[:16]}"
 
 

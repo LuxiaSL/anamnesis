@@ -3,12 +3,12 @@
 **What this entry point covers.** A model with a vLLM lane (``--model`` offers
 exactly those), whole-prompt prefill of spans that fit the lane's context, one
 GPU, and only on a host whose install check (`qualify_vllm.py`) is cached and did
-not refuse it. The command refuses before loading anything otherwise.
+not refuse it. The command refuses before building an engine otherwise.
 
 **What an output is.** The same banked format the fast lane writes: a feature
 vector and a metadata sidecar per generation, no raw tensors, beside a deployment
 record of what produced them. Every row carries the lane id the install check assigned
-(the qualified lane's own on an ``identical`` host, the host's own otherwise) and
+(the fixtures' lane id on an ``identical`` host, the host's own otherwise) and
 an ``extraction_lane`` receipt naming the tier and the receipt digest.
 :mod:`anamnesis.analysis.lane_guard` refuses to combine rows of different lanes
 inside one contrast, and a vLLM lane is never the fast lane.
@@ -51,7 +51,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--chunk-rows", type=int, default=32,
                    help="Rows captured and reduced together (at least 8)")
     p.add_argument("--cache-dir", type=Path,
-                   help="Install-check receipt cache; defaults to vllm_conformance under the output root")
+                   help="Install-check receipt cache; defaults to vllm_conformance under "
+                        "the output root")
     return p
 
 

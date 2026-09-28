@@ -64,8 +64,9 @@ The check ends in one of three tiers:
   measurement against the anchor showed harmless: each row's distance within its recorded
   ceiling, each continuous coordinate within its family's recorded maximum, and the
   unselected rows' median and tail within the recorded 90th and 99th percentiles. The host
-  is a lane of its own, with an id derived from its fingerprint, and fully usable. Hardware
-  other than the lane was measured on is expected to land here.
+  is a lane of its own, with an id derived from its fingerprint, and fully usable. A GPU
+  model other than the one the fixtures were produced on is expected to land here, because
+  floating-point reductions differ across hardware.
 - **refused** — a different checkpoint, a host whose repeated or batched captures disagree,
   or a deviation outside the tolerance. The reasons are printed.
 

@@ -13,7 +13,8 @@ products in :meth:`LaneCapture.finish`.
 Request ids are the engine's internal ids. The caller queues one group before
 stepping the engine and releases captures between groups. GPU fragments are
 cloned before the engine can reuse their memory and move to the CPU only at
-finish. The module imports no vLLM: it touches the engine only through the
+finish. The module does not import vLLM itself (the backend imports it when it is
+installed and tolerates its absence), and touches the engine only through the
 runner object it is handed, so it is tested against a stand-in runner.
 
 The runner methods it wraps (``_prepare_inputs``, ``_get_prompt_logprobs_dict``,
@@ -339,7 +340,7 @@ class LaneCapture:
             attn = self.blocks[layer].self_attn
             q, k, d = int(attn.q_size), int(attn.kv_size), int(attn.head_dim)
             if q != self.model.config.hidden_size or q % d or k % d or q % k:
-                raise ValueError("native QKV incompatible with TP1 Llama")
+                raise ValueError("the packed QKV projection does not match a single-GPU Llama")
             if (
                 not isinstance(output, tuple)
                 or len(output) != 2

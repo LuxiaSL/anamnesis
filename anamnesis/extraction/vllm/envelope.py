@@ -2,7 +2,7 @@
 
 A vLLM lane computes the fast lane's features from a vLLM engine instead of a
 hooked eager forward. It is only the lane it claims to be inside the envelope it
-was qualified in, so everything that fixes its arithmetic is declared here, once,
+its fixtures were produced in, so everything that fixes its arithmetic is declared here, once,
 and refused by name when a run asks for anything else:
 
 * :data:`SETTINGS` — the engine settings that never vary: one GPU, eager
@@ -10,7 +10,9 @@ and refused by name when a run asks for anything else:
   LoRA, no speculative decoding, a 1024-token context.
 * :data:`REQUIRED_ENV` — the environment the engine process must be started in.
   Batch-invariant mode and the cuBLAS workspace are read when the libraries
-  initialise, so they are refused rather than set.
+  initialise, so the engine process refuses a wrong value rather than correcting
+  it after start; :func:`anamnesis.extraction.vllm.runtime.run_step` exports them
+  when it launches that process.
 * :data:`PINNED_PACKAGES` — the versions the backend and the capture were written
   against. Both reach into engine internals, so another version is refused before
   an engine is built rather than trusted to behave.
@@ -21,7 +23,7 @@ and refused by name when a run asks for anything else:
   a time, and batches of eight. The install check captures every fixture under
   both, so a host that passes it has shown the two agree.
 
-:func:`lane_id` is the qualified lane's identity for a model: a digest of the
+:func:`lane_id` is the lane id a model's fixtures carry: a digest of the
 facts above that are fixed per model. :func:`enforce_lane_envelope` is the gate
 every engine construction passes first.
 """
@@ -53,8 +55,9 @@ SETTINGS: dict[str, Any] = dict(
     seed=20260922,
 )
 """Engine settings fixed by the lane. ``dtype`` and the batching keys in
-:data:`CONDITION_KEYS` are set per model and condition; every other key is part of
-the lane identity and is refused if it differs."""
+:data:`CONDITION_KEYS` are set per model and condition; every other key is fixed: the
+startup guard refuses a departure, and an install check's receipt is keyed by the
+digest of the full settings."""
 
 CONDITION_KEYS = frozenset({
     "dtype", "max_num_seqs", "enable_chunked_prefill", "max_num_batched_tokens",
@@ -129,7 +132,7 @@ def lane_model(model: str) -> dict[str, str]:
 
 
 def lane_identity(model: str) -> dict[str, Any]:
-    """The facts a model's qualified lane fixes, as the lane id digests them."""
+    """The facts a model's lane fixes, as its lane id digests them."""
     facts = lane_model(model)
     return dict(model=model, dtype=facts["dtype"], invariant_mode=True,
                 attention_backend="TRITON_ATTN", tensor_parallel_size=1,
@@ -137,7 +140,7 @@ def lane_identity(model: str) -> dict[str, Any]:
 
 
 def lane_id(model: str) -> str:
-    """The qualified lane's id for ``model``: the digest of its identity."""
+    """The lane id ``model``'s fixtures carry: the digest of its identity."""
     return canonical_digest(lane_identity(model))
 
 

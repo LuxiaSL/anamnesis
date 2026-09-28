@@ -27,8 +27,9 @@ are only alive inside the forward) and records the reduced products; the
 scratch never leaves the step. Closing verifies the products beside the
 statistics.
 
-Everything outside the lane's configuration is refused at capture time: non-decoder attention, sinks, alibi, sliding windows, softcap,
-quantized KV cache or fused output quantization, and cascade metadata.
+Everything outside the lane's configuration is refused at capture time:
+non-decoder attention, sinks, alibi, sliding windows, softcap, quantized KV
+cache or fused output quantization, and cascade metadata.
 """
 from __future__ import annotations
 

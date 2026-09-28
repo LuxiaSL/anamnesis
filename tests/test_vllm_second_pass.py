@@ -1,7 +1,7 @@
 """The bounded second pass: its refusals, and the coverage definition it applies.
 
-Coverage finalization goes through `second_pass.coverage_reference`, the fast lane's
-coverage definition stated once: a uniform head-mean row is strictly not covered,
+Coverage finalization goes through `second_pass.coverage_reference`, which restates
+the fast lane's coverage expression: a uniform head-mean row is strictly not covered,
 one fp32 ulp above the threshold is covered, and the head mean is taken over heads
 in fp32 before the double promotion. Those, and the launcher's slot validation, run
 on the host.
