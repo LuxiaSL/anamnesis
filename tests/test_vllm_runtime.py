@@ -649,3 +649,9 @@ def test_the_engine_packages_are_checked_before_the_host_is_fingerprinted(
                               host.cache)
     with pytest.raises(RuntimeError, match="pinned engine"):
         runtime.usable_receipt(MODEL, host.model_path, host.cache)
+
+
+def test_the_settings_digest_changes_with_the_lane_source(monkeypatch):
+    before = runtime.settings_digest(MODEL)
+    monkeypatch.setattr(runtime, "lane_source_digest", lambda: "0" * 64)
+    assert runtime.settings_digest(MODEL) != before

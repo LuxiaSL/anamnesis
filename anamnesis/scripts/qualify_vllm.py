@@ -29,7 +29,8 @@ What it does, per model:
 
 The receipt is cached under the output root against the host's fingerprint (GPU,
 driver, CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures,
-tolerance and engine settings), and reused only while every field is equal.
+tolerance, engine settings and the lane's source), and reused only while every field
+is equal.
 `run_vllm_replay.py` refuses to run on a host without one.
 
 Exit status: 0 identical or conformant, 1 refused, 2 the check could not run.

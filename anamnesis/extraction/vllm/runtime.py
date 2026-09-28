@@ -137,12 +137,24 @@ def require_fixture_calibration(fixtures: FixtureSet, calib_dir: Path) -> None:
                          "fixtures were reduced with")
 
 
+def lane_source_digest() -> str:
+    """Digest of the source a pass runs: every module of this package, and the fast
+    lane's reducers, configuration and schema it reduces with."""
+    fast = Path(__file__).parents[1] / "fast"
+    files = sorted(Path(__file__).parent.glob("*.py")) + [
+        fast / name for name in ("features.py", "ops.py", "attention.py", "families.py",
+                                 "batch_layout.py", "schema.py")] + [
+        Path(__file__).parents[1] / "replay_config.py"]
+    return digest_of_shas({f"{p.parent.name}/{p.name}": file_sha(p) for p in files})
+
+
 def settings_digest(model: str) -> str:
     """Digest of every engine setting and capture switch a pass for ``model`` runs
-    under. A receipt keyed by it is never served to a run with other settings."""
+    under, and of the source it runs. A receipt keyed by it is never served to a
+    run with other settings or other code."""
     return canonical_digest(dict(
         settings={c: engine_settings(model, c) for c in CONDITIONS},
-        attention_rounding=ATTENTION_ROUNDING))
+        attention_rounding=ATTENTION_ROUNDING, source=lane_source_digest()))
 
 
 def child_environment(step: str, base: Mapping[str, str] | None = None) -> dict[str, str]:

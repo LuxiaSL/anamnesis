@@ -224,8 +224,8 @@ class HostFingerprint(BaseModel):
     anamnesis: str
     checkpoint_sha256: str
     engine_settings_sha256: str = Field(
-        description="The engine settings the captures ran under; a receipt never outlives a "
-                    "settings change")
+        description="The engine settings and the lane source the captures ran under; a "
+                    "receipt never outlives a change to either")
     fixture_digest: str
     tolerance_digest: str
 

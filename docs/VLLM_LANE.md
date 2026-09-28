@@ -71,8 +71,8 @@ The check ends in one of three tiers:
   or a deviation outside the tolerance. The reasons are printed.
 
 The receipt is cached under the output root, keyed by the host's fingerprint (GPU, driver,
-CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures, tolerance and engine
-settings), and reused only while every field is equal. Change any of them and the check runs
+CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures, tolerance, engine
+settings and the lane's source), and reused only while every field is equal. Change any of them and the check runs
 again; `--refresh` runs it regardless.
 
 Exit status 0 means identical or conformant, 1 refused, 2 that the check could not run (a
