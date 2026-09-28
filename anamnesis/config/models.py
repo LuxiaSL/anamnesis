@@ -327,6 +327,10 @@ class ModelRegistry(BaseModel):
     aliases: dict[str, str]
     run_depths: dict[str, int]
     sources: tuple[Path, ...] = Field(description="The files this was read from, in merge order")
+    lineage: dict[str, str] = Field(
+        default_factory=dict,
+        description="Each row written with extends, mapped to the key it extends",
+    )
 
     def names(self) -> tuple[str, ...]:
         """Every registry key, in merge order."""
@@ -362,6 +366,19 @@ class ModelRegistry(BaseModel):
             f"read from: {', '.join(str(path) for path in self.sources)}; "
             f"add a row and name its file in {MODELS_ENV}"
         )
+
+    def extends_chain(self, preset: str) -> tuple[str, ...]:
+        """The registry keys a row descends from through ``extends``, nearest first.
+
+        Empty for a row written in full. ``preset`` is resolved as :meth:`resolve`
+        resolves it, so an alias reaches the row it names.
+        """
+        key = self.resolve(preset).name
+        chain: list[str] = []
+        while key in self.lineage:
+            key = self.lineage[key]
+            chain.append(key)
+        return tuple(chain)
 
     def layer_counts_by_run_prefix(self) -> dict[str, int]:
         """Every run-name prefix this registry answers for, and its layer count.
@@ -479,6 +496,7 @@ def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
     presets: dict[str, ModelPreset] = {}
     aliases: dict[str, str] = {}
     depths: dict[str, int] = {}
+    lineage: dict[str, str] = {}
     owner: dict[tuple[str, str], Path] = {}
 
     def claim(kind: str, key: str, path: Path) -> None:
@@ -502,6 +520,7 @@ def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
                 presets[key] = _extended_row(path, key, pending[key], presets)
             for key in ready:
                 claim("preset", key, path)
+                lineage[key] = pending[key][EXTENDS_KEY]
                 presets[key] = _extended_row(path, key, pending.pop(key), presets)
         for alias, target in parsed.aliases.items():
             claim("alias", alias, path)
@@ -545,7 +564,8 @@ def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
             )
 
     return ModelRegistry(
-        presets=presets, aliases=aliases, run_depths=depths, sources=tuple(p for p, _ in files)
+        presets=presets, aliases=aliases, run_depths=depths, sources=tuple(p for p, _ in files),
+        lineage=lineage,
     )
 
 

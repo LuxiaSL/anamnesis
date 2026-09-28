@@ -17,7 +17,9 @@ combined with fast-lane rows inside one contrast.
 | Engine | `vllm==0.16.0`, `torch==2.9.1`, `triton==3.5.1`: the `vllm` extra |
 
 Everything outside that table is refused by name before an engine is built:
-`anamnesis/extraction/vllm/envelope.py` holds the declaration and the guard.
+`anamnesis/extraction/vllm/envelope.py` holds the declaration and the guard. A fine-tune of
+one of these models can join as an extension lane of its own (see
+[Extension lanes](#extension-lanes-fine-tunes-of-a-qualified-model)).
 
 ## Setting up
 
@@ -125,6 +127,118 @@ record naming the tier, the receipt digest, the calibration and the feature sche
 contrast, so a bank from an `identical` host joins other `identical` banks of the same model,
 and a `conformant` host's bank joins only banks from that host. Every reader that takes a
 signature directory reads it, `run_gauntlet` among them.
+
+## Extension lanes (fine-tunes of a qualified model)
+
+A fine-tune of `3b`, `8b` or `70b` is the same network with different weights. It can use its
+base's lane as an **extension lane** of its own, without a qualification campaign and without
+editing this package, once a transfer check has shown that the lane measures it inside the
+regime its base was qualified in. The owner of the fine-tune runs the check and keeps the
+result; this package learns no fine-tune's paths.
+
+### What carries over, and what the check measures
+
+Everything that depends only on the architecture and its shapes carries over from the base
+unchanged: the instrumented kernel and its second pass, the determinism of the dispatch, the
+feature schema, the capture routes, the dtype, the logprob handling and every engine setting in
+`anamnesis/extraction/vllm/envelope.py`. An extension may not set any of them.
+
+What the weights can change is how far the vLLM lane drifts from the fast lane on a row:
+threshold proximity, large activations and gate sparsity are statistics of the activations.
+The base's qualification measured its effects surviving the lane as a function of the size of
+that drift, and its tolerance records the drift it measured. So the check measures the
+fine-tune's drift on a sample of its own rows and scores it with the **base's** tolerance, the
+way the install check scores a host:
+
+- each row's covered-substrate and attention distance over its path floor, under the base's
+  ceilings, and each continuous coordinate under its family's recorded maximum;
+- the ordinary rows' median ratio under the base's 90th percentile, and every ordinary row
+  under its 99th;
+- the path floor is the fine-tune's own: how far the numeric anchor's one-forward replay and
+  its token-by-token path disagree on the row, over a σ_cal fitted on the sample. A row whose
+  floor exceeds the base's limit (`BASE_MAX_FLOOR` in
+  `anamnesis/extraction/vllm/transfer.py`) is named and left out of the scoring, because on a
+  fragile reference the deviation measures the reference rather than the lane;
+- every row is also captured again one at a time and in batches of eight, and all three
+  vectors must be byte-identical.
+
+A fine-tune inside the base's regime inherits the base's evidence that effects survive the
+lane, for the same reason a conformant host does. One outside it needs a qualification of its
+own. Which contrasts the fine-tune resolves is a question about the fine-tune, answered by its
+owner's own experiments; the check answers only whether the lane measures it faithfully.
+
+A pass also writes the fine-tune's own fixtures and tolerance, built from the sample by the same
+rules as the shipped ones, so each host that runs the fine-tune checks its install exactly as
+it would for a base.
+
+### Running the check
+
+The check needs, for the fine-tune:
+
+1. a registry preset that `extends` the base's preset with the same architecture, dtype and
+   layer plan, in a file named by `ANAMNESIS_MODELS` (see `CONTRIBUTING.md`);
+2. its own calibration, fitted with `run_calibration` at that preset, and so at the base's
+   dtype;
+3. a replay manifest of 44 to 60 rows it generated in its own prompt regime, within the lane's
+   1024-token context.
+
+```
+python -m anamnesis.scripts.transfer_vllm --key my-finetune --extends 70b \
+    --preset my-finetune --model-path /path/to/checkpoint --calib-dir /path/to/calibration \
+    --manifest runs/<run>/replay_manifest.json --out transfer-my-finetune
+```
+
+It captures the sample through the vLLM lane first, then loads the checkpoint through the fast
+lane and the anchor on the same GPU. `--out` receives `transfer_receipt.json`, and on a pass
+`fixtures/` and `lane-entry.json`. Exit status 0 means pass, 1 refuse (the reasons are
+printed and recorded in the receipt), 2 that the check could not run.
+
+### Declaring the lane
+
+`ANAMNESIS_VLLM_LANES` names lane files, separated the way `PATH` is. The `lane-entry.json`
+a pass writes is one, and can be named as it is:
+
+```json
+{"lanes": {"my-finetune": {
+  "extends": "70b",
+  "preset": "my-finetune",
+  "checkpoint_sha256": "<the checkpoint digest>",
+  "calibration_dir": "/path/to/calibration",
+  "calibration": {"positional_means.npz": {"size": 0, "sha256": "<digest>"},
+                  "pca_model.pkl": {"size": 0, "sha256": "<digest>"}},
+  "fixtures_dir": "fixtures",
+  "transfer_receipt": "transfer_receipt.json",
+  "transfer_receipt_sha256": "<the receipt's digest>"}}}
+```
+
+Relative paths resolve against the lane file's directory. With the file named, both commands
+take the key:
+
+```
+export ANAMNESIS_VLLM_LANES=transfer-my-finetune/lane-entry.json
+python -m anamnesis.scripts.qualify_vllm --model my-finetune \
+    --model-path /path/to/checkpoint --work-dir ./qualify-my-finetune
+python -m anamnesis.scripts.run_vllm_replay --model my-finetune \
+    --model-path /path/to/checkpoint --manifest runs/<run>/replay_manifest.json \
+    --output banks/<run>-vllm
+```
+
+The calibration is read from the declared directory, or `--calib-dir`, and verified against
+the declared sizes and digests before anything reads it; nothing is downloaded.
+
+Every use passes the extension's guard (`anamnesis/extraction/vllm/extensions.py`), which
+refuses the lane by name unless its receipt exists, matches its declared digest and passed;
+unless the receipt, the entry and the fixtures agree on the base lane, the checkpoint, the
+calibration, the fixture set and the tolerance; unless the base's shipped tolerance is still the
+one the receipt was scored against; and unless the preset still descends from the base's with
+its architecture and layer plan unchanged. A file that gives an entry a shipped key or another
+entry's key, declares one checkpoint on one base twice, extends anything but a shipped lane, or
+sets an inherited setting is refused whole.
+
+An extension's lane id is the digest of its base's lane identity, the base's key and its
+checkpoint digest. It differs from the base's and from every other extension's, so
+`anamnesis/analysis/lane_guard.py` keeps an extension's rows out of any contrast with the base's
+rows, exactly as it keeps two hosts' rows apart.
 
 ## How it works
 

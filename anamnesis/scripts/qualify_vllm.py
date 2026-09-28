@@ -27,6 +27,11 @@ What it does, per model:
      lane's inside one contrast.
    * **refused** — anything else, with the reasons.
 
+An extension lane (a fine-tune declared in ``ANAMNESIS_VLLM_LANES``; see
+:mod:`anamnesis.extraction.vllm.extensions`) is checked the same way against its own
+fixtures and tolerance. Its calibration is read from the declared directory, or
+``--calib-dir``, and verified against the declared digests; nothing is fetched.
+
 The receipt is cached under the output root against the host's fingerprint (GPU,
 driver, CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures,
 tolerance, engine settings and the lane's source), and reused only while every field
@@ -43,12 +48,12 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from anamnesis.extraction.vllm.envelope import LANE_MODELS
+from anamnesis.extraction.vllm.extensions import lane_keys
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="qualify_vllm.py", description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=sorted(LANE_MODELS), required=True)
+    p.add_argument("--model", choices=lane_keys(), required=True)
     p.add_argument("--model-path", type=Path, required=True, help="Local checkpoint directory")
     p.add_argument("--calib-dir", type=Path,
                    help="The lane's calibration; fetched and verified when omitted")
@@ -62,7 +67,13 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    try:
+        command = parser()
+    except ValueError as exc:
+        print(f"the install check did not run: {exc}", file=sys.stderr)
+        return 2
+    args = command.parse_args(argv)
+    from anamnesis.extraction.vllm import extensions
     from anamnesis.extraction.vllm.hub import fetch_calibration, verify_calibration
     from anamnesis.extraction.vllm.runtime import (
         check_install,
@@ -73,9 +84,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     cache_dir = args.cache_dir or default_cache_dir()
     try:
         load_fixtures(args.model)
-        if args.calib_dir is not None:
-            verify_calibration(args.model, args.calib_dir)
-        calib_dir = args.calib_dir or fetch_calibration(args.model)
+        if extensions.is_extension(args.model):
+            calib_dir = extensions.verify_calibration(args.model, args.calib_dir)
+        else:
+            if args.calib_dir is not None:
+                verify_calibration(args.model, args.calib_dir)
+            calib_dir = args.calib_dir or fetch_calibration(args.model)
         receipt, cached = check_install(args.model, args.model_path, calib_dir,
                                         args.work_dir, cache_dir, refresh=args.refresh)
     except (ValueError, RuntimeError, OSError, ImportError) as exc:

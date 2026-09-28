@@ -9,7 +9,10 @@ not refuse it. The command refuses before building an engine otherwise.
 vector and a metadata sidecar per generation, no raw tensors, beside a deployment
 record of what produced them. Every row carries the lane id the install check assigned
 (the fixtures' lane id on an ``identical`` host, the host's own otherwise) and
-an ``extraction_lane`` receipt naming the tier and the receipt digest.
+an ``extraction_lane`` receipt naming the tier and the receipt digest. An
+extension lane declared in ``ANAMNESIS_VLLM_LANES`` is accepted like a shipped one,
+with its calibration read from the declared directory, or ``--calib-dir``, and
+verified against the declared digests.
 :mod:`anamnesis.analysis.lane_guard` refuses to combine rows of different lanes
 inside one contrast, and a vLLM lane is never the fast lane.
 
@@ -29,12 +32,12 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from anamnesis.extraction.vllm.envelope import LANE_MODELS
+from anamnesis.extraction.vllm.extensions import lane_keys
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="run_vllm_replay.py", description=__doc__.splitlines()[0])
-    p.add_argument("--model", choices=sorted(LANE_MODELS), required=True)
+    p.add_argument("--model", choices=lane_keys(), required=True)
     p.add_argument("--model-path", type=Path, required=True, help="Local checkpoint directory")
     p.add_argument("--calib-dir", type=Path,
                    help="The lane's calibration; fetched and verified when omitted")
@@ -57,8 +60,14 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    try:
+        command = parser()
+    except ValueError as exc:
+        print(f"the replay did not run: {exc}", file=sys.stderr)
+        return 2
+    args = command.parse_args(argv)
     from anamnesis.extraction.replay.manifest import ReplayManifest
+    from anamnesis.extraction.vllm import extensions
     from anamnesis.extraction.vllm.hub import fetch_calibration, verify_calibration
     from anamnesis.extraction.vllm.runtime import (
         default_cache_dir,
@@ -92,9 +101,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             manifest_sha256=file_sha(args.manifest), selected_ids=ids,
             source_metadata_sha256=file_sha(metadata_path) if metadata_path else None,
             runner_sha256=file_sha(Path(__file__)))
-        if args.calib_dir is not None:
-            verify_calibration(args.model, args.calib_dir)
-        calib_dir = args.calib_dir or fetch_calibration(args.model)
+        if extensions.is_extension(args.model):
+            calib_dir = extensions.verify_calibration(args.model, args.calib_dir)
+        else:
+            if args.calib_dir is not None:
+                verify_calibration(args.model, args.calib_dir)
+            calib_dir = args.calib_dir or fetch_calibration(args.model)
         written = replay_bank(args.model, args.model_path, calib_dir, rows, args.output,
                               work_dir, args.cache_dir or default_cache_dir(),
                               chunk_rows=args.chunk_rows, metadata=metadata,
