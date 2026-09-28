@@ -54,7 +54,9 @@ is fetched on first use and verified against its pinned digests; `--calib-dir` n
 copy instead.
 
 The work directory holds the raw captures of the three passes until each is reduced: about
-44 GB per pass for the 70B model, far less for the smaller ones.
+44 GB per pass for the 70B model, far less for the smaller ones. On one B200 the 70B check takes
+about 35 minutes, most of it the three capture passes and a first read of the checkpoint to
+digest it; a replay then runs at about 20 seconds a row, engine start included.
 
 The check ends in one of three tiers:
 
