@@ -87,7 +87,8 @@ class FixtureSet(BaseModel):
     ruler_sha256: str = Field(pattern="^[0-9a-f]{64}$")
     authority: dict[str, str] = Field(
         default_factory=dict,
-        description="What the vectors were produced under: seal digests, scored configuration")
+        description="What the vectors were produced under: the digests of the records "
+                    "and the capture configuration behind them")
     feature_names: tuple[str, ...] = Field(min_length=1)
     sigma_cal: NDArray[np.float64]
     weights: NDArray[np.float64]

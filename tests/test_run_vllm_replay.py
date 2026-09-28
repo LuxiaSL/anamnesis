@@ -112,39 +112,39 @@ def test_an_existing_output_is_never_overwritten(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("ids", [["4"], ["3", "3"]])
-def test_an_unknown_or_duplicated_selection_is_refused(tmp_path, monkeypatch, ids):
+def test_an_unknown_or_duplicated_selection_is_refused(tmp_path, monkeypatch, capsys, ids):
     manifest = _manifest(tmp_path, {3: (2, 6)})
     calls = _stand_in(monkeypatch)
-    with pytest.raises(ValueError, match="generation selection"):
-        run_vllm_replay.main(_argv(tmp_path, manifest, "--gen-ids", *ids))
+    assert run_vllm_replay.main(_argv(tmp_path, manifest, "--gen-ids", *ids)) == 2
+    assert "generation selection" in capsys.readouterr().err
     assert not calls
 
 
-def test_an_empty_manifest_is_refused(tmp_path, monkeypatch):
+def test_an_empty_manifest_is_refused(tmp_path, monkeypatch, capsys):
     manifest = _manifest(tmp_path, {})
     calls = _stand_in(monkeypatch)
-    with pytest.raises(ValueError, match="generation selection"):
-        run_vllm_replay.main(_argv(tmp_path, manifest))
+    assert run_vllm_replay.main(_argv(tmp_path, manifest)) == 2
+    assert "generation selection" in capsys.readouterr().err
     assert not calls
 
 
-def test_metadata_that_misses_a_selected_generation_is_refused(tmp_path, monkeypatch):
+def test_metadata_that_misses_a_selected_generation_is_refused(tmp_path, monkeypatch, capsys):
     manifest = _manifest(tmp_path, {3: (2, 6), 9: (1, 4)})
     metadata = tmp_path / "other.json"
     metadata.write_text(json.dumps([dict(generation_id=3)]))
     calls = _stand_in(monkeypatch)
-    with pytest.raises(ValueError, match="missing selected generation"):
-        run_vllm_replay.main(_argv(tmp_path, manifest, "--metadata", str(metadata)))
+    assert run_vllm_replay.main(_argv(tmp_path, manifest, "--metadata", str(metadata))) == 2
+    assert "missing selected generation" in capsys.readouterr().err
     assert not calls
 
 
 def test_a_span_longer_than_the_lanes_context_is_refused_before_the_bank(tmp_path,
-                                                                        monkeypatch):
+                                                                        monkeypatch, capsys):
     limit = SETTINGS["max_model_len"]
     manifest = _manifest(tmp_path, {3: (2, limit + 1)})
     calls = _stand_in(monkeypatch)
-    with pytest.raises(ValueError, match="exceed the lane's context"):
-        run_vllm_replay.main(_argv(tmp_path, manifest))
+    assert run_vllm_replay.main(_argv(tmp_path, manifest)) == 2
+    assert "exceed the lane's context" in capsys.readouterr().err
     assert not calls
 
 

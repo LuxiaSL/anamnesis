@@ -16,6 +16,9 @@ inside one contrast, and a vLLM lane is never the fast lane.
 Rows are captured and reduced in chunks, because a captured row's substrate is
 large; ``--work-dir`` holds one chunk's captures at a time and ``--chunk-rows``
 sets its size.
+
+Exit status: 0 banked, 2 refused before or while banking, with the reason on
+stderr. An existing ``--output`` raises rather than being reused.
 """
 
 from __future__ import annotations
@@ -67,24 +70,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.output.exists():
         raise FileExistsError(args.output)
     work_dir = args.work_dir or args.output.with_name(args.output.name + ".work")
-    manifest = ReplayManifest.model_validate_json(args.manifest.read_text())
-    ids = list(manifest.gen_ids()) if args.gen_ids is None else args.gen_ids
-    if not ids or len(set(ids)) != len(ids) or any(str(i) not in manifest.entries for i in ids):
-        raise ValueError("empty, duplicated or unknown generation selection")
-    metadata_path = args.metadata
-    if metadata_path is None and (args.manifest.parent / "metadata.json").exists():
-        metadata_path = args.manifest.parent / "metadata.json"
-    metadata = source_metadata(metadata_path)
-    if metadata_path is not None and any(i not in metadata for i in ids):
-        raise ValueError("source metadata is missing selected generation ids")
-    entries = {key: entry.model_dump() for key, entry in manifest.entries.items()}
-    rows = replay_rows(entries, ids)
-    provenance = dict(
-        model=args.model, model_path=str(args.model_path),
-        manifest_sha256=file_sha(args.manifest), selected_ids=ids,
-        source_metadata_sha256=file_sha(metadata_path) if metadata_path else None,
-        runner_sha256=file_sha(Path(__file__)))
     try:
+        manifest = ReplayManifest.model_validate_json(args.manifest.read_text())
+        ids = list(manifest.gen_ids()) if args.gen_ids is None else args.gen_ids
+        if not ids or len(set(ids)) != len(ids) or any(str(i) not in manifest.entries
+                                                       for i in ids):
+            raise ValueError("empty, duplicated or unknown generation selection")
+        metadata_path = args.metadata
+        if metadata_path is None and (args.manifest.parent / "metadata.json").exists():
+            metadata_path = args.manifest.parent / "metadata.json"
+        metadata = source_metadata(metadata_path)
+        if metadata_path is not None and any(i not in metadata for i in ids):
+            raise ValueError("source metadata is missing selected generation ids")
+        entries = {key: entry.model_dump() for key, entry in manifest.entries.items()}
+        rows = replay_rows(entries, ids)
+        provenance = dict(
+            model=args.model, model_path=str(args.model_path),
+            manifest_sha256=file_sha(args.manifest), selected_ids=ids,
+            source_metadata_sha256=file_sha(metadata_path) if metadata_path else None,
+            runner_sha256=file_sha(Path(__file__)))
         calib_dir = args.calib_dir or fetch_calibration(args.model)
         written = replay_bank(args.model, args.model_path, calib_dir, rows, args.output,
                               work_dir, args.cache_dir or default_cache_dir(),
