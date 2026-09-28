@@ -412,25 +412,6 @@ def tolerance_reasons(
     return reasons
 
 
-def component_from_ratios(name: str, feature_names: Sequence[str],
-                          ratios: Mapping[int, float], source: str) -> RowComponent:
-    """A component whose ceilings are the maximum and the 90th and 99th percentiles
-    of per-row ratios d/floor.
-
-    Raises
-    ------
-    ValueError
-        When ``ratios`` is empty.
-    """
-    values = np.asarray([ratios[g] for g in sorted(ratios)], dtype=np.float64)
-    if not values.size:
-        raise ValueError(f"{name}: no row with a positive floor is left to read a ratio from")
-    return RowComponent(name=name, feature_names=tuple(feature_names),
-                        max_ratio=float(values.max()),
-                        p90_ratio=float(np.percentile(values, 90)),
-                        p99_ratio=float(np.percentile(values, 99)), source=source)
-
-
 def decide(
     fixtures: FixtureSet,
     tolerance: Tolerance,

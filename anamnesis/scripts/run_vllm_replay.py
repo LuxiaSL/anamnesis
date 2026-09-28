@@ -10,9 +10,8 @@ vector and a metadata sidecar per generation, no raw tensors, beside a deploymen
 record of what produced them. Every row carries the lane id the install check assigned
 (the fixtures' lane id on an ``identical`` host, the host's own otherwise) and
 an ``extraction_lane`` receipt naming the tier and the receipt digest. An
-extension lane declared in ``ANAMNESIS_VLLM_LANES`` is accepted like a shipped one,
-with its calibration read from the declared directory, or ``--calib-dir``, and
-verified against the declared digests.
+extension lane (:mod:`anamnesis.extraction.vllm.extensions`) is accepted like a
+shipped one, its calibration verified against its declared pins.
 :mod:`anamnesis.analysis.lane_guard` refuses to combine rows of different lanes
 inside one contrast, and a vLLM lane is never the fast lane.
 
@@ -101,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             manifest_sha256=file_sha(args.manifest), selected_ids=ids,
             source_metadata_sha256=file_sha(metadata_path) if metadata_path else None,
             runner_sha256=file_sha(Path(__file__)))
-        if extensions.is_extension(args.model):
+        if extensions.declared_lane(args.model) is not None:
             calib_dir = extensions.verify_calibration(args.model, args.calib_dir)
         else:
             if args.calib_dir is not None:

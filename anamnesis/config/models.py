@@ -367,19 +367,6 @@ class ModelRegistry(BaseModel):
             f"add a row and name its file in {MODELS_ENV}"
         )
 
-    def extends_chain(self, preset: str) -> tuple[str, ...]:
-        """The registry keys a row descends from through ``extends``, nearest first.
-
-        Empty for a row written in full. ``preset`` is resolved as :meth:`resolve`
-        resolves it, so an alias reaches the row it names.
-        """
-        key = self.resolve(preset).name
-        chain: list[str] = []
-        while key in self.lineage:
-            key = self.lineage[key]
-            chain.append(key)
-        return tuple(chain)
-
     def layer_counts_by_run_prefix(self) -> dict[str, int]:
         """Every run-name prefix this registry answers for, and its layer count.
 

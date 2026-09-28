@@ -27,10 +27,8 @@ What it does, per model:
      lane's inside one contrast.
    * **refused** — anything else, with the reasons.
 
-An extension lane (a fine-tune declared in ``ANAMNESIS_VLLM_LANES``; see
-:mod:`anamnesis.extraction.vllm.extensions`) is checked the same way against its own
-fixtures and tolerance. Its calibration is read from the declared directory, or
-``--calib-dir``, and verified against the declared digests; nothing is fetched.
+An extension lane (:mod:`anamnesis.extraction.vllm.extensions`) is checked against
+its own fixtures, with its calibration verified against its declared pins.
 
 The receipt is cached under the output root against the host's fingerprint (GPU,
 driver, CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures,
@@ -84,7 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cache_dir = args.cache_dir or default_cache_dir()
     try:
         load_fixtures(args.model)
-        if extensions.is_extension(args.model):
+        if extensions.declared_lane(args.model) is not None:
             calib_dir = extensions.verify_calibration(args.model, args.calib_dir)
         else:
             if args.calib_dir is not None:

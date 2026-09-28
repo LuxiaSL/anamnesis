@@ -90,30 +90,16 @@ def default_cache_dir() -> Path:
     return outputs_root() / "vllm_conformance"
 
 
-def _extension(model: str):
-    """The declared extension lane ``model`` names, or None; see
-    :mod:`anamnesis.extraction.vllm.extensions`."""
-    from anamnesis.extraction.vllm.extensions import declared_lane
-
-    return declared_lane(model)
-
-
 def fixtures_dir(model: str) -> Path:
-    """The fixture directory for ``model``: shipped, or an admitted extension's own.
+    """The shipped fixture directory for ``model``.
 
     Raises
     ------
     ValueError
-        When the model has no vLLM lane or no shipped fixtures, or is an extension
-        its guard refuses.
+        When the model has no vLLM lane or no shipped fixtures.
     """
     if model not in LANE_MODELS:
-        if _extension(model) is None:
-            raise ValueError(f"{model!r} has no vLLM lane (declared: "
-                             f"{', '.join(LANE_MODELS)})")
-        from anamnesis.extraction.vllm.extensions import admit
-
-        return admit(model).entry.fixtures_dir
+        raise ValueError(f"{model!r} has no vLLM lane (declared: {', '.join(LANE_MODELS)})")
     path = FIXTURES_ROOT / model
     if not (path / "fixtures.json").is_file():
         raise ValueError(f"no conformance fixtures ship for {model!r}")
@@ -121,18 +107,14 @@ def fixtures_dir(model: str) -> Path:
 
 
 def load_fixtures(model: str) -> tuple[FixtureSet, Tolerance]:
-    """The fixture set and tolerance for ``model``, digest-checked.
+    """The fixture set and tolerance for ``model``, digest-checked: shipped, or an
+    extension lane's through its guard, :func:`anamnesis.extraction.vllm.extensions.admit`."""
+    if model not in LANE_MODELS:
+        from anamnesis.extraction.vllm.extensions import admit, declared_lane
 
-    A shipped lane's come from :data:`FIXTURES_ROOT`; an extension lane's from its
-    declared directory, through its guard,
-    :func:`anamnesis.extraction.vllm.extensions.admit`, which checks them against the
-    extension's identity and its transfer receipt.
-    """
-    if model not in LANE_MODELS and _extension(model) is not None:
-        from anamnesis.extraction.vllm.extensions import admit
-
-        admitted = admit(model)
-        return admitted.fixtures, admitted.tolerance
+        if declared_lane(model) is not None:
+            admitted = admit(model)
+            return admitted.fixtures, admitted.tolerance
     path = fixtures_dir(model)
     fixtures = FixtureSet.load(path)
     tolerance = Tolerance.model_validate_json((path / "tolerance.json").read_text())
@@ -456,13 +438,9 @@ def check_install(model: str, model_path: Path, calib_dir: Path, work_dir: Path,
 def capture_repeats(model: str, model_path: Path, calib_dir: Path,
                     rows: Sequence[Mapping[str, Any]], feature_names: Sequence[str],
                     work_dir: Path) -> list[CapturedFixture]:
-    """Capture and reduce ``rows`` twice one at a time and once in batches of eight.
-
-    Runs the engine and readout steps under ``full-b1-order0`` (two passes) and
-    ``full-b8-order0`` (one pass) into ``work_dir``, which must not exist, and
-    returns each row's three vectors. A row missing from any pass is left out, so
-    a caller comparing the result with the rows it asked for sees the gap.
-    """
+    """Each row's vectors captured twice under ``full-b1-order0`` and once under
+    ``full-b8-order0`` into ``work_dir`` (which must not exist); a row missing from
+    any pass is left out."""
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=False)
     rows = list(rows)

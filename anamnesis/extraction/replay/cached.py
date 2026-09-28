@@ -198,19 +198,10 @@ def replay_extract_incremental(
     prompt_length: int,
     positional_means: F32 | None = None,
 ) -> RawGenerationData:
-    """The generate path's per-step states for a realized sequence, one token at a time.
-
-    Prefills the prompt with hooks off, then teacher-forces each generated position
-    ``P .. L-2`` as its own one-token forward against the growing cache, with hooks
-    on. The result has the alignment :func:`anamnesis.extraction.replay.extract.replay_extract`
-    gives: T = N-1 entries, entry i the state at generated token g_i, whose logits
-    predict g_{i+1}. The two differ only in execution path, one causal forward
-    against N-1 cached ones, so the distance between their feature vectors is the
-    row's path floor: the part of any deviation that the reference itself carries.
-
-    Dense models only: a mixture-of-experts router surface is refused rather than
-    left out of the raw data, because a feature vector missing it would read as a
-    difference between the paths.
+    """:func:`anamnesis.extraction.replay.extract.replay_extract`'s states and alignment,
+    computed the generate path's way: prompt prefill, then one cached forward per
+    generated position. The distance between the two paths' vectors is a row's path
+    floor. Dense models only: a router surface is refused, not dropped.
 
     Raises
     ------

@@ -138,54 +138,48 @@ result; this package learns no fine-tune's paths.
 
 ### What carries over, and what the check measures
 
-Everything that depends only on the architecture and its shapes carries over from the base
-unchanged: the instrumented kernel and its second pass, the determinism of the dispatch, the
-feature schema, the capture routes, the dtype, the logprob handling and every engine setting in
-`anamnesis/extraction/vllm/envelope.py`. An extension may not set any of them.
+Everything that depends only on the architecture carries over from the base unchanged: the
+instrumented kernel, the determinism of the dispatch, the feature schema, the capture routes, the
+dtype, the logprob handling and every engine setting in `anamnesis/extraction/vllm/envelope.py`.
+An extension may not set any of them.
 
-What the weights can change is how far the vLLM lane drifts from the fast lane on a row:
-threshold proximity, large activations and gate sparsity are statistics of the activations.
-The base's qualification measured its effects surviving the lane as a function of the size of
-that drift, and its tolerance records the drift it measured. So the check measures the
-fine-tune's drift on a sample of its own rows and scores it with the **base's** tolerance, the
-way the install check scores a host:
+What the weights can change is how far the vLLM lane drifts from the fast lane on a row. The
+base's qualification showed its effects surviving the lane as a function of the size of that
+drift, and its tolerance records the drift it measured. The check measures the fine-tune's drift
+on a sample of its own rows and scores it with the **base's** tolerance:
 
-- each row's covered-substrate and attention distance over its path floor, under the base's
-  ceilings, and each continuous coordinate under its family's recorded maximum;
-- the ordinary rows' median ratio under the base's 90th percentile, and at most one ordinary row
-  over its 99th. The 16 ordinary rows are evenly spaced over the sample's generation ids, chosen
-  before anything is measured: the median and tail gates compare the sample with population
-  quantiles of the base, which only means something over rows drawn without regard to how far
-  they deviate. The other rows are labelled by the deviation-ranked selection rules for the
-  fixture set, and those labels feed no gate;
-- the path floor is the fine-tune's own: how far the numeric anchor's one-forward replay and
-  its token-by-token path disagree on the row, over a σ_cal fitted on the sample. A row whose
-  floor exceeds the base's limit (`BASE_MAX_FLOOR` in
-  `anamnesis/extraction/vllm/transfer.py`) is named and left out of the scoring, because on a
-  fragile reference the deviation measures the reference rather than the lane;
-- every row is also captured again one at a time and in batches of eight, and all three
-  vectors must be byte-identical.
+- the distance of each row over its path floor, per component (covered substrate, attention):
+  at most one row over the base's maximum ratio, none over twice it; every continuous
+  coordinate within its family's recorded maximum;
+- 16 ordinary rows, evenly spaced over the sample's generation ids and chosen before anything is
+  measured: their median ratio within the base's 90th percentile, and at most one of them over
+  its 99th;
+- the path floor is the fine-tune's own: how far the numeric anchor's one-forward replay and its
+  token-by-token path disagree on the row, over a σ_cal fitted on the sample. A row whose floor
+  exceeds the base's limit (`BASE_MAX_FLOOR` in `anamnesis/extraction/vllm/transfer.py`) is named
+  and left out of the scoring, because on a fragile reference the deviation measures the
+  reference;
+- every row is captured again one at a time and in batches of eight, and all three vectors must
+  be byte-identical.
 
-The tail rule is deliberately looser than the install check's, which bounds every ordinary
-row by the 99th percentile. A host reproducing a qualified lane deviates from its fixtures by
-far less than the qualification's own deviations, so a single row over the 99th percentile is
-already a sign the host is somewhere else. A fine-tune's deviation is a full vLLM-versus-fast-lane
-deviation on new weights, expected to be distributed like the base's own: each ordinary row then
-lands over the base's 99th percentile about one time in a hundred even when the fine-tune is
-exactly in regime, and bounding all 16 would refuse such a fine-tune about 15% of the time.
-Allowing one keeps that false refusal near 1% while still refusing a heavy tail. The receipt
-records how many ordinary rows exceeded the 90th and the 99th percentile. The fine-tune's own
-fixtures keep the same id-chosen ordinary rows, and its hosts' install checks apply the install
-check's own rules to them.
+These rules differ from the install check's because the deviations differ in size. A host
+reproducing a qualified lane departs from its fixtures by far less than the qualification's own
+deviations, so any row past a recorded quantile means the host is elsewhere, and the install
+check bounds every row. A fine-tune's deviation is a full vLLM-versus-fast-lane deviation,
+distributed like the base's own when the fine-tune is in regime: then a row lands over the base's
+99th percentile about one time in a hundred, and 44 rows put one over a maximum read from a
+couple of hundred about one time in five. So the transfer check counts such rows rather than
+forbidding them, refuses any row at twice the maximum outright, and reads its median and tail
+only from rows chosen by id, since rows chosen by how far they deviate would leave the calmest
+ones to be tested. The receipt records the rows over the maximum, the worst multiple, and how
+many ordinary rows exceeded each percentile.
 
-A fine-tune inside the base's regime inherits the base's evidence that effects survive the
-lane, for the same reason a conformant host does. One outside it needs a qualification of its
-own. Which contrasts the fine-tune resolves is a question about the fine-tune, answered by its
-owner's own experiments; the check answers only whether the lane measures it faithfully.
-
-A pass also writes the fine-tune's own fixtures and tolerance, built from the sample by the same
-rules as the shipped ones, so each host that runs the fine-tune checks its install exactly as
-it would for a base.
+A fine-tune inside the base's regime inherits the base's evidence that effects survive the lane,
+for the same reason a conformant host does; one outside it needs a qualification of its own.
+Which contrasts the fine-tune resolves is a question for its owner's own experiments. A pass also
+writes the fine-tune's own fixtures and tolerance, built from the sample with the same
+id-chosen ordinary rows, so each host that runs the fine-tune checks its install as it would for
+a base.
 
 ### Running the check
 
@@ -242,14 +236,13 @@ python -m anamnesis.scripts.run_vllm_replay --model my-finetune \
 The calibration is read from the declared directory, or `--calib-dir`, and verified against
 the declared sizes and digests before anything reads it; nothing is downloaded.
 
-Every use passes the extension's guard (`anamnesis/extraction/vllm/extensions.py`), which
-refuses the lane by name unless its receipt exists, matches its declared digest and passed;
-unless the receipt, the entry and the fixtures agree on the base lane, the checkpoint, the
-calibration, the fixture set and the tolerance; unless the base's shipped tolerance is still the
-one the receipt was scored against; and unless the preset still descends from the base's with
-its architecture and layer plan unchanged. A file that gives an entry a shipped key or another
-entry's key, declares one checkpoint on one base twice, extends anything but a shipped lane, or
-sets an inherited setting is refused whole.
+Every use passes the extension's guard (`anamnesis/extraction/vllm/extensions.py`): the lane
+is refused by name unless its receipt exists, matches its declared digest and passed; the
+receipt, entry and fixtures agree on base, checkpoint, calibration, fixtures and tolerance; the
+base's shipped tolerance is still the one scored against; and the preset still extends the
+base's with its architecture and layer plan unchanged. A file whose entry reuses a key, repeats
+a checkpoint on one base, extends anything but a shipped lane, or sets an inherited setting is
+refused whole.
 
 An extension's lane id is the digest of its base's lane identity, the base's key and its
 checkpoint digest. It differs from the base's and from every other extension's, so
