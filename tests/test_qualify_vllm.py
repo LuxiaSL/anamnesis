@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from anamnesis.extraction.vllm import runtime
+from anamnesis.extraction.vllm import hub, runtime
 from anamnesis.extraction.vllm.conformance import ConformanceReceipt, HostFingerprint
 from anamnesis.scripts import qualify_vllm
 
@@ -48,6 +48,8 @@ def _stand_in(monkeypatch, outcome, cached=False):
         return outcome, cached
 
     monkeypatch.setattr(runtime, "check_install", check_install)
+    monkeypatch.setattr(runtime, "load_fixtures", lambda model: (None, None))
+    monkeypatch.setattr(hub, "verify_calibration", lambda model, directory: None)
     return calls
 
 
@@ -137,3 +139,15 @@ def test_the_command_offers_exactly_the_lane_models():
 
     action = next(a for a in qualify_vllm.parser()._actions if a.dest == "model")
     assert sorted(action.choices) == sorted(LANE_MODELS)
+
+
+def test_a_model_without_fixtures_is_refused_before_any_calibration_is_fetched(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(runtime, "FIXTURES_ROOT", tmp_path / "none")
+    fetched = []
+    monkeypatch.setattr(hub, "fetch_calibration", lambda model: fetched.append(model))
+    argv = ["--model", "8b", "--model-path", str(tmp_path / "ckpt"),
+            "--work-dir", str(tmp_path / "work")]
+    assert qualify_vllm.main(argv) == 2
+    assert "no conformance fixtures ship for '8b'" in capsys.readouterr().err
+    assert not fetched

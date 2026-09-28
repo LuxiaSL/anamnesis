@@ -215,7 +215,7 @@ def test_pinned_packages_refuse_a_differing_or_missing_package(monkeypatch) -> N
     versions = dict(PINNED_PACKAGES, vllm="0.17.0")
     del versions["triton"]
     monkeypatch.setattr(envelope.importlib.metadata, "version", _installed(versions))
-    with pytest.raises(RuntimeError, match=r"anamnesis\[vllm\]") as caught:
+    with pytest.raises(RuntimeError, match="vllm extra") as caught:
         require_pinned_packages()
     message = str(caught.value)
     assert "'vllm': '0.17.0'" in message

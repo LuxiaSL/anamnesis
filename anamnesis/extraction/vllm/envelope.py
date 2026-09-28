@@ -219,8 +219,8 @@ def require_pinned_packages() -> dict[str, str]:
     Raises
     ------
     RuntimeError
-        Naming each missing or differing package; ``anamnesis[vllm]`` installs the
-        pinned set.
+        Naming each missing or differing package; this package's ``vllm`` extra
+        installs the pinned set.
     """
     found, wrong = {}, {}
     for name, version in PINNED_PACKAGES.items():
@@ -232,7 +232,8 @@ def require_pinned_packages() -> dict[str, str]:
             wrong[name] = found[name]
     if wrong:
         raise RuntimeError(f"the vLLM lane needs {PINNED_PACKAGES}; this installation has "
-                           f"{wrong} (install anamnesis[vllm])")
+                           f"{wrong} (install this package with its vllm extra: "
+                           f"uv pip install -e '.[vllm]' from a clone)")
     return found
 
 

@@ -386,18 +386,26 @@ def check_install(model: str, model_path: Path, calib_dir: Path, work_dir: Path,
                   cache_dir: Path, *, refresh: bool = False) -> tuple[ConformanceReceipt, bool]:
     """Decide this host's tier for ``model``; return the receipt and whether it was cached.
 
-    A cached receipt for an equal fingerprint is returned without capturing,
-    unless ``refresh``. Otherwise the fixtures are captured twice under
+    The fixtures, the calibration and the installed engine packages are checked
+    first, then the checkpoint's digest. A cached receipt for an equal fingerprint
+    is returned without capturing, unless ``refresh``. Otherwise the fixtures are
+    captured twice under
     ``full-b1-order0`` and once under ``full-b8-order0`` into ``work_dir``, which
     must not exist, reduced, and decided.
     """
     fixtures, tolerance = load_fixtures(model)
     require_fixture_calibration(fixtures, calib_dir)
+    require_pinned_packages()
     fingerprint = host_fingerprint(fixtures, tolerance, model_path)
     cache = ReceiptCache(cache_dir)
     cached = cache.load(fingerprint)
     if cached is not None and not refresh:
         return cached, True
+    if fingerprint.checkpoint_sha256 != fixtures.checkpoint_sha256:
+        raise ValueError(f"the checkpoint in {model_path} is not the one the {model} fixtures "
+                         f"were produced from: its config and weights digest to "
+                         f"{fingerprint.checkpoint_sha256}, the fixtures to "
+                         f"{fixtures.checkpoint_sha256}")
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=False)
     rows = fixture_rows(fixtures)
@@ -432,6 +440,7 @@ def usable_receipt(model: str, model_path: Path, cache_dir: Path) -> Conformance
         that produces one, or when the cached one refused the host.
     """
     fixtures, tolerance = load_fixtures(model)
+    require_pinned_packages()
     fingerprint = host_fingerprint(fixtures, tolerance, model_path)
     receipt = ReceiptCache(cache_dir).load(fingerprint)
     if receipt is None:

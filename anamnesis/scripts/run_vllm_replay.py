@@ -18,7 +18,7 @@ large; ``--work-dir`` holds one chunk's captures at a time and ``--chunk-rows``
 sets its size.
 
 Exit status: 0 banked, 2 refused before or while banking, with the reason on
-stderr. An existing ``--output`` raises rather than being reused.
+stderr. An existing ``--output`` is refused, never reused.
 """
 
 from __future__ import annotations
@@ -58,19 +58,21 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     from anamnesis.extraction.replay.manifest import ReplayManifest
-    from anamnesis.extraction.vllm.hub import fetch_calibration
+    from anamnesis.extraction.vllm.hub import fetch_calibration, verify_calibration
     from anamnesis.extraction.vllm.runtime import (
         default_cache_dir,
+        load_fixtures,
         replay_bank,
         replay_rows,
         source_metadata,
     )
     from anamnesis.provenance import file_sha
 
-    if args.output.exists():
-        raise FileExistsError(args.output)
     work_dir = args.work_dir or args.output.with_name(args.output.name + ".work")
     try:
+        if args.output.exists():
+            raise FileExistsError(f"{args.output} exists; outputs are never overwritten")
+        load_fixtures(args.model)
         manifest = ReplayManifest.model_validate_json(args.manifest.read_text())
         ids = list(manifest.gen_ids()) if args.gen_ids is None else args.gen_ids
         if not ids or len(set(ids)) != len(ids) or any(str(i) not in manifest.entries
@@ -89,12 +91,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             manifest_sha256=file_sha(args.manifest), selected_ids=ids,
             source_metadata_sha256=file_sha(metadata_path) if metadata_path else None,
             runner_sha256=file_sha(Path(__file__)))
+        if args.calib_dir is not None:
+            verify_calibration(args.model, args.calib_dir)
         calib_dir = args.calib_dir or fetch_calibration(args.model)
         written = replay_bank(args.model, args.model_path, calib_dir, rows, args.output,
                               work_dir, args.cache_dir or default_cache_dir(),
                               chunk_rows=args.chunk_rows, metadata=metadata,
                               provenance=provenance)
-    except ValueError as exc:
+    except (ValueError, RuntimeError, OSError, ImportError) as exc:
         print(f"the replay did not run: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(dict(model=args.model, rows=written, output=str(args.output))))

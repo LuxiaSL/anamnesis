@@ -93,6 +93,10 @@ def _fingerprint(fixtures: FixtureSet, tolerance: Tolerance) -> HostFingerprint:
                            fixture_digest=fixtures.digest, tolerance_digest=tolerance.digest)
 
 
+
+PINNED = {"vllm": "0.16.0", "torch": "2.9.1", "triton": "3.5.1"}
+"""What the stand-in installation reports: the engine packages the lane pins."""
+
 def _ship(tmp_path: Path, monkeypatch, fixtures: FixtureSet, tolerance: Tolerance,
           directory: str | None = None) -> Path:
     """Write ``fixtures`` and ``tolerance`` where the runtime reads shipped fixtures."""
@@ -112,6 +116,7 @@ def host(tmp_path, monkeypatch):
     _ship(tmp_path, monkeypatch, fixtures, tolerance)
     fingerprint = _fingerprint(fixtures, tolerance)
     monkeypatch.setattr(runtime, "host_fingerprint", lambda *a: fingerprint)
+    monkeypatch.setattr(runtime, "require_pinned_packages", lambda: dict(PINNED))
     return SimpleNamespace(calib=calib, fixtures=fixtures, tolerance=tolerance,
                            fingerprint=fingerprint, cache=tmp_path / "cache",
                            model_path=tmp_path / "checkpoint")
@@ -615,3 +620,32 @@ def test_the_engine_probe_sees_an_engine_import():
     """The counterpart: the backend reaches for the engine, and the probe sees it,
     so an empty result above is a property of the import graph."""
     assert _probe(["anamnesis.extraction.vllm.backend"])["attempts"]
+
+
+def test_a_checkpoint_other_than_the_fixtures_is_refused_before_any_capture(
+        host, tmp_path, monkeypatch):
+    other = host.fingerprint.model_copy(update={"checkpoint_sha256": "f" * 64})
+    monkeypatch.setattr(runtime, "host_fingerprint", lambda *a: other)
+    steps = []
+    monkeypatch.setattr(runtime, "run_step", lambda *a, **k: steps.append(a))
+    with pytest.raises(ValueError, match="not the one the .* fixtures were produced from"):
+        runtime.check_install(MODEL, host.model_path, host.calib, tmp_path / "work",
+                              host.cache)
+    assert not steps and not (tmp_path / "work").exists()
+
+
+def test_the_engine_packages_are_checked_before_the_host_is_fingerprinted(
+        host, tmp_path, monkeypatch):
+    def missing():
+        raise RuntimeError("the vLLM lane needs the pinned engine")
+
+    def fingerprinted(*args):
+        raise AssertionError("the fingerprint ran before the package check")
+
+    monkeypatch.setattr(runtime, "require_pinned_packages", missing)
+    monkeypatch.setattr(runtime, "host_fingerprint", fingerprinted)
+    with pytest.raises(RuntimeError, match="pinned engine"):
+        runtime.check_install(MODEL, host.model_path, host.calib, tmp_path / "work",
+                              host.cache)
+    with pytest.raises(RuntimeError, match="pinned engine"):
+        runtime.usable_receipt(MODEL, host.model_path, host.cache)

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from anamnesis.extraction.vllm import runtime
+from anamnesis.extraction.vllm import hub, runtime
 from anamnesis.extraction.vllm.envelope import SETTINGS
 from anamnesis.provenance import file_sha
 from anamnesis.scripts import run_vllm_replay
@@ -53,6 +53,8 @@ def _stand_in(monkeypatch, outcome=None):
         return len(args[3])
 
     monkeypatch.setattr(runtime, "replay_bank", replay_bank)
+    monkeypatch.setattr(runtime, "load_fixtures", lambda model: (None, None))
+    monkeypatch.setattr(hub, "verify_calibration", lambda model, directory: None)
     return calls
 
 
@@ -102,12 +104,12 @@ def test_metadata_beside_the_manifest_is_read_and_stamped(tmp_path, monkeypatch)
     assert kwargs["provenance"]["source_metadata_sha256"] == file_sha(metadata)
 
 
-def test_an_existing_output_is_never_overwritten(tmp_path, monkeypatch):
+def test_an_existing_output_is_never_overwritten(tmp_path, monkeypatch, capsys):
     manifest = _manifest(tmp_path, {3: (2, 6)})
     calls = _stand_in(monkeypatch)
     (tmp_path / "out").mkdir()
-    with pytest.raises(FileExistsError):
-        run_vllm_replay.main(_argv(tmp_path, manifest))
+    assert run_vllm_replay.main(_argv(tmp_path, manifest)) == 2
+    assert "outputs are never overwritten" in capsys.readouterr().err
     assert not calls
 
 

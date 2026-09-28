@@ -63,15 +63,22 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    from anamnesis.extraction.vllm.hub import fetch_calibration
-    from anamnesis.extraction.vllm.runtime import check_install, default_cache_dir
+    from anamnesis.extraction.vllm.hub import fetch_calibration, verify_calibration
+    from anamnesis.extraction.vllm.runtime import (
+        check_install,
+        default_cache_dir,
+        load_fixtures,
+    )
 
     cache_dir = args.cache_dir or default_cache_dir()
     try:
+        load_fixtures(args.model)
+        if args.calib_dir is not None:
+            verify_calibration(args.model, args.calib_dir)
         calib_dir = args.calib_dir or fetch_calibration(args.model)
         receipt, cached = check_install(args.model, args.model_path, calib_dir,
                                         args.work_dir, cache_dir, refresh=args.refresh)
-    except (ValueError, RuntimeError, OSError) as exc:
+    except (ValueError, RuntimeError, OSError, ImportError) as exc:
         print(f"the install check did not run: {exc}", file=sys.stderr)
         return 2
     print(f"model: {args.model}  tier: {receipt.tier}{'  (cached)' if cached else ''}")

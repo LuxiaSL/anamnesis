@@ -14,12 +14,31 @@ combined with fast-lane rows inside one contrast.
 | Placement | One GPU holding every parameter, plus 2 GiB of KV cache. The 70B model in bfloat16 needs a card with roughly 160 GB |
 | Spans | A prompt and at least two generated tokens, 1024 tokens in all at most |
 | Execution | Whole-prompt prefill, one request at a time or eight in a batch |
-| Engine | `vllm==0.16.0`, `torch==2.9.1`, `triton==3.5.1`, which `pip install "anamnesis[vllm]"` installs |
+| Engine | `vllm==0.16.0`, `torch==2.9.1`, `triton==3.5.1`: the `vllm` extra |
 
 Everything outside that table is refused by name before an engine is built:
-`anamnesis/extraction/vllm/envelope.py` holds the declaration and the guard. Triton compiles
-a small launcher when it first runs, so the Python interpreter's development headers must be
-installed.
+`anamnesis/extraction/vllm/envelope.py` holds the declaration and the guard.
+
+## Setting up
+
+Install from a clone into a virtual environment of its own, because the extra pins torch
+exactly: `uv pip install -e ".[vllm]"`. Triton compiles a small launcher when it first runs,
+so the Python interpreter's development headers must be present; the interpreters `uv`
+installs carry them.
+
+`--model-path` is a local directory holding the checkpoint's `config.json` and its
+`*.safetensors` shards at the top level: Meta's Instruct release of the model, as published
+on Hugging Face. The check hashes those files and refuses, before capturing anything, a
+checkpoint whose digest differs from the one the fixtures were produced from; the refusal
+prints both digests.
+
+The lane reads the first GPU the process can see, and a receipt names that card. On a host
+with several, `CUDA_VISIBLE_DEVICES` chooses one, and a different card is checked again.
+
+The lane reduces every row with the calibration its fixtures were reduced with, not one
+fitted on the host, so banks from any host running the lane share one calibration. It is
+downloaded once into the output root; a copy elsewhere is named with `--calib-dir` and
+verified against the sizes and digests in `anamnesis/extraction/vllm/hub.py`.
 
 ## Before first use on a host: the install check
 
@@ -33,6 +52,9 @@ batches of eight, reduces them, and compares them with the vectors the lane prod
 it was measured against the numeric anchor. The calibration those vectors were reduced with
 is fetched on first use and verified against its pinned digests; `--calib-dir` names a local
 copy instead.
+
+The work directory holds the raw captures of the three passes until each is reduced: about
+44 GB per pass for the 70B model, far less for the smaller ones.
 
 The check ends in one of three tiers:
 
@@ -50,7 +72,13 @@ The check ends in one of three tiers:
 The receipt is cached under the output root, keyed by the host's fingerprint (GPU, driver,
 CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures, tolerance and engine
 settings), and reused only while every field is equal. Change any of them and the check runs
-again.
+again; `--refresh` runs it regardless.
+
+Exit status 0 means identical or conformant, 1 refused, 2 that the check could not run (a
+missing engine, checkpoint or calibration, with the reason). A refusal lists what differed:
+a host whose repeated or batched captures disagree is not deterministic in this
+configuration, and a deviation outside the tolerance means this hardware and software do
+not compute what the lane computes closely enough to share its results.
 
 ## Banking signatures
 
@@ -59,6 +87,11 @@ python -m anamnesis.scripts.run_vllm_replay --model 8b \
     --model-path /path/to/Llama-3.1-8B-Instruct \
     --manifest runs/<run>/replay_manifest.json --output banks/<run>-vllm
 ```
+
+The manifest is the `replay_manifest.json` a banked run carries, written by `run_extraction`
+or `run_gen_tokens` into the run's directory under the output root; `metadata.json` beside it
+is read when present. Spans must fit the lane's 1024-token context, and a span too short to
+carry the fast lane's full schema (fewer than eight predicted positions) is refused.
 
 It refuses to start without a cached receipt for this host that did not refuse it. Rows are
 captured and reduced in chunks (`--chunk-rows`), because a captured row's substrate is large,
@@ -70,7 +103,8 @@ Every row carries `lane_id`, the id its host's receipt assigned, and an `extract
 record naming the tier, the receipt digest, the calibration and the feature schema.
 `anamnesis/analysis/lane_guard.py` refuses to combine rows of different lanes inside one
 contrast, so a bank from an `identical` host joins other `identical` banks of the same model,
-and a `conformant` host's bank joins only banks from that host.
+and a `conformant` host's bank joins only banks from that host. Every reader that takes a
+signature directory reads it, `run_gauntlet` among them.
 
 ## How it works
 
