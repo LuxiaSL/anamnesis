@@ -200,8 +200,9 @@ def capture_rows(spec: Mapping[str, Any]) -> None:
 
     ``spec`` holds ``model``, ``model_path``, ``condition_id``, ``passes``,
     ``out`` and ``rows`` (each with ``generation_id``, ``input_ids``,
-    ``prompt_length`` and ``end``). Pass ``i`` is written to ``out/pass-i``, and
-    ``out/capture.json`` records the settings, the guard's record and the device.
+    ``prompt_length`` and ``end``). Pass ``i`` is written to its own directory under
+    ``out``, beside a capture record of the settings, the guard's record and the
+    device.
     """
     require_environment()
     versions = require_pinned_packages()
@@ -286,10 +287,10 @@ def reduce_rows(spec: Mapping[str, Any]) -> None:
     """The readout step: reduce every captured pass of ``spec`` and delete its raws.
 
     ``spec`` holds ``model``, ``calib_dir``, ``feature_names``, ``captures`` (the
-    engine step's ``out``) and ``rows``. Each ``pass-i`` directory gains a
-    ``vectors.npz`` of ``generation_ids``, ``vectors`` and, when the model's
-    configuration enables it, ``knnlm`` (the final hidden state at each span's
-    last position). A raw capture is deleted once its vector is written.
+    engine step's ``out``) and ``rows``. Each pass directory gains one npz of the
+    arrays ``generation_ids``, ``vectors`` and, when the model's configuration
+    enables it, ``knnlm`` (the final hidden state at each span's last position). A
+    raw capture is deleted once its vector is written.
     """
     import torch
 

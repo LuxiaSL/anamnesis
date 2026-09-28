@@ -6,8 +6,8 @@ first generates without hooks, then again under :class:`LaneCapture`, and
 refuses unless the hooked run produced the same tokens and logprobs: capturing
 must not change what the model computes. It proves the scheduler realized the
 declared batch capacity and prefilled every prompt whole, and writes each
-retained row's substrate (``row-NNNNN.pt``) beside a receipt of its tensor
-contents (``row-NNNNN.json``) and each group's schedule record.
+retained row's substrate as a torch file named for its generation id, beside a
+JSON receipt of its tensor contents, and each group's schedule record.
 
 Nothing here builds an engine or deletes a file; the command that calls it owns
 both.
@@ -217,7 +217,7 @@ def capture_groups(
     ValueError, RuntimeError
         On any departure from the declared groups, the scheduling or the
         substrate, and when the hooks changed the generation. A failing group
-        leaves a ``group-NNNN.failed.json`` naming why.
+        leaves a failure record beside its captures naming why.
     """
     by_id = _validate_groups(rows, groups, condition)
     if getattr(sampling, "max_tokens", None) != 1 or getattr(sampling, "n", 1) != 1:

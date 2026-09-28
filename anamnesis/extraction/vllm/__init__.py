@@ -29,6 +29,8 @@ declared there, and on a host only after that host's install check.
   in a process that never imports the engine.
 * :mod:`~anamnesis.extraction.vllm.conformance` — the install check's decision:
   identical, conformant (a lane of this host's own) or refused.
+* :mod:`~anamnesis.extraction.vllm.hub` — the calibrations the fixtures were
+  reduced with, pinned by digest and fetched on first use.
 * :mod:`~anamnesis.extraction.vllm.runtime` and
   :mod:`~anamnesis.extraction.vllm.steps` — the two processes a pass runs as, the
   host fingerprint, and the check and replay flows the commands call.

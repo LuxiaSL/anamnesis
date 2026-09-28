@@ -131,11 +131,12 @@ libraries beside it — several gigabytes. On a machine with no accelerator,
 `uv pip install --torch-backend=cpu -e ".[dev]"` fetches the CPU build instead; the
 quickstart and everything on the reading side run on it unchanged.
 
-Four extras, each carrying what one part needs and nothing else: `geometry`
+Five extras, each carrying what one part needs and nothing else: `geometry`
 (intrinsic-dimension estimators and persistent homology), `semantic` (sentence
-embeddings), `judge` (provider clients), `adapters` (checkpoint-series replay). The
-instrument imports and runs without all four, and a part that needs one reports its
-absence rather than failing the import.
+embeddings), `judge` (provider clients), `adapters` (checkpoint-series replay), `vllm`
+(the pinned engine the vLLM lane runs on; see `docs/VLLM_LANE.md`). The instrument
+imports and runs without all five, and a part that needs one reports its absence rather
+than failing the import.
 
 ## Lineage
 

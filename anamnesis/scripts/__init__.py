@@ -39,6 +39,13 @@ reviewer reads for.
 * `qualify_box.py` — measure whether this machine's fast lane agrees with the
   numeric anchor, and name the lane identity its outputs will carry.
 
+**The vLLM lane, and checking a host for it.**
+
+* `qualify_vllm.py` — check this host's vLLM install against the shipped fixtures and
+  cache the tier it earns: identical, conformant or refused.
+* `run_vllm_replay.py` — replay a banked run through the vLLM lane on a host whose check
+  did not refuse it.
+
 **Judging: the behavioural channel.**
 
 * `judge_2afc.py` — draw a blind two-alternative forced choice over banked text,

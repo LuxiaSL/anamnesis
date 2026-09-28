@@ -5,7 +5,9 @@ measured once per engine version and model, against the numeric anchor, and is
 what the shipped fixtures and tolerance record) but the smaller question a host
 can answer on its own: does *this* install compute what the qualified lane
 computes? It needs no second model and no reference bank, only the checkpoint,
-its calibration and one GPU.
+its calibration and one GPU. The calibration is the one the fixtures were reduced
+with; without ``--calib-dir`` it is fetched once and verified against its pinned
+digests.
 
 What it does, per model:
 
@@ -48,7 +50,8 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="qualify_vllm.py", description=__doc__.splitlines()[0])
     p.add_argument("--model", choices=sorted(LANE_MODELS), required=True)
     p.add_argument("--model-path", type=Path, required=True, help="Local checkpoint directory")
-    p.add_argument("--calib-dir", type=Path, required=True)
+    p.add_argument("--calib-dir", type=Path,
+                   help="The lane's calibration; fetched and verified when omitted")
     p.add_argument("--work-dir", type=Path, required=True,
                    help="New directory for the captures and vectors of this check")
     p.add_argument("--cache-dir", type=Path,
@@ -60,11 +63,13 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    from anamnesis.extraction.vllm.hub import fetch_calibration
     from anamnesis.extraction.vllm.runtime import check_install, default_cache_dir
 
     cache_dir = args.cache_dir or default_cache_dir()
     try:
-        receipt, cached = check_install(args.model, args.model_path, args.calib_dir,
+        calib_dir = args.calib_dir or fetch_calibration(args.model)
+        receipt, cached = check_install(args.model, args.model_path, calib_dir,
                                         args.work_dir, cache_dir, refresh=args.refresh)
     except (ValueError, RuntimeError, OSError) as exc:
         print(f"the install check did not run: {exc}", file=sys.stderr)

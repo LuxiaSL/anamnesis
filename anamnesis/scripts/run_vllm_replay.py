@@ -6,8 +6,8 @@ GPU, and only on a host whose install check (`qualify_vllm.py`) is cached and di
 not refuse it. The command refuses before loading anything otherwise.
 
 **What an output is.** The same banked format the fast lane writes: a feature
-vector and a metadata sidecar per generation, no raw tensors, beside a
-``deployment.json``. Every row carries the lane id the install check assigned
+vector and a metadata sidecar per generation, no raw tensors, beside a deployment
+record of what produced them. Every row carries the lane id the install check assigned
 (the qualified lane's own on an ``identical`` host, the host's own otherwise) and
 an ``extraction_lane`` receipt naming the tier and the receipt digest.
 :mod:`anamnesis.analysis.lane_guard` refuses to combine rows of different lanes
@@ -33,7 +33,8 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="run_vllm_replay.py", description=__doc__.splitlines()[0])
     p.add_argument("--model", choices=sorted(LANE_MODELS), required=True)
     p.add_argument("--model-path", type=Path, required=True, help="Local checkpoint directory")
-    p.add_argument("--calib-dir", type=Path, required=True)
+    p.add_argument("--calib-dir", type=Path,
+                   help="The lane's calibration; fetched and verified when omitted")
     p.add_argument("--manifest", type=Path, required=True, help="Replay manifest of a banked run")
     p.add_argument("--output", type=Path, required=True,
                    help="New directory; existing outputs are never overwritten")
@@ -54,6 +55,7 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     from anamnesis.extraction.replay.manifest import ReplayManifest
+    from anamnesis.extraction.vllm.hub import fetch_calibration
     from anamnesis.extraction.vllm.runtime import (
         default_cache_dir,
         replay_bank,
@@ -83,7 +85,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_metadata_sha256=file_sha(metadata_path) if metadata_path else None,
         runner_sha256=file_sha(Path(__file__)))
     try:
-        written = replay_bank(args.model, args.model_path, args.calib_dir, rows, args.output,
+        calib_dir = args.calib_dir or fetch_calibration(args.model)
+        written = replay_bank(args.model, args.model_path, calib_dir, rows, args.output,
                               work_dir, args.cache_dir or default_cache_dir(),
                               chunk_rows=args.chunk_rows, metadata=metadata,
                               provenance=provenance)
