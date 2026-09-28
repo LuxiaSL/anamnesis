@@ -61,6 +61,8 @@ def generation_record(outputs, expected_ids):
             for row in values]
 
     completion = request.outputs[0]
+    if request.prompt_logprobs is None:
+        raise ValueError('requested logprobs absent')
     if len(completion.token_ids) != 1 or len(request.prompt_logprobs) != len(expected_ids):
         raise ValueError('generation/logprob lengths differ from the request')
     result = dict(
