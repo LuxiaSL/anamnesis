@@ -71,6 +71,18 @@ def check_shipped_data() -> list[str]:
         if not names:
             failures.append("the run registry loaded but names no runs")
 
+    try:
+        from anamnesis.extraction.vllm.runtime import load_fixtures
+        from anamnesis.extraction.vllm.envelope import LANE_MODELS
+    except Exception as exc:  # noqa: BLE001 - reported, not raised
+        failures.append(f"the vLLM lane's runtime does not import: {exc!r}")
+    else:
+        for model in LANE_MODELS:
+            try:
+                load_fixtures(model)
+            except Exception as exc:  # noqa: BLE001 - reported, not raised
+                failures.append(f"the {model} vLLM lane fixtures do not load: {exc!r}")
+
     return failures
 
 
