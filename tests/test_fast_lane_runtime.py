@@ -85,6 +85,45 @@ def test_the_arithmetic_pins_are_idempotent_and_off_by_the_end(
     torch.use_deterministic_algorithms(False)
 
 
+def test_a_cuda_path_floor_outside_the_lane_arithmetic_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A path floor is defined under the pin: unpinned, cuBLAS picks GEMM algorithms by
+    shape and the floor depends on the device it ran on. The check names what is missing
+    and changes nothing; a CPU computation passes, since cuBLAS is not involved."""
+    import torch
+
+    monkeypatch.delenv(WORKSPACE_ENV, raising=False)
+    torch.use_deterministic_algorithms(False)
+    runtime.refuse_unpinned_floor(torch.device("cpu"))
+    with pytest.raises(ValueError, match=f"{WORKSPACE_ENV}.*deterministic"):
+        runtime.refuse_unpinned_floor(torch.device("cuda"))
+    assert not torch.are_deterministic_algorithms_enabled()
+    monkeypatch.setenv(WORKSPACE_ENV, WORKSPACE_VALUE)
+    require_lane_arithmetic()
+    try:
+        runtime.refuse_unpinned_floor("cuda:0")
+        torch.backends.cudnn.allow_tf32 = True
+        with pytest.raises(ValueError, match="TF32"):
+            runtime.refuse_unpinned_floor("cuda:0")
+    finally:
+        torch.backends.cudnn.allow_tf32 = False
+        torch.use_deterministic_algorithms(False)
+
+
+def test_the_incremental_primitives_check_the_arithmetic_before_any_forward() -> None:
+    """Both path-floor primitives refuse on CUDA before running the model."""
+    import inspect
+
+    from anamnesis.extraction.equivalence.path_floor import first_incremental_coordinates
+    from anamnesis.extraction.replay.cached import replay_extract_incremental
+
+    for primitive in (replay_extract_incremental, first_incremental_coordinates):
+        source = inspect.getsource(primitive)
+        assert source.index("refuse_unpinned_floor(device)") < source.index("loaded.model("), \
+            primitive.__name__
+
+
 def _entries(*rows: tuple[int, int, int]) -> dict[str, dict[str, object]]:
     """A manifest's entries: (gen_id, prompt_length, generated token count) each."""
     return {

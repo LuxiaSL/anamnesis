@@ -104,6 +104,39 @@ def require_lane_arithmetic() -> None:
     torch.backends.cudnn.allow_tf32 = False
 
 
+def refuse_unpinned_floor(device: Any) -> None:
+    """Refuse a path-floor computation on CUDA outside the lane's arithmetic.
+
+    A path floor is the anchor's one-forward vs token-by-token disagreement *within*
+    the arithmetic every reference the lane is scored against was computed in. Without
+    the cuBLAS workspace pin, cuBLAS chooses GEMM algorithms by shape, and a floor
+    measured that way depends on the device it ran on as well as on the model. This
+    only checks, unlike :func:`require_lane_arithmetic`, so a library primitive can
+    call it without changing global state. CPU computations pass: cuBLAS is not
+    involved.
+
+    Raises
+    ------
+    ValueError
+        On a CUDA device when the workspace pin, deterministic algorithms or TF32-off
+        is not in force, naming each.
+    """
+    import torch
+
+    if torch.device(device).type != "cuda":
+        return
+    missing = []
+    if os.environ.get(WORKSPACE_ENV) != WORKSPACE_VALUE:
+        missing.append(f"{WORKSPACE_ENV}={WORKSPACE_VALUE}")
+    if not torch.are_deterministic_algorithms_enabled():
+        missing.append("deterministic algorithms")
+    if torch.backends.cuda.matmul.allow_tf32 or torch.backends.cudnn.allow_tf32:
+        missing.append("TF32 off")
+    if missing:
+        raise ValueError("a path floor is defined under the lane's arithmetic; missing: "
+                         + ", ".join(missing) + " (see require_lane_arithmetic)")
+
+
 @dataclass(frozen=True)
 class LaneSpan:
     """One banked generation as the lane replays it: its ids, and where the prompt ends.
