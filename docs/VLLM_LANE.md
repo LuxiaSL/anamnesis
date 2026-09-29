@@ -152,14 +152,28 @@ An extension may not set any of them.
 What the weights can change is how far the vLLM lane drifts from the fast lane on a row. The
 base's qualification showed its effects surviving the lane as a function of the size of that
 drift, and its tolerance records the drift it measured. The check measures the fine-tune's drift
-on a sample of its own rows and scores it with the **base's** tolerance:
+on a sample of its own rows and scores it with the **base's** tolerance, under the **base's rule
+set** (`transfer_rules.json` beside the base's tolerance):
 
 - the distance of each row over its path floor, per component (covered substrate, attention):
-  at most one row over the base's maximum ratio, none over twice it; every continuous
-  coordinate within its family's recorded maximum;
+  at most two rows over the base's maximum ratio;
 - 16 ordinary rows, evenly spaced over the sample's generation ids and chosen before anything is
   measured: their median ratio within the base's 90th percentile, and at most one of them over
   its 99th;
+- per feature family, a **drift gate**: over the same 16 ordinary rows, the median of each row's
+  largest |δ|/σ_cal in the family must stay within the base's 90th percentile of that statistic.
+  A single row over a family's recorded maximum is listed in the receipt, not refused;
+- a single row's extremity is **reported, never gated**, whatever its size. Every row over a
+  component's or a family's base maximum is listed in the receipt with its multiple, beside the
+  bifurcation diagnostic, which the check runs itself: it compares the vLLM lane's residual
+  stream with the numeric anchor's, token by token, over the blocks from 35% of the depth, and
+  reports the largest divergence and, at that token, the largest one-sided channel (one side's
+  largest residual channel over its usual largest, with the other side's same channel beside
+  it). At 70B the largest single-row deviations are tokens where one engine forms a massive
+  activation and the other does not, which did not affect retained effects, and no per-row bound
+  read from a couple of hundred rows told them apart from a departure without refusing most
+  in-regime fine-tunes. The accepted trade: a fine-tune with one or two badly broken rows passes,
+  with those rows listed;
 - the path floor is the fine-tune's own: how far the numeric anchor's one-forward replay and its
   token-by-token path disagree on the row under the lane's arithmetic, over a σ_cal fitted on the
   sample, the same definition as the base's. A row whose floor
@@ -173,13 +187,30 @@ These rules differ from the install check's because the deviations differ in siz
 reproducing a qualified lane departs from its fixtures by far less than the qualification's own
 deviations, so any row past a recorded quantile means the host is elsewhere, and the install
 check bounds every row. A fine-tune's deviation is a full vLLM-versus-fast-lane deviation,
-distributed like the base's own when the fine-tune is in regime: then a row lands over the base's
-99th percentile about one time in a hundred, and 44 rows put one over a maximum read from a
-couple of hundred about one time in five. So the transfer check counts such rows rather than
-forbidding them, refuses any row at twice the maximum outright, and reads its median and tail
-only from rows chosen by id, since rows chosen by how far they deviate would leave the calmest
-ones to be tested. The receipt records the rows over the maximum, the worst multiple, and how
-many ordinary rows exceeded each percentile.
+distributed like the base's own when the fine-tune is in regime: then some of its 44 rows land
+over a maximum read from a couple of hundred rows by chance alone, and the base's largest rows
+are single tokens where the engines split. So the transfer check counts rows rather than
+forbidding them, gates families by their median rather than their extremes, reads its medians
+and tails only from rows chosen by id (rows chosen by how far they deviate would leave the
+calmest ones to be tested), and reports single-row extremes rather than gating them.
+
+**Each base's rule set is qualified on that base's own records.** Simulated fine-tunes are drawn
+from the base's qualification rows, 300 samples of 56, and scored against ceilings read from the
+rows left out; a rule set ships only when it refuses fewer than one in ten of these in-regime
+samples. The shipped sets refuse 9.3% (3B), 9.0% (8B) and 5.0% (70B). A base without a
+qualified rule set refuses every extension, naming the base. The drift gate is strong for the attention
+families and weaker for some substrate families: the rule set and every receipt name the
+families where a 1.5× drift is caught less than 80% of the time, with the drift it does catch.
+
+| base | weakly guarded families (the drift caught 80% of the time) |
+|---|---|
+| 3B | attention, keys, qk, values (2×); attn-spectral, output (2.5×) |
+| 8B | attention, attn-spectral, keys, qk, values (2×); gate, output (2.5×) |
+| 70B | keys, qk, values (2×); gate, attn-spectral (2.5×); residual (3×); output (4×) |
+
+The receipt records the rows over each maximum with their multiples, how many ordinary rows
+exceeded each percentile, each family's ordinary median, and the diagnostic for every row it
+measured.
 
 A fine-tune inside the base's regime inherits the base's evidence that effects survive the lane,
 for the same reason a conformant host does; one outside it needs a qualification of its own.

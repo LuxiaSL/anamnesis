@@ -1,0 +1,38 @@
+{
+  "contract": "vllm-transfer-rules/1",
+  "model": "3b",
+  "tolerance_digest": "695b441c8e6bdd18b9adcef73b0a86a42734d99d29a525341a25f1acc7893aef",
+  "component_max_allowance": 2,
+  "p99_allowance": 1,
+  "diagnostic_from_depth": 0.35,
+  "family_p90_abs_sigma": {
+    "attention": 0.003128407310933022,
+    "attn-cache": 0.016410540663309728,
+    "attn-flow": 0.01504545104799911,
+    "attn-head": 0.01568986179158453,
+    "attn-spectral": 0.01510333681806059,
+    "gate": 0.016345515090699154,
+    "keys": 0.0051097261237903905,
+    "output": 0.018713853522714888,
+    "qk": 0.008433799319549556,
+    "residual": 0.012515730951795258,
+    "values": 0.007281621041527651
+  },
+  "weakly_guarded": {
+    "attention": 2.0,
+    "attn-spectral": 2.5,
+    "keys": 2.0,
+    "output": 2.5,
+    "qk": 2.0,
+    "values": 2.0
+  },
+  "qualification": {
+    "method": "simulated fine-tunes resampled from the base records, ceilings read from the rows left out",
+    "false_refusal": 0.0933,
+    "draws": 300,
+    "sample_rows": 56,
+    "base_rows": 190,
+    "ceiling_rows": 134,
+    "seed": 20260929
+  }
+}
