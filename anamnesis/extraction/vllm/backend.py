@@ -353,22 +353,32 @@ if HAVE_VLLM:
             key_cache, value_cache = kv_cache.unbind(1)
             prefix_lengths, recency_cutoffs = collector.step_metadata(
                 num_actual)
+            world = self._tp_world()
+            self._record_heads(layer.layer_name)
             stats = collector.stats_buffer(
                 layer_name=layer.layer_name, num_tokens=num_actual,
-                num_query_heads=self.num_heads, device=query.device)
+                num_query_heads=self.num_heads * world, device=query.device)
+            # Under tensor parallelism this rank's heads are a slice: their
+            # statistics are computed locally and gathered in rank order, which
+            # is the global head order, before anything reduces across heads.
+            local = stats if world == 1 else torch.empty(
+                (num_actual, self.num_heads, stats.shape[-1]),
+                dtype=stats.dtype, device=stats.device)
             unified_attention_stats(
                 query[:num_actual], key_cache, value_cache,
-                out=output[:num_actual], stats=stats,
+                out=output[:num_actual], stats=local,
                 cu_seqlens_q=attn_metadata.query_start_loc,
                 seqused_k=attn_metadata.seq_lens,
                 block_table=attn_metadata.block_table,
                 softmax_scale=self.scale,
                 prefix_lengths=prefix_lengths,
                 recency_cutoffs=recency_cutoffs)
+            if world > 1:
+                stats.copy_(self._gather_heads(local))
             selection = collector.second_pass_for(layer.layer_name)
             if selection is not None:
                 scratch, rowsum = second_pass_rows(
-                    query[:num_actual], key_cache, stats=stats,
+                    query[:num_actual], key_cache, stats=local,
                     row_slots=selection.slots,
                     num_slots=selection.lengths.numel(),
                     cu_seqlens_q=attn_metadata.query_start_loc,
@@ -376,6 +386,9 @@ if HAVE_VLLM:
                     block_table=attn_metadata.block_table,
                     softmax_scale=self.scale,
                     round_to_model_dtype=selection.round_to_model_dtype)
+                if world > 1:
+                    scratch = self._gather_heads(scratch)
+                    rowsum = self._gather_heads(rowsum)
                 if selection.kind == 'span':
                     products = span_products(
                         scratch, lengths=selection.lengths,
@@ -396,6 +409,17 @@ if HAVE_VLLM:
                 del scratch
                 collector.record_second(layer.layer_name, products)
             return output
+
+        def _tp_world(self) -> int:
+            """The number of ranks sharing this layer's heads: one, in-process."""
+            return 1
+
+        def _record_heads(self, layer_name: str) -> None:
+            """Record which heads this rank computed; nothing to record in-process."""
+
+        def _gather_heads(self, tensor: Tensor) -> Tensor:
+            """Every rank's slice of the head axis (dim 1), in rank order."""
+            raise RuntimeError('head gathering needs a tensor-parallel impl')
 
     class InstrumentedTritonAttentionBackend(TritonAttentionBackend):
         """TRITON_ATTN with the instrumented impl; the backend name is unchanged."""

@@ -59,9 +59,11 @@ from anamnesis.extraction.vllm.envelope import (
     lane_id,
     lane_model,
     lane_preset,
+    lane_tensor_parallel_size,
     request_groups,
     require_environment,
     require_pinned_packages,
+    required_environment,
 )
 from anamnesis.provenance import digest_of_shas, file_sha
 
@@ -167,17 +169,19 @@ def settings_digest(model: str, *, matmul_policy: Mapping[str, int] | None = Non
         matmul_policy=matmul_policy))
 
 
-def child_environment(step: str, base: Mapping[str, str] | None = None) -> dict[str, str]:
+def child_environment(step: str, base: Mapping[str, str] | None = None,
+                      model: str | None = None) -> dict[str, str]:
     """The environment a step's process starts in.
 
-    ``capture`` adds :data:`anamnesis.extraction.vllm.envelope.REQUIRED_ENV`;
+    ``capture`` adds :data:`anamnesis.extraction.vllm.envelope.REQUIRED_ENV`, or
+    given ``model`` its :func:`~anamnesis.extraction.vllm.envelope.required_environment`;
     ``reduce`` removes every ``VLLM_`` variable, fixes the readout workspace and
     pins the BLAS thread pools to one. Everything else, device visibility
     included, passes through unchanged.
     """
     env = dict(os.environ if base is None else base)
     if step == "capture":
-        env.update(REQUIRED_ENV)
+        env.update(REQUIRED_ENV if model is None else required_environment(model))
     elif step == "reduce":
         for key in list(env):
             if key.startswith("VLLM_"):
@@ -199,7 +203,8 @@ def run_step(step: str, spec: Mapping[str, Any], spec_path: Path) -> None:
     """
     spec_path.write_text(json.dumps(spec, indent=2, default=str) + "\n")
     result = subprocess.run([sys.executable, "-m", STEP_MODULE, step, str(spec_path)],
-                            env=child_environment(step), check=False)
+                            env=child_environment(step, model=spec.get("model")),
+                            check=False)
     if result.returncode != 0:
         raise RuntimeError(f"the {step} step exited {result.returncode} ({spec_path})")
 
@@ -225,8 +230,14 @@ def capture_rows(spec: Mapping[str, Any]) -> None:
     ``out`` and ``rows`` (each with ``generation_id``, ``input_ids``,
     ``prompt_length`` and ``end``). Pass ``i`` is written to its own directory under
     ``out``, beside a capture record of the settings, the guard's record and the
-    device.
+    device. A tensor-parallel lane captures in its engine's workers
+    (:func:`anamnesis.extraction.vllm.tensor_parallel.capture_rows_tp`).
     """
+    if lane_tensor_parallel_size(spec["model"]) > 1:
+        from anamnesis.extraction.vllm.tensor_parallel import capture_rows_tp
+
+        capture_rows_tp(spec)
+        return
     require_environment()
     versions = require_pinned_packages()
     model, condition_id = spec["model"], spec["condition_id"]

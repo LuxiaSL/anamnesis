@@ -16,9 +16,14 @@ and refused by name when a run asks for anything else:
 * :data:`PINNED_PACKAGES` — the versions the backend and the capture were written
   against. Both reach into engine internals, so another version is refused before
   an engine is built rather than trusted to behave.
-* :data:`LANE_MODELS` — the models a lane exists for, and the two facts that
-  differ between them: the dtype, and whether the sampler's logprob input is
-  promoted to float32.
+* :data:`LANE_MODELS` — the models a lane exists for, and the facts that differ
+  between them: the dtype, whether the sampler's logprob input is promoted to
+  float32, and, for a model too large for one GPU, its tensor-parallel size.
+* :data:`TP_SETTINGS` and :data:`TP_REQUIRED_ENV` — what a tensor-parallel lane
+  adds: one worker process per GPU, spawned, reached through the capture's worker
+  extension, with the engine's custom all-reduce off. A tensor-parallel lane sums
+  each layer's partial products across GPUs in its own order, so it is its own
+  lane, with its own id and its own fixtures.
 * :data:`CONDITIONS` — the two execution conditions a run may use: one request at
   a time, and batches of eight. The install check captures every fixture under
   both, so a host that passes it has shown the two agree.
@@ -98,14 +103,33 @@ READOUT_WORKSPACE = ":4096:8"
 """The cuBLAS workspace the reduction process runs at. The reduction refuses the
 engine's batch-invariant mode, so it always runs in a process of its own."""
 
-LANE_MODELS: dict[str, dict[str, str]] = {
+LANE_MODELS: dict[str, dict[str, Any]] = {
     "3b": dict(dtype="float16", logprob_wrapper="explicit-fp32-input"),
     "8b": dict(dtype="bfloat16", logprob_wrapper="none"),
     "70b": dict(dtype="bfloat16", logprob_wrapper="none"),
 }
 """Per model: the engine dtype, and whether the sampler's logprob input is
 promoted to float32. Float16 needs the promotion, because the invariant
-log-softmax has no half-precision path; bfloat16 runs without it."""
+log-softmax has no half-precision path; bfloat16 runs without it. A model may
+also declare ``tensor_parallel_size`` above 1; without it the lane runs on one GPU."""
+
+TP_WORKER_EXTENSION = "anamnesis.extraction.vllm.tp_worker.TPCaptureExtension"
+"""The worker extension a tensor-parallel lane's engine loads into every worker:
+importing it installs the instrumented backend there, and its methods are how the
+capture reaches each worker's model."""
+
+TP_SETTINGS: dict[str, Any] = dict(
+    distributed_executor_backend="mp",
+    disable_custom_all_reduce=True,
+    worker_extension_cls=TP_WORKER_EXTENSION,
+)
+"""Engine settings a tensor-parallel lane adds to :data:`SETTINGS`, fixed like them.
+The custom all-reduce kernel is off because batch-invariant mode fixes the
+reduction order only for the collective library's all-reduce."""
+
+TP_REQUIRED_ENV: dict[str, str] = {"VLLM_WORKER_MULTIPROC_METHOD": "spawn"}
+"""The environment a tensor-parallel lane adds to :data:`REQUIRED_ENV`: forked
+workers inherit the parent's CUDA state and can hang, so they are spawned."""
 
 CONDITIONS: dict[str, dict[str, Any]] = {
     "full-b1-order0": dict(condition_id="full-b1-order0", max_num_seqs=1),
@@ -148,6 +172,28 @@ def lane_model(model: str) -> dict[str, str]:
     return LANE_MODELS[model if model in LANE_MODELS else _extension(model).extends]
 
 
+def lane_tensor_parallel_size(model: str) -> int:
+    """The number of GPUs ``model``'s lane runs on: its declared tensor-parallel size,
+    or 1."""
+    return int(lane_model(model).get("tensor_parallel_size", 1))
+
+
+def fixed_settings(model: str) -> dict[str, Any]:
+    """The settings ``model``'s lane fixes: :data:`SETTINGS`, and for a
+    tensor-parallel lane its size and :data:`TP_SETTINGS`."""
+    tp = lane_tensor_parallel_size(model)
+    if tp == 1:
+        return dict(SETTINGS)
+    return dict(SETTINGS, tensor_parallel_size=tp, **TP_SETTINGS)
+
+
+def required_environment(model: str) -> dict[str, str]:
+    """The environment ``model``'s engine process must start in."""
+    if lane_tensor_parallel_size(model) == 1:
+        return dict(REQUIRED_ENV)
+    return dict(REQUIRED_ENV, **TP_REQUIRED_ENV)
+
+
 def lane_preset(model: str) -> str:
     """The registry preset ``model``'s lane reads its layer plan from."""
     return model if model in LANE_MODELS else _extension(model).preset
@@ -166,9 +212,16 @@ def lane_identity(model: str) -> dict[str, Any]:
         raise ValueError(f"{model!r} has no vLLM lane of its own; an extension's identity "
                          "is extension_lane_id's")
     facts = LANE_MODELS[model]
-    return dict(model=model, dtype=facts["dtype"], invariant_mode=True,
-                attention_backend="TRITON_ATTN", tensor_parallel_size=1,
-                logprob_wrapper=facts["logprob_wrapper"])
+    identity = dict(model=model, dtype=facts["dtype"], invariant_mode=True,
+                    attention_backend="TRITON_ATTN", tensor_parallel_size=1,
+                    logprob_wrapper=facts["logprob_wrapper"])
+    tp = lane_tensor_parallel_size(model)
+    if tp > 1:
+        identity.update(tensor_parallel_size=tp, collectives=dict(
+            executor=TP_SETTINGS["distributed_executor_backend"],
+            custom_all_reduce=not TP_SETTINGS["disable_custom_all_reduce"],
+            worker_start=TP_REQUIRED_ENV["VLLM_WORKER_MULTIPROC_METHOD"]))
+    return identity
 
 
 def lane_id(model: str) -> str:
@@ -196,7 +249,7 @@ def engine_settings(model: str, condition_id: str) -> dict[str, Any]:
         raise ValueError(f"{condition_id!r} is not a declared condition "
                          f"(declared: {', '.join(CONDITIONS)})")
     capacity = CONDITIONS[condition_id]["max_num_seqs"]
-    return dict(SETTINGS, dtype=facts["dtype"], max_num_seqs=capacity,
+    return dict(fixed_settings(model), dtype=facts["dtype"], max_num_seqs=capacity,
                 enable_chunked_prefill=False,
                 max_num_batched_tokens=capacity * SETTINGS["max_model_len"],
                 long_prefill_token_threshold=0, max_num_partial_prefills=1,
@@ -234,8 +287,10 @@ def request_groups(generation_ids: Sequence[int], capacity: int) -> list[list[di
     return groups
 
 
-def require_environment(environment: Mapping[str, str] | None = None) -> None:
-    """Refuse an engine process not started in :data:`REQUIRED_ENV`.
+def require_environment(environment: Mapping[str, str] | None = None,
+                        model: str | None = None) -> None:
+    """Refuse an engine process not started in :data:`REQUIRED_ENV`, or, given
+    ``model``, in :func:`required_environment`.
 
     Raises
     ------
@@ -243,7 +298,8 @@ def require_environment(environment: Mapping[str, str] | None = None) -> None:
         Naming every variable that differs.
     """
     environment = os.environ if environment is None else environment
-    wrong = {key: environment.get(key) for key, value in REQUIRED_ENV.items()
+    required = REQUIRED_ENV if model is None else required_environment(model)
+    wrong = {key: environment.get(key) for key, value in required.items()
              if environment.get(key) != value}
     if wrong:
         raise RuntimeError("the vLLM lane's environment must be exported before the "
@@ -333,21 +389,26 @@ def enforce_lane_envelope(settings: Mapping[str, Any], environment: Mapping[str,
     if capacity not in {c["max_num_seqs"] for c in CONDITIONS.values()}:
         _refuse(lane, f"batch capacity max_num_seqs={capacity!r} (declared: "
                       f"{sorted(c['max_num_seqs'] for c in CONDITIONS.values())})")
-    for key, expected in REQUIRED_ENV.items():
+    required = required_environment(model)
+    for key, expected in required.items():
         if environment.get(key) != expected:
             _refuse(lane, f"environment {key}={environment.get(key)!r} "
                           f"(declared: {expected!r})")
-    undeclared = sorted(set(settings) - set(SETTINGS) - CONDITION_KEYS)
+    fixed = fixed_settings(model)
+    undeclared = sorted(set(settings) - set(fixed) - CONDITION_KEYS)
     if undeclared:
         _refuse(lane, f"undeclared engine settings {undeclared}")
-    for key in sorted(set(SETTINGS) - CONDITION_KEYS):
-        if key not in settings or settings[key] != SETTINGS[key]:
+    for key in sorted(set(fixed) - CONDITION_KEYS):
+        if key not in settings or settings[key] != fixed[key]:
             _refuse(lane, f"{key}={settings.get(key)!r} (the lane fixes it to "
-                          f"{SETTINGS[key]!r})")
-    return dict(lane_id=lane, model=model, dtype=dtype,
-                named_exclusions_checked=[
-                    "prefix_caching", "plugins", "lora", "speculative_decoding",
-                    "non_invariant_mode", "dtype", "chunked_prefill",
-                    "concurrent_partial_prefill"],
-                fixed_settings_verified=sorted(set(SETTINGS) - CONDITION_KEYS),
-                environment_verified=sorted(REQUIRED_ENV))
+                          f"{fixed[key]!r})")
+    record = dict(lane_id=lane, model=model, dtype=dtype,
+                  named_exclusions_checked=[
+                      "prefix_caching", "plugins", "lora", "speculative_decoding",
+                      "non_invariant_mode", "dtype", "chunked_prefill",
+                      "concurrent_partial_prefill"],
+                  fixed_settings_verified=sorted(set(fixed) - CONDITION_KEYS),
+                  environment_verified=sorted(required))
+    if fixed["tensor_parallel_size"] > 1:
+        record["tensor_parallel_size"] = fixed["tensor_parallel_size"]
+    return record

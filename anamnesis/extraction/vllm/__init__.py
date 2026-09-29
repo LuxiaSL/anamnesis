@@ -24,6 +24,10 @@ declared there, and on a host only after that host's install check.
   :mod:`~anamnesis.extraction.vllm.runner` and
   :mod:`~anamnesis.extraction.vllm.receipts` — the verified capture of every
   request's substrate, group by group, with content receipts.
+* :mod:`~anamnesis.extraction.vllm.tensor_parallel` and
+  :mod:`~anamnesis.extraction.vllm.tp_worker` — the same capture for a model split
+  over several GPUs: run inside every worker, gathered to the single-GPU layouts
+  in rank order, and checked for agreement across ranks.
 * :mod:`~anamnesis.extraction.vllm.readout` and
   :mod:`~anamnesis.extraction.vllm.adapter` — the reduction to the feature vector,
   in a process that never imports the engine.
