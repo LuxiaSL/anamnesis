@@ -4,13 +4,14 @@
   "lane_id": "c34f17d8d1a4e42731d613a6bc6378828a8b19b4258c476753be3376451067d2",
   "checkpoint_sha256": "fce1fcdbd6852f24f81af4bcec76ead9575573d4476c7e62645440ef3228403d",
   "calibration_sha256": "896c160a294edab3fe8c5499dc236ec9a0220386c9ebe093e0fac1ddf417b5a7",
-  "ruler_sha256": "7ae24c5cf040f4d7f510d7fdb9324d49d0f6d106540e7e07c73e061bff40723c",
+  "ruler_sha256": "187502edb6de45f861eb0bf1973e225eaed8f86ad776f380604d1fb6b335dc2e",
   "authority": {
     "backend_seal_sha256": "5e3f23962c1882628d8c2844c9fc7aa32bf47105e5531ab5e95f5adf42417752",
     "l2_seal_sha256": "56857a7f1d1104a6027dc9d419cb6c1b9761ec7470b929da2516bc8279166118",
     "scored_configuration": "{\"families_from_rows\": true, \"retain_span_rows\": true, \"rounding\": \"rounded\"}",
     "selection_sha256": "cb49ffab38129b0744452d89248398a7dbed76ab639b15f1aef9fb2285bd58c4",
-    "vectors_receipt_sha256": "810c36a0a58c4bb0cfa032b41b2298a09791be5f499c06c2a04e2329256b5b44"
+    "vectors_receipt_sha256": "810c36a0a58c4bb0cfa032b41b2298a09791be5f499c06c2a04e2329256b5b44",
+    "pinned_ruler_report_sha256": "24dd9c7c1de3572dccf111076cd5f215b93554cd931c3612c0f101ab1da3c16e"
   },
   "feature_names": [
     "activation_norm_mean_L0",
@@ -4721,7 +4722,7 @@
       ],
       "prompt_length": 101,
       "end": 613,
-      "floor_b": 0.8183571455987254,
+      "floor_b": 0.8222738885469391,
       "selected_by": "largest-spectral-deviation"
     },
     {
@@ -5346,7 +5347,7 @@
       ],
       "prompt_length": 103,
       "end": 615,
-      "floor_b": 1.1264262953673836,
+      "floor_b": 0.9567242318112369,
       "selected_by": "largest-spectral-deviation"
     },
     {
@@ -8308,7 +8309,7 @@
       ],
       "prompt_length": 101,
       "end": 613,
-      "floor_b": 12.394284050282636,
+      "floor_b": 0.886423320797606,
       "selected_by": "largest-attention-shift"
     },
     {
@@ -12824,7 +12825,7 @@
       ],
       "prompt_length": 97,
       "end": 609,
-      "floor_b": 13.917426596128177,
+      "floor_b": 10.328844958592493,
       "selected_by": "largest-attention-shift"
     },
     {
@@ -13275,7 +13276,7 @@
       ],
       "prompt_length": 112,
       "end": 441,
-      "floor_b": 13.374496981666047,
+      "floor_b": 13.365757008519838,
       "selected_by": "largest-coverage-shift"
     },
     {
@@ -13899,7 +13900,7 @@
       ],
       "prompt_length": 102,
       "end": 614,
-      "floor_b": 1.2824068383245584,
+      "floor_b": 0.7739507748930459,
       "selected_by": "largest-gate-sparsity-displacement"
     },
     {
@@ -14497,7 +14498,7 @@
       ],
       "prompt_length": 104,
       "end": 588,
-      "floor_b": 1.2765096768206023,
+      "floor_b": 1.1815660217096835,
       "selected_by": "evenly-spaced"
     },
     {
@@ -18762,7 +18763,7 @@
       ],
       "prompt_length": 101,
       "end": 613,
-      "floor_b": 1.1535680113284068,
+      "floor_b": 0.8022608655002474,
       "selected_by": "evenly-spaced"
     },
     {
@@ -19387,7 +19388,7 @@
       ],
       "prompt_length": 103,
       "end": 615,
-      "floor_b": 2.024362297364469,
+      "floor_b": 4.05977920886921,
       "selected_by": "largest-coverage-shift"
     },
     {
@@ -20627,7 +20628,7 @@
       ],
       "prompt_length": 103,
       "end": 615,
-      "floor_b": 0.8283105741525482,
+      "floor_b": 0.8473357105536382,
       "selected_by": "largest-spectral-deviation"
     },
     {
@@ -22365,7 +22366,7 @@
       ],
       "prompt_length": 101,
       "end": 613,
-      "floor_b": 0.7753769965311923,
+      "floor_b": 0.7185204894861612,
       "selected_by": "evenly-spaced"
     },
     {
@@ -22990,7 +22991,7 @@
       ],
       "prompt_length": 103,
       "end": 615,
-      "floor_b": 0.836466361205613,
+      "floor_b": 0.8694163651232252,
       "selected_by": "largest-coverage-shift"
     },
     {
@@ -24045,7 +24046,7 @@
       ],
       "prompt_length": 102,
       "end": 614,
-      "floor_b": 0.8837180268547423,
+      "floor_b": 0.8080041650695415,
       "selected_by": "evenly-spaced"
     },
     {
@@ -29963,5 +29964,5 @@
       "selected_by": "largest-attention-shift"
     }
   ],
-  "digest": "ec02361520263efff46f34d9d8dafc7eb7f63cd58a9f1332949ff068c9878679"
+  "digest": "e8524e8c51a73783f1e62f6873bb0299d236ad717fdd51d4b08b41751bcdc314"
 }

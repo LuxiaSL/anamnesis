@@ -10,7 +10,8 @@
     "l2_seal_sha256": "6be015ff1d598ba606935e99a9ccaacfa59a688057b949b17a3bbd17e9056a4f",
     "scored_configuration": "{\"families_from_rows\": true, \"retain_span_rows\": true, \"rounding\": \"rounded\"}",
     "selection_sha256": "404409edf6b99aeb40e69eb095eefc6fda48ae2ff4ee7b503025b94bfd169686",
-    "vectors_receipt_sha256": "2420750b54c8ceb2a4f42fded367c6b4be097891cf0365f402b626b8cd1bf264"
+    "vectors_receipt_sha256": "2420750b54c8ceb2a4f42fded367c6b4be097891cf0365f402b626b8cd1bf264",
+    "pinned_ruler_report_sha256": "ea43e315c69bb18e5241ff72da4fdd31c0609ba37e01729ee2a31df34cb45e45"
   },
   "feature_names": [
     "activation_norm_mean_L0",
@@ -29620,5 +29621,5 @@
       "selected_by": "largest-spectral-deviation"
     }
   ],
-  "digest": "8f3c14fac24a200cc72a40c804d4cb7fb7704e1e9828579e9475bde8f480d157"
+  "digest": "85b08e8399f86d422f7a7da5c5ac24276bf5f2b6e4b412283e268a163ad7fd1a"
 }
