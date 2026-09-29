@@ -33,10 +33,10 @@ from anamnesis.config.models import (
     resolve_preset,
 )
 
-MODELS_SHA256 = "a808adb8e06cd8c16168f1a910ab6818e0d215a7d00e40192d1514ada3d93a38"
+MODELS_SHA256 = "75478c9652c46ba11a0d040ac76bb53869717f6df3009d33d9dfd59f86c504e9"
 """The shipped registry's bytes; an edit to a row fails here."""
 
-SHIPPED_PRESETS = ("8b", "70b", "3b", "olmo2-7b", "gemma3-27b", "qwen-7b", "dsv2-lite")
+SHIPPED_PRESETS = ("8b", "70b", "405b", "3b", "olmo2-7b", "gemma3-27b", "qwen-7b", "dsv2-lite")
 
 ADDED_ROW: dict[str, Any] = {
     "name": "tiny-probe",
@@ -245,6 +245,27 @@ def test_the_70b_row_shares_the_8b_depth_rule() -> None:
     assert row.num_layers == 80
     assert row.sampled_layers == (0, 20, 40, 50, 60, 70, 79)
     assert row.kv_group_size == 8
+
+
+@pytest.mark.parametrize("name", ["3b", "8b", "70b", "405b"])
+def test_the_llama_rows_share_one_fractional_depth_rule(name: str) -> None:
+    """Every Llama row samples the same depth fractions, rounded half to even, with the
+    first and last layers anchored; the cutoffs are the quarter and three-quarter depths."""
+    row = resolve_preset(name)
+    depth = row.num_layers
+    inner = tuple(round(f * depth) for f in (0.25, 0.5, 0.625, 0.75, 0.875))
+    assert row.sampled_layers == (0, *inner, depth - 1)
+    assert row.pca_layers == row.trajectory_layers == row.contrastive_layers == inner
+    assert (row.early_layer_cutoff, row.late_layer_cutoff) == (inner[0], inner[3])
+
+
+def test_the_405b_row_is_the_instruct_checkpoint_with_the_70b_decoding() -> None:
+    row, base = resolve_preset("405b"), resolve_preset("70b")
+    assert row.model_id == "meta-llama/Llama-3.1-405B-Instruct"
+    assert (row.num_layers, row.hidden_dim, row.num_attention_heads, row.num_kv_heads,
+            row.head_dim) == (126, 16384, 128, 8, 128)
+    for field in ("torch_dtype", "temperature", "top_p", "max_new_tokens", "eos_token_ids"):
+        assert getattr(row, field) == getattr(base, field), field
 
 
 def _extending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: dict[str, Any]) -> Path:
