@@ -1,5 +1,5 @@
 {
-  "contract": "conformance-tolerance/1",
+  "contract": "conformance-tolerance/2",
   "model": "8b",
   "components": [
     {
@@ -2830,9 +2830,9 @@
         "kv_value_cka_adjacent_mean",
         "kv_value_cka_overall_mean"
       ],
-      "max_ratio": 2.668179407309016,
-      "p90_ratio": 1.2085485711735982,
-      "p99_ratio": 1.7456347642834833,
+      "max_ratio": 2.769293115319953,
+      "p90_ratio": 1.1937331305620653,
+      "p99_ratio": 1.655722847066778,
       "source": "HF-vLLM comparison: covered-substrate distance / path floor"
     },
     {
@@ -3429,9 +3429,9 @@
         "ph_L31_head_role_stability",
         "ph_L31_sink_head_std"
       ],
-      "max_ratio": 1.029291142462636,
-      "p90_ratio": 0.8889971296724393,
-      "p99_ratio": 1.021995928660076,
+      "max_ratio": 1.0706484966560506,
+      "p90_ratio": 0.9083573558242316,
+      "p99_ratio": 1.018047667207504,
       "source": "HF-vLLM comparison: attention distance / path floor"
     }
   ],
@@ -6872,6 +6872,7 @@
     "hf-vllm-comparison/attention-lane-report": "1861d957d97f03dbb4c0d5b40bdbf51ae74e1380e3bfa9e72c1bed655cb91df0",
     "hf-vllm-comparison/feature-manifest": "f4d6e2184cf4cc6b6918d90f70ed4cab7534de48105939c50f8463fd67934fc9",
     "hf-vllm-comparison/attention-population": "79e60db41793aa6ca61a775c58301202829c4bd13eb994c99dcbbf2fb0c4f77e",
-    "hf-vllm-comparison/covered-substrate": "fb4adb80b188857cfed02da6a2bae3c1d4f07d880f87694246089b3537c2302b"
+    "hf-vllm-comparison/covered-substrate": "fb4adb80b188857cfed02da6a2bae3c1d4f07d880f87694246089b3537c2302b",
+    "hf-reference/pinned-path-ruler": "5eab1fa7f9096f84b7111bb752968812505d414170d10d2f3e4c76b7d16b6f71"
   }
 }

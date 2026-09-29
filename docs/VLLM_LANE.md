@@ -54,8 +54,14 @@ that comparison measured while the lane's effects were retained. Its row ceiling
 ratios of a row's **distance** (its standardized L2 difference over one component of the
 vector: the **covered substrate**, which is every coordinate outside the attention
 families, or the **attention** families) to the row's **path floor** (how far the anchor's
-own two execution paths disagree on that row). A few rows whose path floor is too fragile to
-divide by are left out of the ceilings and named in the file. The records the tolerance was
+own two execution paths, its one-forward replay and its token-by-token path, disagree on that
+row). A path floor is measured under the lane's arithmetic, the cuBLAS workspace pin
+(`CUBLAS_WORKSPACE_CONFIG=:16:8`) and deterministic algorithms, which is the arithmetic every
+reference the lane is scored against was computed in. Without the pin, cuBLAS picks its GEMM
+algorithms by matrix shape, so a floor measured unpinned mixes the path disagreement with
+algorithm-selection noise that grows with the model; tolerance contract 2 is the one measured
+under the pin. A few rows whose path floor is too fragile to divide by are left out of the
+ceilings and named in the file. The records the tolerance was
 read from belong to that comparison and are not published; the file names each by its role
 and pins it by sha256.
 
@@ -155,7 +161,8 @@ on a sample of its own rows and scores it with the **base's** tolerance:
   measured: their median ratio within the base's 90th percentile, and at most one of them over
   its 99th;
 - the path floor is the fine-tune's own: how far the numeric anchor's one-forward replay and its
-  token-by-token path disagree on the row, over a σ_cal fitted on the sample. A row whose floor
+  token-by-token path disagree on the row under the lane's arithmetic, over a σ_cal fitted on the
+  sample, the same definition as the base's. A row whose floor
   exceeds the base's limit (`BASE_MAX_FLOOR` in `anamnesis/extraction/vllm/transfer.py`) is named
   and left out of the scoring, because on a fragile reference the deviation measures the
   reference;

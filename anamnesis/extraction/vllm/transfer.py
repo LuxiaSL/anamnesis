@@ -62,10 +62,11 @@ SAMPLE_ROWS = (44, 60)
 DETERMINISM_ROWS = 16
 """The fewest rows whose repeated and batched captures must match byte for byte."""
 
-BASE_MAX_FLOOR: dict[str, float | None] = {"3b": None, "8b": None, "70b": 2.39}
+BASE_MAX_FLOOR: dict[str, float | None] = {"3b": None, "8b": None, "70b": 2.489361708872322}
 """Per shipped lane, the largest path floor a scored row may have. At 70B it is the
-largest path floor of the 8B qualification rows, and the shipped 70B tolerance
-excludes exactly its fixture rows above it; the 3B and 8B tolerances exclude none."""
+largest path floor of the 8B qualification rows, measured under the lane's
+arithmetic like every floor here, and the shipped 70B tolerance excludes exactly
+its fixture rows above it; the 3B and 8B tolerances exclude none."""
 
 ORDINARY_RULE = "evenly-spaced"
 ORDINARY_ROWS = 16

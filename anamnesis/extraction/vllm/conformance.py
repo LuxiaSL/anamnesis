@@ -40,7 +40,7 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 FIXTURE_CONTRACT = "conformance-fixtures/1"
-TOLERANCE_CONTRACT = "conformance-tolerance/1"
+TOLERANCE_CONTRACT = "conformance-tolerance/2"
 RECEIPT_CONTRACT = "conformance-receipt/1"
 
 Tier = Literal["identical", "conformant", "refused"]
@@ -63,7 +63,8 @@ class FixtureRow(BaseModel):
     prompt_length: int = Field(gt=0)
     end: int
     floor_b: float = Field(gt=0, description="The row's reference noise floor, in σ_cal "
-                                              "units; a row's ratio is its distance d over it")
+                                              "units, measured under the lane's arithmetic; "
+                                              "a row's ratio is its distance d over it")
     selected_by: str = Field(min_length=1, description="The selection rule that took the row")
 
     @model_validator(mode="after")
@@ -171,11 +172,18 @@ class RowComponent(BaseModel):
 
 class Tolerance(BaseModel):
     """The largest deviations from the fixtures the anchor comparison found harmless,
-    per row component and per feature family."""
+    per row component and per feature family.
+
+    Contract 2: every path floor behind the ratios is the anchor's full-vs-incremental
+    disagreement under the lane's arithmetic (the cuBLAS workspace pin and
+    deterministic algorithms), the arithmetic every reference the lane is scored
+    against was computed in. Contract 1 floors were measured without it, which let
+    cuBLAS pick different GEMM algorithms per prompt shape and inflated some floors;
+    it is not read."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    contract: Literal["conformance-tolerance/1"] = TOLERANCE_CONTRACT
+    contract: Literal["conformance-tolerance/2"] = TOLERANCE_CONTRACT
     model: str = Field(min_length=1)
     components: tuple[RowComponent, ...] = Field(min_length=1)
     families: dict[str, str] = Field(description="Continuous feature name → its family")

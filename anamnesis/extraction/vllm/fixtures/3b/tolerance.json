@@ -1,5 +1,5 @@
 {
-  "contract": "conformance-tolerance/1",
+  "contract": "conformance-tolerance/2",
   "model": "3b",
   "components": [
     {
@@ -6760,6 +6760,7 @@
     "hf-vllm-comparison/attention-lane-report": "ca38df8ed3cbdbbd6acef7904320256987277e61b0264c73d03f0a0a2391c6f3",
     "hf-vllm-comparison/feature-manifest": "ba4efbcd7cdd528f5fa6c0780af94abb9c7b4b24286d2ca05d2fa0b8f805015b",
     "hf-vllm-comparison/attention-population": "ffd1ee0ecaf97086885b5448df9d1f466f995bd7697943be6f3e2c264d34fb13",
-    "hf-vllm-comparison/covered-substrate": "8bfcd41ae8874d36d4bc3f10da23789c86801a83baa4ce31b84fd25c9f83dba5"
+    "hf-vllm-comparison/covered-substrate": "8bfcd41ae8874d36d4bc3f10da23789c86801a83baa4ce31b84fd25c9f83dba5",
+    "hf-reference/pinned-path-ruler": "ea43e315c69bb18e5241ff72da4fdd31c0609ba37e01729ee2a31df34cb45e45"
   }
 }
