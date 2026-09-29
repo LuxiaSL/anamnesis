@@ -17,10 +17,30 @@ own, not a host's tiny departure from the qualified lane:
 * the median and tail gates read 16 **ordinary rows chosen from the sampled ids
   alone** (:func:`ordinary_rows`); rows ranked by deviation would leave the
   calmest rows ordinary and make those gates lenient;
-* per component, at most :data:`OUTLIER_ALLOWANCE` scored row may exceed the base's
-  max ratio (none beyond :data:`GROSS_MULTIPLE` times it), and at most that many
-  ordinary rows its p99, where the install check bounds every row. An in-regime
-  sample of 44 rows puts a row over a 190-row maximum about one time in five.
+* its row gates are counted, where the install check bounds every row: an in-regime
+  sample of 44 rows puts some row over a 190-row maximum about one time in five.
+
+**Each base carries its own rule set** (:class:`TransferRules`, shipped beside its
+tolerance), the one that passed a false-refusal probe on that base's own records:
+simulated fine-tunes drawn from the base's rows, scored against ceilings read from the
+rows left out. An extension of a base without one is refused by name. A rule set holds:
+
+* per component, at most ``component_max_allowance`` rows over the base's max ratio,
+  the ordinary median at or below the p90, and at most ``p99_allowance`` ordinary rows
+  over the p99;
+* per family, a **drift gate**: the ordinary rows' median of each row's largest
+  family |δ|/σ_cal at or below the base's family p90 (``family_p90_abs_sigma``).
+
+A single row's extremity is reported, never gated, whatever its size: every row over a
+component's or a family's base maximum is listed in the receipt with its multiple, beside
+the bifurcation diagnostic (:func:`bifurcation_report`). At 70B the largest single-row
+deviations are single tokens where one engine forms a massive activation and the other
+does not, which did not affect retained effects, and no per-row bound read from about
+190 rows separated them from a departure without refusing most in-regime samples; the
+gates that remain read distributions.
+
+The families where the drift gate catches a 1.5× drift less than 80% of the time are
+named in the rule set and in every receipt, with the scale at which it does.
 
 Rows whose path floor exceeds :data:`BASE_MAX_FLOOR` are named and left out of the
 scoring: on a fragile reference the deviation measures the reference.
@@ -71,8 +91,7 @@ its fixture rows above it; the 3B and 8B tolerances exclude none."""
 ORDINARY_RULE = "evenly-spaced"
 ORDINARY_ROWS = 16
 UNRANKED = "unranked"
-OUTLIER_ALLOWANCE = 1
-GROSS_MULTIPLE = 2.0
+RULES_FILE = "transfer_rules.json"
 RULES: tuple[tuple[str, int], ...] = (
     ("largest-attention-shift", 8),
     ("largest-coverage-shift", 8),
@@ -88,6 +107,137 @@ SOURCE_LABEL = "transfer check: fast lane vs vLLM lane distance / path floor"
 HEX64 = "^[0-9a-f]{64}$"
 F32 = NDArray[np.float32]
 F64 = NDArray[np.float64]
+
+
+class TransferRules(BaseModel):
+    """A base's transfer rule set, qualified on that base's own records."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    contract: Literal["vllm-transfer-rules/1"] = "vllm-transfer-rules/1"
+    model: str = Field(min_length=1)
+    tolerance_digest: str = Field(pattern=HEX64, description="The base tolerance the rule set "
+                                                             "was qualified with")
+    component_max_allowance: int = Field(ge=0)
+    p99_allowance: int = Field(ge=0)
+    diagnostic_from_depth: float = Field(gt=0, lt=1, description="The bifurcation diagnostic "
+                                                                 "reads blocks from this "
+                                                                 "fraction of depth")
+    family_p90_abs_sigma: dict[str, float] = Field(min_length=1)
+    weakly_guarded: dict[str, float] = Field(
+        default_factory=dict, description="Family → the drift scale the gate catches 80% of "
+                                          "the time, where 1.5× is caught less often")
+    qualification: dict[str, float | int | str | list[int]] = Field(
+        description="The false-refusal probe the rule set passed on the base's records")
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(json.dumps(self.model_dump(mode="json"), sort_keys=True,
+                                         separators=(",", ":")).encode()).hexdigest()
+
+
+def load_transfer_rules(base: str, tolerance: Tolerance) -> TransferRules:
+    """``base``'s qualified rule set, checked against the tolerance it was qualified with.
+
+    Raises
+    ------
+    ValueError
+        When the base ships no rule set, or one for another model or tolerance.
+    """
+    from anamnesis.extraction.vllm.runtime import fixtures_dir
+
+    path = fixtures_dir(base) / RULES_FILE
+    if not path.is_file():
+        raise ValueError(f"no transfer rules are qualified for {base!r}; its extensions are "
+                         "refused until a rule set passes a probe on its own records")
+    rules = TransferRules.model_validate_json(path.read_text())
+    if rules.model != base or rules.tolerance_digest != tolerance.digest:
+        raise ValueError(f"{path} is not {base!r}'s rule set for its shipped tolerance")
+    if set(rules.family_p90_abs_sigma) != set(tolerance.family_max_abs_sigma):
+        raise ValueError(f"{path} does not give a p90 for every family of the tolerance")
+    return rules
+
+
+class BifurcationReport(BaseModel):
+    """The bifurcation diagnostic on one row, reported beside its deviations: never gating."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    peak: float = Field(ge=0, description="Largest relative residual difference, lane vs anchor")
+    token: int = Field(ge=0)
+    block: int = Field(ge=0, description="The block of the peak")
+    channel_ratio: float = Field(ge=0, description="At the peak token, the largest of either "
+                                                   "side's largest residual channel over that "
+                                                   "side's median largest channel at the block")
+    channel_block: int = Field(ge=0)
+    channel_side: Literal["lane", "anchor"]
+    channel: int = Field(ge=0)
+    other_fraction: float = Field(ge=0, description="The other side's same channel over it: "
+                                                    "near 0 when one engine alone forms it")
+
+
+def bifurcation_report(lane_hidden: NDArray, anchor_hidden: NDArray,
+                       from_depth: float) -> BifurcationReport:
+    """Where and how a row's lane and anchor residual streams diverge most.
+
+    ``lane_hidden`` is the lane capture's block outputs ``[layers, tokens, hidden]``,
+    ``anchor_hidden`` the anchor's hidden states ``[tokens, layers + 1, hidden]`` (the
+    embedding first) over the same tokens. Over the blocks from ``round(from_depth ·
+    layers)`` to the second-to-last (the anchor's last state is normed, the lane's is
+    not): the peak ``‖lane − anchor‖ / ‖anchor‖`` of any token, and at that token the
+    largest one-sided channel ratio, one side's largest channel over that side's median
+    (over tokens) largest channel at the block, with the other side's same channel as a
+    fraction of it. A massive activation one engine forms and the other does not shows
+    as a large ratio with a small fraction.
+
+    Raises
+    ------
+    ValueError
+        When the two do not cover the same tokens and blocks.
+    """
+    lane = np.asarray(lane_hidden, dtype=np.float32)
+    anchor = np.asarray(anchor_hidden, dtype=np.float32)
+    if lane.ndim != 3 or anchor.shape != (lane.shape[1], lane.shape[0] + 1, lane.shape[2]):
+        raise ValueError("the lane and anchor hidden states do not cover the same tokens and "
+                         "blocks")
+    blocks = range(round(from_depth * lane.shape[0]), lane.shape[0] - 1)
+    if not blocks:
+        raise ValueError("no block to read at this depth")
+    peak, token, block = 0.0, 0, blocks[0]
+    for b in blocks:
+        a = anchor[:, b + 1, :].astype(np.float64)
+        rel = np.linalg.norm(lane[b].astype(np.float64) - a, axis=-1) \
+            / np.maximum(np.linalg.norm(a, axis=-1), 1e-12)
+        t = int(rel.argmax())
+        if rel[t] > peak:
+            peak, token, block = float(rel[t]), t, b
+    best = dict(channel_ratio=0.0, channel_block=blocks[0], channel_side="lane", channel=0,
+                other_fraction=0.0)
+    for b in blocks:
+        for side, own, other in (("lane", lane[b], anchor[:, b + 1, :]),
+                                 ("anchor", anchor[:, b + 1, :], lane[b])):
+            typical = float(np.median(np.abs(own).max(axis=-1)))
+            channel = int(np.abs(own[token]).argmax())
+            value = float(abs(own[token, channel]))
+            if typical > 0 and value > 0 and value / typical > best["channel_ratio"]:
+                best = dict(channel_ratio=value / typical, channel_block=b, channel_side=side,
+                            channel=channel,
+                            other_fraction=abs(float(other[token, channel])) / value)
+    return BifurcationReport(peak=peak, token=token, block=block, **best)
+
+
+def family_values(sample: "TransferSample", tolerance: Tolerance) -> dict[int, dict[str, float]]:
+    """Per scored row and family, the row's largest |δ|/σ_cal over the family's continuous
+    coordinates."""
+    index = check_coordinates(sample.feature_names, tolerance)
+    columns: dict[str, list[int]] = {}
+    for name, family in tolerance.families.items():
+        columns.setdefault(family, []).append(index[name])
+    out = {}
+    for gid in sample.ids:
+        z = np.abs(sample.standardized(gid))
+        out[gid] = {f: float(z[cols].max()) for f, cols in columns.items()}
+    return out
 
 
 class TransferSample(BaseModel):
@@ -149,7 +299,7 @@ class TransferReceipt(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    contract: Literal["vllm-transfer-receipt/1"] = "vllm-transfer-receipt/1"
+    contract: Literal["vllm-transfer-receipt/2"] = "vllm-transfer-receipt/2"
     verdict: Literal["pass", "refuse"]
     reasons: tuple[str, ...]
     key: str = Field(min_length=1)
@@ -168,6 +318,18 @@ class TransferReceipt(BaseModel):
     worst_max_multiple: dict[str, float] = Field(default_factory=dict)
     ordinary_over_p90: dict[str, int] = Field(default_factory=dict)
     ordinary_over_p99: dict[str, int] = Field(default_factory=dict)
+    rules_digest: str = Field(pattern=HEX64)
+    weakly_guarded: dict[str, float] = Field(
+        description="Families the drift gate guards weakly, with the drift scale it catches")
+    family_ordinary_median: dict[str, float] = Field(default_factory=dict)
+    family_rows_over_max: dict[str, tuple[int, ...]] = Field(
+        default_factory=dict, description="Reported, not gated")
+    over_max_multiples: dict[str, dict[int, float]] = Field(
+        default_factory=dict, description="Per component, and per family as 'family:<name>', "
+                                          "each row over the base maximum with its multiple; "
+                                          "reported, not gated")
+    diagnostics: dict[int, BifurcationReport] = Field(
+        default_factory=dict, description="The bifurcation diagnostic per row measured")
     rows: tuple[RowResult, ...]
     family_report: dict[str, float]
     fixture_digest: str | None = Field(default=None, pattern=HEX64)
@@ -342,18 +504,21 @@ def check_transfer(*, key: str, extends: str, base_tolerance: Tolerance,
                    base_feature_names: Sequence[str], checkpoint_sha256: str,
                    calibration_sha256: str, sample: TransferSample,
                    strata: Mapping[int, str], determinism: Sequence[CapturedFixture],
-                   max_floor: float | None) -> TransferResult:
-    """Score a fine-tune's sample against its base's tolerance.
+                   max_floor: float | None, rules: TransferRules,
+                   diagnostics: Mapping[int, BifurcationReport] | None = None
+                   ) -> TransferResult:
+    """Score a fine-tune's sample against its base's tolerance and rule set.
 
     ``strata`` must come from :func:`select_strata`; ``determinism`` holds the vLLM
     captures (alone, repeated, batched) of at least :data:`DETERMINISM_ROWS` rows,
-    each first capture the vector scored. Refuses, with every reason found: a schema
-    other than the base's, a sample outside :data:`SAMPLE_ROWS`, strata whose ordinary
-    rows are not :func:`ordinary_rows`, a lane that disagrees with itself, and on the
-    rows at or under ``max_floor``: more than :data:`OUTLIER_ALLOWANCE` row over a
-    component's max ratio or any over :data:`GROSS_MULTIPLE` times it, a family over
-    its maximum, an ordinary median over the p90, or more than
-    :data:`OUTLIER_ALLOWANCE` ordinary row over the p99.
+    each first capture the vector scored; ``diagnostics`` holds
+    :func:`bifurcation_report` per row where it was measured, reported only. Refuses, with every reason
+    found: a schema other than the base's, a sample outside :data:`SAMPLE_ROWS`, strata
+    whose ordinary rows are not :func:`ordinary_rows`, a lane that disagrees with
+    itself, and on the rows at or under ``max_floor``, by ``rules``: more rows over a
+    component's max ratio than allowed, an ordinary median over a component's p90, more
+    ordinary rows over its p99 than allowed, or a family whose ordinary median exceeds the
+    base's family p90. Rows over a maximum are listed with their multiples, not refused.
 
     Raises
     ------
@@ -367,6 +532,9 @@ def check_transfer(*, key: str, extends: str, base_tolerance: Tolerance,
     if base_tolerance.model != extends or base_tolerance.median_gate_stratum != ORDINARY_RULE:
         raise ValueError(f"the tolerance given is not {extends!r}'s, gating the "
                          f"{ORDINARY_RULE!r} stratum")
+    if rules.model != extends or rules.tolerance_digest != base_tolerance.digest:
+        raise ValueError(f"the rule set given is not {extends!r}'s for this tolerance")
+    reports = dict(diagnostics or {})
     reasons = _preconditions(sample, base_feature_names, strata, determinism, extends)
     fragile = tuple(g for g, f in sorted(sample.floors.items())
                     if max_floor is not None and f > max_floor)
@@ -377,19 +545,24 @@ def check_transfer(*, key: str, extends: str, base_tolerance: Tolerance,
     worst: dict[str, float] = {}
     over_p90: dict[str, int] = {}
     over_p99: dict[str, int] = {}
+    family_median: dict[str, float] = {}
+    family_over: dict[str, tuple[int, ...]] = {}
+    multiples: dict[str, dict[int, float]] = {}
     if not reasons and len(fragile) == len(sample.rows):
         reasons.append(f"every sampled row's path floor exceeds {max_floor}")
     elif not reasons:
         rows, report = score_rows(sample.feature_names, sample.sigma_cal, sample.weights,
                                   sample.floors, sample.reference, sample.candidate,
                                   base_tolerance, exclude_from_report=fragile)
-        # The row gates are counted below, so the shared gates read only the family
-        # maxima and the median.
-        uncapped = [r.model_copy(update=dict(components_within=True)) for r in rows]
+        # The row and family gates are the rule set's, below; the shared gates read only
+        # the component medians.
+        uncapped = [r.model_copy(update=dict(components_within=True, worst_family_excess=0.0))
+                    for r in rows]
         no_tail = base_tolerance.model_copy(update=dict(components=tuple(
             c.model_copy(update=dict(p99_ratio=None)) for c in base_tolerance.components)))
         reasons += tolerance_reasons(uncapped, no_tail, strata, exclude=fragile)
         scored = [r for r in rows if r.generation_id not in fragile]
+
         for c in base_tolerance.components:
             ratio = {r.generation_id: r.component_ratios[c.name] for r in scored}
             over_max[c.name] = tuple(g for g, x in ratio.items() if x > c.max_ratio)
@@ -397,15 +570,30 @@ def check_transfer(*, key: str, extends: str, base_tolerance: Tolerance,
             ordinary_ratios = [ratio[g] for g in ordinary if g in ratio]
             over_p90[c.name] = sum(x > c.p90_ratio for x in ordinary_ratios)
             over_p99[c.name] = sum(x > (c.p99_ratio or np.inf) for x in ordinary_ratios)
-            if len(over_max[c.name]) > OUTLIER_ALLOWANCE or worst[c.name] > GROSS_MULTIPLE:
+            multiples[c.name] = {g: ratio[g] / c.max_ratio for g in over_max[c.name]}
+            if len(over_max[c.name]) > rules.component_max_allowance:
                 reasons.append(f"{c.name}: rows {list(over_max[c.name])} exceed the recorded "
-                               f"max ratio {c.max_ratio:.3g}, the worst at "
-                               f"{worst[c.name]:.3g}×; at most {OUTLIER_ALLOWANCE} may, and "
-                               f"none beyond {GROSS_MULTIPLE:g}×")
-            if over_p99[c.name] > OUTLIER_ALLOWANCE:
+                               f"max ratio {c.max_ratio:.3g}; at most "
+                               f"{rules.component_max_allowance} may")
+            if over_p99[c.name] > rules.p99_allowance:
                 reasons.append(f"{c.name}: {over_p99[c.name]} of {len(ordinary_ratios)} "
                                f"ordinary rows exceed the recorded p99 {c.p99_ratio:.3g}; "
-                               f"at most {OUTLIER_ALLOWANCE} may")
+                               f"at most {rules.p99_allowance} may")
+        values = family_values(sample, base_tolerance)
+        kept = [g for g in sample.ids if g not in fragile]
+        for family, fmax in sorted(base_tolerance.family_max_abs_sigma.items()):
+            family_over[family] = tuple(g for g in kept if values[g][family] > fmax)
+            ordinary_values = [values[g][family] for g in ordinary if g in values
+                               and g not in fragile]
+            family_median[family] = float(np.median(ordinary_values)) if ordinary_values \
+                else float("inf")
+            p90 = rules.family_p90_abs_sigma[family]
+            if family_median[family] > p90:
+                reasons.append(f"family {family}: the ordinary rows' median |δ|/σ "
+                               f"{family_median[family]:.3g} exceeds the base's p90 {p90:.3g}")
+            if family_over[family]:
+                multiples[f"family:{family}"] = {g: values[g][family] / fmax
+                                                  for g in family_over[family]}
     fixtures = tolerance = None
     if not reasons:
         fixtures, tolerance = build_extension_fixtures(
@@ -421,7 +609,11 @@ def check_transfer(*, key: str, extends: str, base_tolerance: Tolerance,
         sample_sha256=sample.digest, max_floor=max_floor, fragile_rows=fragile,
         determinism_rows=len({c.generation_id for c in determinism}), ordinary_rows=ordinary,
         rows_over_max=over_max, worst_max_multiple=worst, ordinary_over_p90=over_p90,
-        ordinary_over_p99=over_p99, rows=tuple(rows), family_report=report,
+        ordinary_over_p99=over_p99, rules_digest=rules.digest,
+        weakly_guarded=dict(rules.weakly_guarded), family_ordinary_median=family_median,
+        family_rows_over_max={f: g for f, g in family_over.items() if g},
+        over_max_multiples=multiples, diagnostics=reports,
+        rows=tuple(rows), family_report=report,
         fixture_digest=fixtures and fixtures.digest,
         tolerance_digest=tolerance and tolerance.digest)
     return TransferResult(receipt=receipt, fixtures=fixtures, tolerance=tolerance)

@@ -27,7 +27,9 @@ from anamnesis.extraction.vllm.conformance import (
 from anamnesis.extraction.vllm.envelope import lane_id
 from anamnesis.extraction.vllm.extensions import LANES_ENV
 from anamnesis.extraction.vllm.transfer import (
+    RULES_FILE,
     TransferResult,
+    TransferRules,
     TransferSample,
     check_transfer,
     select_strata,
@@ -59,8 +61,21 @@ def base_tolerance(residual_max: float = 1.0, **overrides) -> Tolerance:
     return Tolerance(**{**fields, **overrides})
 
 
+def base_rules(tolerance: Tolerance | None = None, **overrides) -> TransferRules:
+    """The base's rule set: two rows over a component maximum allowed, one ordinary row over
+    the p99, family p90s at half the family maxima."""
+    tolerance = tolerance or base_tolerance()
+    fields = dict(model=BASE, tolerance_digest=tolerance.digest, component_max_allowance=2,
+                  p99_allowance=1, diagnostic_from_depth=0.35,
+                  family_p90_abs_sigma={f: m / 2 for f, m in
+                                        tolerance.family_max_abs_sigma.items()},
+                  weakly_guarded={"residual": 2.5},
+                  qualification=dict(method="synthetic", false_refusal=0.0))
+    return TransferRules(**{**fields, **overrides})
+
+
 def ship_base(root: Path, monkeypatch, tolerance: Tolerance | None = None) -> Tolerance:
-    """Ship a two-row ``8b`` fixture set and ``tolerance`` under ``root``."""
+    """Ship a two-row ``8b`` fixture set, ``tolerance`` and its rule set under ``root``."""
     monkeypatch.setattr(runtime, "FIXTURES_ROOT", root)
     tolerance = tolerance or base_tolerance()
     rows = tuple(FixtureRow(generation_id=g, population="native", input_ids=(1, 2, 3, 4),
@@ -72,6 +87,7 @@ def ship_base(root: Path, monkeypatch, tolerance: Tolerance | None = None) -> To
                vectors={g: np.zeros(len(NAMES), dtype=np.float32) for g in (1, 2)}
                ).save(root / BASE)
     (root / BASE / "tolerance.json").write_text(tolerance.model_dump_json())
+    (root / BASE / RULES_FILE).write_text(base_rules(tolerance).model_dump_json())
     return tolerance
 
 
@@ -110,13 +126,16 @@ def repeats(s: TransferSample) -> list[CapturedFixture]:
 
 def run(s: TransferSample, tolerance: Tolerance | None = None, *, strata=None,
         determinism=None, max_floor: float | None = None, key: str = KEY,
-        checkpoint: str = CHECKPOINT, calibration: str = "a" * 64) -> TransferResult:
+        checkpoint: str = CHECKPOINT, calibration: str = "a" * 64,
+        rules: TransferRules | None = None, diagnostics: dict | None = None,
+        **rule_overrides) -> TransferResult:
     tolerance = tolerance or base_tolerance()
     return check_transfer(
         key=key, extends=BASE, base_tolerance=tolerance, base_feature_names=NAMES,
         checkpoint_sha256=checkpoint, calibration_sha256=calibration, sample=s,
         strata=select_strata(s, tolerance) if strata is None else strata,
-        determinism=repeats(s) if determinism is None else determinism, max_floor=max_floor)
+        determinism=repeats(s) if determinism is None else determinism, max_floor=max_floor,
+        rules=rules or base_rules(tolerance, **rule_overrides), diagnostics=diagnostics)
 
 
 def registry(path: Path, monkeypatch, row: dict | None = None) -> Path:

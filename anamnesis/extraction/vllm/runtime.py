@@ -312,7 +312,8 @@ def reduce_rows(spec: Mapping[str, Any]) -> None:
     engine step's ``out``) and ``rows``. Each pass directory gains one npz of the
     arrays ``generation_ids``, ``vectors`` and, when the model's configuration
     enables it, ``knnlm`` (the final hidden state at each span's last position). A
-    raw capture is deleted once its vector is written.
+    raw capture is deleted once its vector is written; with ``keep_hidden``, the first
+    pass keeps each row's block outputs beside its vectors, one file per row.
     """
     import torch
 
@@ -348,6 +349,8 @@ def reduce_rows(spec: Mapping[str, Any]) -> None:
                                          end=int(rows[gid]["end"]), model=spec["model"])
             gids.append(gid)
             vectors.append(np.asarray(readout.features, dtype=np.float32))
+            if spec.get("keep_hidden") and directory.name == "pass-0":
+                torch.save(raw["hidden"].clone(), directory / f"row-{gid:05d}.hidden.pt")
             if lane.config.enable_knnlm_baseline:
                 knnlm.append(raw["hidden"][-1][-1].float().numpy().copy())
         arrays = dict(generation_ids=np.asarray(gids, dtype=np.int64),
@@ -437,10 +440,11 @@ def check_install(model: str, model_path: Path, calib_dir: Path, work_dir: Path,
 
 def capture_repeats(model: str, model_path: Path, calib_dir: Path,
                     rows: Sequence[Mapping[str, Any]], feature_names: Sequence[str],
-                    work_dir: Path) -> list[CapturedFixture]:
+                    work_dir: Path, *, keep_hidden: bool = False) -> list[CapturedFixture]:
     """Each row's vectors captured twice under ``full-b1-order0`` and once under
     ``full-b8-order0`` into ``work_dir`` (which must not exist); a row missing from
-    any pass is left out."""
+    any pass is left out. With ``keep_hidden``, the first single pass keeps each row's
+    block outputs for a caller that compares them with the anchor's and deletes them."""
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=False)
     rows = list(rows)
@@ -452,7 +456,8 @@ def capture_repeats(model: str, model_path: Path, calib_dir: Path,
                  work_dir / f"{label}.capture.json")
         run_step("reduce", dict(model=model, calib_dir=str(calib_dir),
                                 feature_names=list(feature_names),
-                                captures=str(work_dir / label), rows=rows),
+                                captures=str(work_dir / label), rows=rows,
+                                keep_hidden=keep_hidden and label == "single"),
                  work_dir / f"{label}.reduce.json")
     first = pass_vectors(work_dir / "single" / "pass-0")
     repeat = pass_vectors(work_dir / "single" / "pass-1")

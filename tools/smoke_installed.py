@@ -73,15 +73,18 @@ def check_shipped_data() -> list[str]:
 
     try:
         from anamnesis.extraction.vllm.runtime import load_fixtures
+        from anamnesis.extraction.vllm.transfer import load_transfer_rules
         from anamnesis.extraction.vllm.envelope import LANE_MODELS
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         failures.append(f"the vLLM lane's runtime does not import: {exc!r}")
     else:
         for model in LANE_MODELS:
             try:
-                load_fixtures(model)
+                _, tolerance = load_fixtures(model)
+                load_transfer_rules(model, tolerance)
             except Exception as exc:  # noqa: BLE001 - reported, not raised
-                failures.append(f"the {model} vLLM lane fixtures do not load: {exc!r}")
+                failures.append(f"the {model} vLLM lane fixtures or transfer rules do not "
+                                f"load: {exc!r}")
 
     return failures
 

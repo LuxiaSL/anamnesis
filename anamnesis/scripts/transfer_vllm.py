@@ -55,9 +55,12 @@ def parser() -> argparse.ArgumentParser:
 
 
 def hf_vectors(preset: str, model_path: Path, calib_dir: Path, entries: Mapping[str, Any],
-               ids: Sequence[int], device: str) -> tuple[tuple[str, ...], dict, dict, dict]:
-    """Feature names, and per row the fast-lane vector and the anchor's replay and
-    incremental vectors; the model is released before returning."""
+               ids: Sequence[int], device: str, *, lane_hidden: Path | None = None,
+               rules: Any = None) -> tuple[tuple[str, ...], dict, dict, dict, dict]:
+    """Feature names, and per row the fast-lane vector, the anchor's replay and
+    incremental vectors, and, where ``lane_hidden`` holds the row's lane block outputs,
+    the bifurcation diagnostic against the anchor's one-forward replay, reading from ``rules``' depth
+    (each kept file is deleted once read); the model is released before returning."""
     import torch
 
     from anamnesis.config import resolve_preset
@@ -65,25 +68,36 @@ def hf_vectors(preset: str, model_path: Path, calib_dir: Path, entries: Mapping[
     from anamnesis.extraction.feature_pipeline import compute_features_with_families_from_data
     from anamnesis.extraction.replay.cached import replay_extract_incremental
     from anamnesis.extraction.replay.extract import replay_extract
+    from anamnesis.extraction.vllm.transfer import bifurcation_report
 
     lane = resolve_fast_lane(preset=resolve_preset(preset), model_path=str(model_path),
                              calib_dir=Path(calib_dir), entries=entries, gen_ids=list(ids),
                              device=device, require_local_weights=True)
     out: tuple[dict, dict, dict] = ({}, {}, {})
+    reports: dict[int, Any] = {}
     try:
         for span in lane.spans:
             args = (span.input_ids, span.prompt_length)
             out[0][span.gen_id] = np.asarray(lane.lane.replay_span(
                 lane.loaded, *args, span.end).features, dtype=np.float32)
             for path, target in ((replay_extract, out[1]), (replay_extract_incremental, out[2])):
+                raw = path(lane.loaded, *args, lane.positional_means)
+                kept = None if lane_hidden is None or rules is None \
+                    or path is not replay_extract \
+                    else lane_hidden / f"row-{span.gen_id:05d}.hidden.pt"
+                if kept is not None and kept.is_file():
+                    blocks = torch.load(kept, map_location="cpu", weights_only=True)
+                    reports[span.gen_id] = bifurcation_report(
+                        blocks.float().numpy(), np.stack(raw.hidden_states),
+                        rules.diagnostic_from_depth)
+                    kept.unlink()
                 result = compute_features_with_families_from_data(
-                    path(lane.loaded, *args, lane.positional_means), lane.extraction,
-                    lane.families, lane.pca_components, lane.pca_mean)
+                    raw, lane.extraction, lane.families, lane.pca_components, lane.pca_mean)
                 if tuple(result.feature_names) != tuple(lane.feature_names):
                     raise ValueError(f"generation {span.gen_id}: the anchor's schema differs "
                                      "from the fast lane's")
                 target[span.gen_id] = np.asarray(result.features, dtype=np.float32)
-        return (tuple(lane.feature_names), *out)
+        return (tuple(lane.feature_names), *out, reports)
     finally:
         del lane
         gc.collect()
@@ -131,12 +145,15 @@ def run_transfer(*, key: str, extends: str, preset: str, model_path: Path, calib
     FileExistsError
         When ``out`` or ``work_dir`` exists.
     """
-    from anamnesis.extraction.fast.runtime import weight_file_digests
+    from anamnesis.config import resolve_preset
+    from anamnesis.extraction.fast.runtime import (
+        read_lane_calibration, resolve_lane_spans, weight_file_digests)
     from anamnesis.extraction.vllm.extensions import check_preset, lane_keys
     from anamnesis.extraction.vllm.runtime import (
         calibration_digest, capture_repeats, load_fixtures, replay_rows, span_schemas)
     from anamnesis.extraction.vllm.transfer import (
-        BASE_MAX_FLOOR, SAMPLE_ROWS, TransferSample, check_transfer, path_ruler, select_strata)
+        BASE_MAX_FLOOR, SAMPLE_ROWS, TransferSample, check_transfer, load_transfer_rules,
+        path_ruler, select_strata)
     from anamnesis.extraction.vllm.conformance import FixtureRow
     from anamnesis.provenance import digest_of_shas
 
@@ -150,17 +167,29 @@ def run_transfer(*, key: str, extends: str, preset: str, model_path: Path, calib
         raise ValueError(f"a transfer sample is {SAMPLE_ROWS[0]} to {SAMPLE_ROWS[1]} distinct "
                          f"rows, not {len(ids)}")
     base_fixtures, base_tolerance = load_fixtures(extends)
+    rules = load_transfer_rules(extends, base_tolerance)
     names = list(base_fixtures.feature_names)
     rows = replay_rows(entries, ids)
     span_schemas(extends, calib_dir, rows, names)
+    # The anchor's side holds a span only up to the positions the calibration fills;
+    # checked here, before any capture, rather than after the engine has run.
+    resolve_lane_spans(entries, ids, positions_calibrated=read_lane_calibration(
+        resolve_preset(preset), Path(calib_dir)).positions_calibrated)
     checkpoint = digest_of_shas(weight_file_digests(model_path))
 
-    captured = capture_repeats(extends, model_path, calib_dir, rows, names, Path(work_dir))
-    lost = sorted(set(ids) - {c.generation_id for c in captured})
-    if lost:
-        raise ValueError(f"rows {lost[:5]} are missing from a capture pass")
-    feature_names, reference, replay, incremental = hf_vectors(
-        preset, model_path, calib_dir, entries, ids, device)
+    kept = Path(work_dir) / "single" / "pass-0"
+    try:
+        captured = capture_repeats(extends, model_path, calib_dir, rows, names, Path(work_dir),
+                                   keep_hidden=True)
+        lost = sorted(set(ids) - {c.generation_id for c in captured})
+        if lost:
+            raise ValueError(f"rows {lost[:5]} are missing from a capture pass")
+        feature_names, reference, replay, incremental, reports = hf_vectors(
+            preset, model_path, calib_dir, entries, ids, device, lane_hidden=kept, rules=rules)
+    finally:
+        # The kept block outputs are a working copy for the diagnostic, never a record.
+        for path in kept.glob("row-*.hidden.pt"):
+            path.unlink()
     order = sorted(ids)
     sigma, floors = path_ruler(np.stack([replay[g] for g in order]),
                                np.stack([incremental[g] for g in order]))
@@ -177,7 +206,7 @@ def run_transfer(*, key: str, extends: str, preset: str, model_path: Path, calib
         key=key, extends=extends, base_tolerance=base_tolerance, base_feature_names=names,
         checkpoint_sha256=checkpoint, calibration_sha256=calibration_digest(calib_dir),
         sample=sample, strata=select_strata(sample, base_tolerance), determinism=captured,
-        max_floor=BASE_MAX_FLOOR[extends])
+        max_floor=BASE_MAX_FLOOR[extends], rules=rules, diagnostics=reports)
     return result, write_transfer(out, result, calib_dir=calib_dir, preset=preset)
 
 
