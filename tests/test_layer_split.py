@@ -119,7 +119,8 @@ def _lane(**kwargs) -> GpuFeatureLane:
     schema = resolve_gpu_schema(3, 16, extraction, families, components)
     return GpuFeatureLane(extraction, families, list(schema.feature_names),
                           rng.normal(0, 0.01, size=(4, 64, 32)).astype(np.float32),
-                          components, np.zeros(32, dtype=np.float32), device="cpu",
+                          components, np.zeros(32, dtype=np.float32),
+                          device=kwargs.pop("device", "cpu"),
                           calibration_sha256="a" * 64, replay_path="full", **kwargs)
 
 
@@ -133,6 +134,23 @@ def test_a_one_device_split_is_the_one_device_lane_byte_for_byte():
     b = split.replay_span(loaded, tokens, 7, 24)
     assert a.features.tobytes() == b.features.tobytes()
     assert "layer_split_sha256" not in b.metadata
+
+
+def test_a_multi_gpu_split_carries_the_one_device_lane_id(monkeypatch):
+    # The identity is computed on construction; the lane's buffers are placed on CPU so
+    # this runs without a GPU, while the lane's device, and so its identity, stays CUDA.
+    as_tensor = torch.as_tensor
+    monkeypatch.setattr(torch, "as_tensor", lambda *a, **k: as_tensor(*a, **{**k, "device": "cpu"}))
+    plain = _lane(device="cuda:0")
+    split = _lane(device="cuda:0", layer_split=LayerSplit.balanced(3, ("cuda:0", "cuda:1")))
+    assert split.lane_id == plain.lane_id and split.identity == plain.identity
+
+
+def test_a_split_mixing_device_types_is_refused():
+    with pytest.raises(ValueError, match="mixes device types"):
+        _lane(device="cuda:0", layer_split=LayerSplit.from_boundaries(3, ("cuda:0", "cpu"), (2,)))
+    with pytest.raises(ValueError, match="mixes device types"):
+        _lane(layer_split=LayerSplit.from_boundaries(3, ("cpu", "cuda:0"), (2,)))
 
 
 def test_a_lane_that_reduces_off_the_split_is_refused():

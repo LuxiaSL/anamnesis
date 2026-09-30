@@ -583,8 +583,15 @@ class PreparedLane:
             lane_runtime_source_sha256=file_sha(Path(__file__)),
         )
         if self.layer_split is not None and not self.layer_split.is_single:
-            provenance.update(layer_split=self.layer_split.identity(),
-                              layer_split_sha256=self.layer_split.digest)
+            import torch
+
+            provenance.update(
+                layer_split=self.layer_split.identity(),
+                layer_split_sha256=self.layer_split.digest,
+                layer_split_device_names={
+                    d: torch.cuda.get_device_name(torch.device(d))
+                    if torch.device(d).type == "cuda" else torch.device(d).type
+                    for d in self.layer_split.devices})
         return provenance
 
 

@@ -15,7 +15,10 @@ pinned into `lane_id` and checked before every span.
 A model too large for one GPU runs as a declared layer pipeline
 (:class:`anamnesis.extraction.layer_split.LayerSplit`): each layer computes on its
 own GPU, every capture is copied to the lane's device, and the reduction runs
-there. The split is part of `lane_id`; a one-device split is the one-device lane.
+there. The split is recorded in each receipt and the provenance, not in `lane_id`:
+each layer's arithmetic runs on one GPU whichever GPU holds it, so a split lane
+computes the one-device lane's bytes. Every device of a split must be the
+reduction device's type, so no layer computes in another arithmetic under the id.
 
 A receipt is provenance, not a certification. Whether this box's arithmetic
 agrees with the anchor is the business of
@@ -119,7 +122,13 @@ class GpuFeatureLane:
                 torch.device(d) for d in layer_split.devices}:
             raise ValueError(f"the lane reduces on {self.device}, a device the split "
                              "does not hold")
-        # A one-device split is the one-device lane: same placement, same identity.
+        if layer_split is not None and any(
+                torch.device(d).type != self.device.type for d in layer_split.devices):
+            raise ValueError(f"the split {list(layer_split.devices)} mixes device types; "
+                             f"every layer must compute on a {self.device.type} device, "
+                             "the lane's arithmetic")
+        # The split places layers; it does not change their arithmetic, so it is
+        # recorded in the receipt and the provenance, never in the identity.
         self.layer_split = (
             None if layer_split is None or layer_split.is_single else layer_split
         )
@@ -187,8 +196,6 @@ class GpuFeatureLane:
             tf32=torch.backends.cuda.matmul.allow_tf32,
             preferred_blas_library=str(torch.backends.cuda.preferred_blas_library()),
         )
-        if self.layer_split is not None:
-            identity["layer_split"] = self.layer_split.identity()
         self.identity = identity
         self.lane_id = (
             "torch-eager-reduce-v1-"
