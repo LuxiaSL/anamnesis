@@ -315,3 +315,13 @@ batch-invariant mode replaces torch's matrix products for the whole process. It 
 receipt against its file, then reduces the capture with the fast lane's reducers to the full
 named vector. `anamnesis/extraction/vllm/runtime.py` starts both processes with the
 environment each requires, so nothing needs to be exported by hand.
+
+A model too large for one GPU can declare a tensor-parallel size in the envelope. Its engine
+then runs one spawned worker per GPU, with the engine's custom all-reduce off, and the capture
+runs inside every worker (`tensor_parallel.py`, `tp_worker.py`). Each rank's slice of the
+attention heads, the QKV projection and the MLP gate is gathered in rank order to the
+single-GPU layouts before anything reduces across heads, and a batch refuses unless every
+rank captured the same bytes. The workers add each layer's partial products in their own
+order, so the vectors differ from a single-GPU run of the same weights. A tensor-parallel lane
+is therefore a lane of its own, with its own id, and a host checks it against that lane's own
+fixtures; no shipped model declares one.
