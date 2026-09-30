@@ -220,3 +220,19 @@ def test_two_extensions_of_one_base_are_two_lanes(tmp_path, monkeypatch):
     monkeypatch.setenv(LANES_ENV, f"{first.entry}:{second.entry}")
     assert lane_keys() == (*sorted(LANE_MODELS), "ft-a", "ft-b")
     assert admit("ft-a").fixtures.lane_id != admit("ft-b").fixtures.lane_id
+
+
+def test_an_extension_whose_audit_refuses_is_still_a_lane(tmp_path, monkeypatch):
+    """The audit's verdict is recorded, not a condition: a scored sample that reads
+    outside the base's regime still declares the fine-tune's own lane."""
+    from anamnesis.extraction.vllm.transfer import ordinary_rows
+    from synthetic_extension import sample, shifted, with_candidate
+
+    s = sample()
+    s = with_candidate(s, {g: shifted(s, g, "attn_flow_0", 0.8) for g in ordinary_rows(s.ids)})
+    declared = declare_extension(tmp_path, monkeypatch, audited=s)
+    assert declared.result.receipt.verdict == "refuse"
+    fixtures, tolerance = runtime.load_fixtures(KEY)
+    assert fixtures.digest == declared.result.fixtures.digest
+    assert fixtures.lane_id == lane_id(KEY)
+

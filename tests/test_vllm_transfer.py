@@ -206,6 +206,10 @@ def test_a_family_drifting_across_the_ordinary_rows_refuses():
     result = run(s)
     assert "family attn-flow: the ordinary rows' median" in reasons_of(result)
     assert result.receipt.family_ordinary_median["attn-flow"] > 0.5
+    # A refusing audit of a scored sample still yields the fine-tune's own fixtures.
+    assert result.fixtures is not None and result.tolerance is not None
+    assert (result.receipt.fixture_digest, result.receipt.tolerance_digest) == (
+        result.fixtures.digest, result.tolerance.digest)
 
 
 def test_a_receipt_names_its_rule_set_and_weakly_guarded_families():
@@ -323,6 +327,7 @@ def test_each_precondition_refuses(case, expected):
         strata.pop(s.ids[0])
     result = run(s, strata=strata, determinism=determinism)
     assert result.receipt.verdict == "refuse" and expected in reasons_of(result)
+    assert result.fixtures is None and result.receipt.fixture_digest is None
 
 
 def test_a_schema_other_than_the_base_s_refuses_before_scoring():

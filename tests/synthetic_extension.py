@@ -156,8 +156,10 @@ class Declared:
 
 
 def declare_extension(tmp_path: Path, monkeypatch, *, key: str = KEY,
-                      checkpoint: str = CHECKPOINT, out_name: str = "transfer") -> Declared:
-    """A passing extension of ``8b`` written to disk and named in ``ANAMNESIS_VLLM_LANES``."""
+                      checkpoint: str = CHECKPOINT, out_name: str = "transfer",
+                      audited: TransferSample | None = None) -> Declared:
+    """An extension of ``8b`` written to disk and named in ``ANAMNESIS_VLLM_LANES``; its
+    audit passes unless ``audited`` supplies another sample."""
     tolerance = base_tolerance() if (tmp_path / "shipped").exists() \
         else ship_base(tmp_path / "shipped", monkeypatch)
     if not (tmp_path / "models.json").exists():
@@ -167,7 +169,8 @@ def declare_extension(tmp_path: Path, monkeypatch, *, key: str = KEY,
     for name in runtime.CALIBRATION_FILES:
         (calib / name).write_bytes(f"calibration {name}".encode())
     digest = digest_of_shas({n: file_sha(calib / n) for n in runtime.CALIBRATION_FILES})
-    result = run(sample(), tolerance, key=key, checkpoint=checkpoint, calibration=digest)
+    result = run(audited or sample(), tolerance, key=key, checkpoint=checkpoint,
+                 calibration=digest)
     written = write_transfer(tmp_path / out_name, result, calib_dir=calib, preset=PRESET)
     monkeypatch.setenv(LANES_ENV, str(written["entry"]))
     return Declared(tmp_path / out_name, written["entry"], written["receipt"], calib, result)
