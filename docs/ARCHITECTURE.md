@@ -198,7 +198,7 @@ Three paths compute a signature, and they do not accept the same models.
 |---|---|---|---|
 | Commands | `run_extraction` (generate and capture), `run_replay` (teacher-force banked ids) | `run_gpu_replay`, `qualify_box`, and in process `prepare_fast_lane` + `harvest_loaded` | `run_vllm_replay`, `qualify_vllm` |
 | Architectures | Dense decoders whose layers sit at `model.model.layers` with k/q/v/o/gate projections (the Llama, Qwen-2 and OLMo-2 families); Gemma-3, whose text decoder nests inside a multimodal wrapper; DeepSeek-V2, whose latent attention and routed experts get their own capture surface | Dense Llama only. Any other `model_type` is refused by `check_loaded_model` once loaded | The presets with shipped fixtures: `3b`, `8b`, `70b` |
-| Placement | Whatever device map the preset's configuration gives | One device holding every parameter | One GPU holding every parameter |
+| Placement | Whatever device map the preset's configuration gives | One device holding every parameter, or a declared `LayerSplit` (in process) with every layer on one GPU | One GPU holding every parameter, or a declared tensor-parallel size, which is a lane of its own |
 | Attention kernel | Eager, which returns weights; a fused kernel is refused at the preset | Eager | The engine's Triton kernel, instrumented |
 | How a box checks it | `onboard_model` | `qualify_box`, against the anchor on the same box | `qualify_vllm`, against the shipped fixtures |
 

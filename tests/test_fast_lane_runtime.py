@@ -120,7 +120,7 @@ def test_the_incremental_primitives_check_the_arithmetic_before_any_forward() ->
 
     for primitive in (replay_extract_incremental, first_incremental_coordinates):
         source = inspect.getsource(primitive)
-        assert source.index("refuse_unpinned_floor(device)") < source.index("loaded.model("), \
+        assert source.index("refuse_unpinned_floor(held)") < source.index("loaded.model("), \
             primitive.__name__
 
 

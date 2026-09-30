@@ -360,7 +360,8 @@ def test_main_runs_from_argv_on_a_registered_preset_and_banks_what_harvest_retur
     loaded = save_tiny_checkpoint(checkpoint)
     loads: list[tuple[str, str, str]] = []
 
-    def load_saved(preset: ModelPreset, model_path: str, device: str) -> LoadedModel:
+    def load_saved(preset: ModelPreset, model_path: str, device: str,
+                   layer_split: object = None) -> LoadedModel:
         loads.append((preset.name, model_path, device))
         return loaded
 

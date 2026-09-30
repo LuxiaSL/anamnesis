@@ -65,17 +65,20 @@ def first_incremental_coordinates(
 ) -> tuple[NDArray[np.float32], list[str]]:
     """Fresh full-prefix prefill + exactly the original first incremental call.
 
-    On a CUDA model it refuses outside the lane's arithmetic, where a path floor is
-    not defined (:func:`anamnesis.extraction.fast.runtime.refuse_unpinned_floor`).
+    On a model with any parameter on a CUDA device it refuses outside the lane's
+    arithmetic, where a path floor is not defined
+    (:func:`anamnesis.extraction.fast.runtime.refuse_unpinned_floor`).
     """
     import torch
 
     from anamnesis.extraction.fast.runtime import refuse_unpinned_floor
+    from anamnesis.extraction.layer_split import model_devices
 
     if not 0 < start < end <= len(token_ids) or end - start < 2:
         raise ValueError("invalid continuation")
     device = next(loaded.model.parameters()).device
-    refuse_unpinned_floor(device)
+    for held in model_devices(loaded.model):
+        refuse_unpinned_floor(held)
     ids = torch.tensor(token_ids[:end], device=device).unsqueeze(0)
     loaded.clear_hook_state()
     loaded.disable_hooks()

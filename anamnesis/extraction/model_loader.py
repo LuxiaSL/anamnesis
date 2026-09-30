@@ -838,6 +838,7 @@ def load_model(
     query_layers: list[int] | None = None,
     attn_output_layers: list[int] | None = None,
     adapter_path: str | None = None,
+    device_map: dict[str, str] | None = None,
 ) -> LoadedModel:
     """Load model, tokenizer, and register hooks.
 
@@ -867,6 +868,10 @@ def load_model(
         attn_output_layers: Layers for o_proj (attention-output) hooks. Default
             None = no capture. Pass all layers to bank the attention-output
             surface; mlp_out is then derivable from the hidden states.
+        device_map: An explicit module → device map, overriding the config's
+            placement: a layer pipeline across GPUs, from
+            :meth:`anamnesis.extraction.layer_split.LayerSplit.hf_device_map`.
+            Each capture hook keeps its tensors on its own layer's device.
 
     Returns:
         LoadedModel with everything wired up.
@@ -880,7 +885,7 @@ def load_model(
     model = AutoModelForCausalLM.from_pretrained(
         config.model_id,
         torch_dtype=torch_dtype,
-        device_map=config.device_map,
+        device_map=dict(device_map) if device_map is not None else config.device_map,
         attn_implementation=config.attn_implementation,
     )
     model.eval()
