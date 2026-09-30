@@ -7,10 +7,15 @@ all-layer attention tensor never exists at once, and only small per-layer
 summaries survive the pass.
 
 Scope is the dense Llama probe-free battery, in full. The lane refuses a partial
-battery, a non-eager attention implementation, a model split across devices, and
-any arithmetic setting that changed after construction — a feature vector is
-only comparable to another vector computed the same way, so the way is pinned
-into `lane_id` and checked before every span.
+battery, a non-eager attention implementation, a model placed other than the lane
+declares, and any arithmetic setting that changed after construction — a feature
+vector is only comparable to another vector computed the same way, so the way is
+pinned into `lane_id` and checked before every span.
+
+A model too large for one GPU runs as a declared layer pipeline
+(:class:`anamnesis.extraction.layer_split.LayerSplit`): each layer computes on its
+own GPU, every capture is copied to the lane's device, and the reduction runs
+there. The split is part of `lane_id`; a one-device split is the one-device lane.
 
 A receipt is provenance, not a certification. Whether this box's arithmetic
 agrees with the anchor is the business of
@@ -44,6 +49,7 @@ from anamnesis.extraction.fast.ops import (
     std,
     trajectory_indices,
 )
+from anamnesis.extraction.layer_split import LayerSplit
 from anamnesis.extraction.model_loader import LoadedModel, decoder_layers
 
 
@@ -69,6 +75,7 @@ class GpuFeatureLane:
         device: str | torch.device,
         calibration_sha256: str,
         replay_path: Literal["cached", "full"] = "cached",
+        layer_split: LayerSplit | None = None,
     ):
         if replay_path not in ("cached", "full"):
             raise ValueError("replay_path must be cached or full")
@@ -108,6 +115,14 @@ class GpuFeatureLane:
         self.device = torch.device(device)
         if self.device.type == "cuda" and self.device.index is None:
             self.device = torch.device("cuda", torch.cuda.current_device())
+        if layer_split is not None and self.device not in {
+                torch.device(d) for d in layer_split.devices}:
+            raise ValueError(f"the lane reduces on {self.device}, a device the split "
+                             "does not hold")
+        # A one-device split is the one-device lane: same placement, same identity.
+        self.layer_split = (
+            None if layer_split is None or layer_split.is_single else layer_split
+        )
         self.config = extraction
         self.families = families
         self.names = tuple(feature_names)
@@ -172,6 +187,8 @@ class GpuFeatureLane:
             tf32=torch.backends.cuda.matmul.allow_tf32,
             preferred_blas_library=str(torch.backends.cuda.preferred_blas_library()),
         )
+        if self.layer_split is not None:
+            identity["layer_split"] = self.layer_split.identity()
         self.identity = identity
         self.lane_id = (
             "torch-eager-reduce-v1-"
@@ -275,7 +292,10 @@ class GpuFeatureLane:
                             "installed eager attention does not expose weights to hook"
                         )
                     attention.consume(
-                        layer, result[1][:, :, offset : offset + steps + 1, :]
+                        layer,
+                        result[1][:, :, offset : offset + steps + 1, :].to(
+                            self.device
+                        ),
                     )
 
                 handles.append(module.self_attn.register_forward_hook(hook))
@@ -339,6 +359,8 @@ class GpuFeatureLane:
         """
         if self.replay_path != "cached":
             raise ValueError("batched replay currently requires the cached path")
+        if self.layer_split is not None:
+            raise ValueError("batched replay runs on one device only")
         layout = pack_spans(tuple(spans), loaded.model.config.vocab_size)
         if prefill_policy not in ("batched", "independent"):
             raise ValueError("unknown prefill policy")
@@ -520,7 +542,9 @@ class GpuFeatureLane:
             raise ValueError("GPU lane requires an eval-mode dense Llama")
         if loaded.model.config._attn_implementation != "eager":
             raise ValueError("GPU lane requires eager attention")
-        if any(p.device != self.device for p in loaded.model.parameters()):
+        if self.layer_split is not None:
+            self.layer_split.check_placement(loaded.model)
+        elif any(p.device != self.device for p in loaded.model.parameters()):
             raise ValueError("v1 requires a model entirely on the declared device")
         if end - 2 >= self.positions_calibrated:
             raise ValueError("positional calibration does not cover span")
@@ -549,9 +573,11 @@ class GpuFeatureLane:
         h2d_bytes = 0
         previous = None
         for layer in range(len(layers)):
-            h = result.hidden_states[layer + 1][
-                batch_index, offset : offset + steps
-            ].float()
+            h = (
+                result.hidden_states[layer + 1][batch_index, offset : offset + steps]
+                .to(self.device)
+                .float()
+            )
             pm = np.ascontiguousarray(self.pm[layer + 1, start : start + steps])
             h2d_bytes += pm.nbytes
             corrected = h - torch.as_tensor(pm, device=self.device)
@@ -590,7 +616,7 @@ class GpuFeatureLane:
                         collector.put(f"pca_L{layer}_t{ti}_c{ci}", value)
         logprob = self._outputs(
             collector,
-            result.logits[batch_index, offset : offset + steps],
+            result.logits[batch_index, offset : offset + steps].to(self.device),
             ids[0, start + 1 : end],
         )
         for layer in self.config.sampled_layers:
@@ -601,6 +627,7 @@ class GpuFeatureLane:
                     raise RuntimeError(f"missing/duplicate {name} layer {layer}")
                 return (
                     values[0][batch_index, :, offset : offset + steps, :]
+                    .to(self.device)
                     .permute(1, 0, 2)
                     .float()
                 )
@@ -613,7 +640,10 @@ class GpuFeatureLane:
             gate = loaded.hook_state.gate_activations.get(layer)
             if gate is None or len(gate) != 1:
                 raise RuntimeError(f"missing gate layer {layer}")
-            reducer.gate(layer, gate[0][batch_index, offset : offset + steps].float())
+            reducer.gate(
+                layer,
+                gate[0][batch_index, offset : offset + steps].to(self.device).float(),
+            )
         reducer.finish()
         vector = collector.finish(list(self.names)).cpu().numpy()
         if not np.isfinite(vector).all():
@@ -653,6 +683,8 @@ class GpuFeatureLane:
             positional_calibration_h2d_bytes=h2d_bytes,
             input_token_h2d_bytes=ids.numel() * ids.element_size(),
         )
+        if self.layer_split is not None:
+            receipt["layer_split_sha256"] = self.layer_split.digest
         return GpuFeatureResult(
             vector, self.names, float(logprob.cpu()), knnlm, receipt
         )

@@ -49,6 +49,7 @@ from anamnesis.extraction.calibration import (
     read_pca_basis,
     resolve_pca_model,
 )
+from anamnesis.extraction.layer_split import LayerSplit
 from anamnesis.extraction.replay_config import native_replay_configs
 from anamnesis.provenance import digest_of_shas, file_sha
 
@@ -319,8 +320,10 @@ class LaneCalibration:
             self.pca_components,
         )
 
-    def build_lane(self, feature_names: Sequence[str], device: str) -> GpuFeatureLane:
-        """A full-path lane over this calibration, emitting exactly ``feature_names``."""
+    def build_lane(self, feature_names: Sequence[str], device: str,
+                   layer_split: LayerSplit | None = None) -> GpuFeatureLane:
+        """A full-path lane over this calibration, emitting exactly ``feature_names``,
+        reducing on ``device``; ``layer_split`` declares a model held across GPUs."""
         from anamnesis.extraction.fast.features import GpuFeatureLane
 
         return GpuFeatureLane(
@@ -333,6 +336,7 @@ class LaneCalibration:
             device=device,
             calibration_sha256=self.calibration_sha256,
             replay_path="full",
+            layer_split=layer_split,
         )
 
 
@@ -375,7 +379,8 @@ def read_lane_calibration(preset: ModelPreset, calib_dir: Path) -> LaneCalibrati
     )
 
 
-def load_lane_model(preset: ModelPreset, model_path: str, device: str) -> LoadedModel:
+def load_lane_model(preset: ModelPreset, model_path: str, device: str,
+                    layer_split: LayerSplit | None = None) -> LoadedModel:
     """Load a checkpoint with exactly the capture surface the lane reads.
 
     This lane banks features and no raw tensors, so it hooks exactly the surfaces
@@ -388,9 +393,23 @@ def load_lane_model(preset: ModelPreset, model_path: str, device: str) -> Loaded
     A process that keeps one model resident loads it here once and hands the result
     to :func:`prepare_fast_lane`, so the lane reads the surface it expects without
     loading a second copy.
+
+    With a ``layer_split`` of more than one device, the model is placed as that
+    layer pipeline, exactly; ``device`` is where the lane reduces and must be one of
+    the split's devices. A one-device split loads as ``device`` does.
+
+    Raises
+    ------
+    ValueError
+        When the split describes another depth, or does not hold ``device``.
     """
     from anamnesis.extraction.model_loader import load_model
 
+    device_map = None
+    if layer_split is not None:
+        _check_split(layer_split, preset, device)
+        if not layer_split.is_single:
+            device_map = layer_split.hf_device_map()
     sampled = list(preset.sampled_layers)
     return load_model(
         ModelConfig.from_preset(preset, model_id=model_path, device_map=device),
@@ -399,7 +418,19 @@ def load_lane_model(preset: ModelPreset, model_path: str, device: str) -> Loaded
         key_layers=sampled,
         value_layers=sampled,
         query_layers=sampled,
+        device_map=device_map,
     )
+
+
+def _check_split(layer_split: LayerSplit, preset: ModelPreset, device: str) -> None:
+    """Refuse a split for another depth, or one that does not hold the lane's device."""
+    import torch
+
+    if layer_split.num_layers != preset.num_layers:
+        raise ValueError(f"the split places {layer_split.num_layers} layers; preset "
+                         f"{preset.name!r} has {preset.num_layers}")
+    if _declared_device(device) not in {torch.device(d) for d in layer_split.devices}:
+        raise ValueError(f"the lane reduces on {device}, a device the split does not hold")
 
 
 def _declared_device(device: str) -> Any:
@@ -412,15 +443,18 @@ def _declared_device(device: str) -> Any:
     return resolved
 
 
-def check_loaded_model(loaded: LoadedModel, preset: ModelPreset, device: str) -> None:
+def check_loaded_model(loaded: LoadedModel, preset: ModelPreset, device: str,
+                       layer_split: LayerSplit | None = None) -> None:
     """Refuse a loaded model the lane would read wrongly or not at all.
 
     A model handed in by a caller did not come through :func:`load_lane_model`, so
     each fact that function guarantees is checked here instead: the architecture
     the lane is written for, the depth and widths the preset declares (a feature
     named for layer 20 of one model is a different quantity in another), eager
-    attention, eval mode, every parameter on the declared device, and a forward
-    hook on each projection the reducers read at each sampled layer.
+    attention, eval mode, every parameter on the declared device (or, with a
+    ``layer_split`` of more than one device, on the device the split declares for
+    it), and a forward hook on each projection the reducers read at each sampled
+    layer.
 
     Raises
     ------
@@ -450,9 +484,14 @@ def check_loaded_model(loaded: LoadedModel, preset: ModelPreset, device: str) ->
         raise ValueError("GPU lane requires eager attention")
     if model.training:
         raise ValueError("GPU lane requires an eval-mode model")
-    declared = _declared_device(device)
-    if any(p.device != declared for p in model.parameters()):
-        raise ValueError(f"the lane requires a model entirely on {declared}")
+    if layer_split is not None:
+        _check_split(layer_split, preset, device)
+    if layer_split is not None and not layer_split.is_single:
+        layer_split.check_placement(model)
+    else:
+        declared = _declared_device(device)
+        if any(p.device != declared for p in model.parameters()):
+            raise ValueError(f"the lane requires a model entirely on {declared}")
     layers = decoder_layers(model)
     for layer in preset.sampled_layers:
         block = layers[layer]
@@ -502,6 +541,7 @@ class PreparedLane:
     loaded: LoadedModel
     device: str
     model_files: dict[str, str] | None
+    layer_split: LayerSplit | None = None
     _schemas: dict[int, GpuFeatureSchema] = field(
         default_factory=dict, repr=False, compare=False
     )
@@ -521,7 +561,9 @@ class PreparedLane:
             schema = self._schemas[n_steps] = self.calibration.schema(n_steps)
         lane = self._lanes.get(schema.feature_names)
         if lane is None:
-            lane = self.calibration.build_lane(schema.feature_names, self.device)
+            lane = self.calibration.build_lane(
+                schema.feature_names, self.device, self.layer_split
+            )
             self._lanes[schema.feature_names] = lane
         return lane, schema
 
@@ -531,7 +573,7 @@ class PreparedLane:
         Per-span identity — the lane id, the token digest — is on each result's
         receipt; this is the part every span in the process shares.
         """
-        return dict(
+        provenance = dict(
             preset=self.preset.name,
             device=str(self.device),
             calibration_files=dict(self.calibration.calibration_files),
@@ -540,6 +582,10 @@ class PreparedLane:
             model_config=self.loaded.model.config.to_dict(),
             lane_runtime_source_sha256=file_sha(Path(__file__)),
         )
+        if self.layer_split is not None and not self.layer_split.is_single:
+            provenance.update(layer_split=self.layer_split.identity(),
+                              layer_split_sha256=self.layer_split.digest)
+        return provenance
 
 
 def prepare_fast_lane(
@@ -551,6 +597,7 @@ def prepare_fast_lane(
     model_path: str | None = None,
     model_files: Mapping[str, str] | None = None,
     require_local_weights: bool = False,
+    layer_split: LayerSplit | None = None,
 ) -> PreparedLane:
     """Pin the arithmetic, read the calibration, and bind a model to them.
 
@@ -580,6 +627,9 @@ def prepare_fast_lane(
     require_local_weights
         Stamp the checkpoint's digests into :meth:`PreparedLane.provenance`. They
         are computed once per file and reused while the file's size and mtime hold.
+    layer_split
+        The model held as a layer pipeline across GPUs, recorded in the provenance
+        and the lane identity; ``device`` is where the lane reduces.
 
     Raises
     ------
@@ -605,8 +655,8 @@ def prepare_fast_lane(
         digests = weight_file_digests(model_path)
     if loaded is None:
         assert model_path is not None
-        loaded = load_lane_model(row, model_path, device)
-    return _bind(calibration, loaded, device, digests)
+        loaded = load_lane_model(row, model_path, device, layer_split)
+    return _bind(calibration, loaded, device, digests, layer_split)
 
 
 def _bind(
@@ -614,11 +664,13 @@ def _bind(
     loaded: LoadedModel,
     device: str,
     model_files: dict[str, str] | None,
+    layer_split: LayerSplit | None = None,
 ) -> PreparedLane:
     """A calibration and a model the lane can read, as one :class:`PreparedLane`."""
-    check_loaded_model(loaded, calibration.preset, device)
+    check_loaded_model(loaded, calibration.preset, device, layer_split)
     return PreparedLane(
-        calibration=calibration, loaded=loaded, device=device, model_files=model_files
+        calibration=calibration, loaded=loaded, device=device, model_files=model_files,
+        layer_split=layer_split,
     )
 
 
@@ -631,6 +683,7 @@ def resolve_fast_lane(
     gen_ids: Sequence[int],
     device: str = DEFAULT_DEVICE,
     require_local_weights: bool = False,
+    layer_split: LayerSplit | None = None,
 ) -> FastLaneRuntime:
     """Pin the arithmetic, resolve the schema and calibration, load the lane.
 
@@ -660,6 +713,9 @@ def resolve_fast_lane(
         The generations to cover, already selected by the caller's own policy.
     device
         Device the model and the lane run on; part of what a verdict is about.
+    layer_split
+        The model held as a layer pipeline across GPUs; ``device`` is then where
+        the lane reduces.
 
     Raises
     ------
@@ -682,7 +738,11 @@ def resolve_fast_lane(
     feature_names = names.pop()
 
     prepared = _bind(
-        calibration, load_lane_model(preset, model_path, device), device, model_files
+        calibration,
+        load_lane_model(preset, model_path, device, layer_split),
+        device,
+        model_files,
+        layer_split,
     )
     lane, _ = prepared.lane(spans[0].n_steps)
     return FastLaneRuntime(

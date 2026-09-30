@@ -207,15 +207,18 @@ def replay_extract_incremental(
     ------
     ValueError
         On a batch other than one sequence, or a span with no prompt or fewer than
-        two generated tokens; on a CUDA model outside the lane's arithmetic, where a
-        path floor is not defined (:func:`anamnesis.extraction.fast.runtime.refuse_unpinned_floor`).
+        two generated tokens; on a model with any parameter on a CUDA device, outside
+        the lane's arithmetic, where a path floor is not defined
+        (:func:`anamnesis.extraction.fast.runtime.refuse_unpinned_floor`).
     NotImplementedError
         When the loaded model captures a router surface.
     """
     from anamnesis.extraction.fast.runtime import refuse_unpinned_floor
+    from anamnesis.extraction.layer_split import model_devices
 
     device = next(loaded.model.parameters()).device
-    refuse_unpinned_floor(device)
+    for held in model_devices(loaded.model):
+        refuse_unpinned_floor(held)
     if isinstance(full_token_ids, Tensor):
         ids = full_token_ids.to(device=device, dtype=torch.long)
     else:
