@@ -3,8 +3,16 @@
 :data:`LANES_ENV` names lane files, separated like ``PATH``, each
 ``{"lanes": {key: entry}}`` with entry fields as :class:`ExtensionLane` declares
 them; relative paths resolve against the file's directory.
-``anamnesis/scripts/transfer_vllm.py`` writes one on a passing transfer check
-(:mod:`anamnesis.extraction.vllm.transfer`).
+``anamnesis/scripts/transfer_vllm.py`` writes one, with the fine-tune's fixtures
+and tolerance, when its lane-agreement audit reads the fine-tune inside its base's
+measured regime (:mod:`anamnesis.extraction.vllm.transfer`).
+
+An entry is admitted on its identity: the registry preset extending its base, the
+calibration pinned by digest, the checkpoint digest, and fixtures and a tolerance
+carrying that identity. The install check on those fixtures then decides its
+tier on each host, as for a shipped lane. A transfer receipt is optional evidence:
+recorded when the entry names one, checked to be about this lane, never a
+condition of admission.
 
 An entry adds a lane and never redefines one: a file is refused whole when an
 entry reuses a shipped or declared key, declares one checkpoint on one base
@@ -21,9 +29,16 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from anamnesis.extraction.vllm.conformance import FixtureSet, Tolerance
 from anamnesis.extraction.vllm.envelope import (
@@ -33,7 +48,7 @@ from anamnesis.extraction.vllm.envelope import (
     extension_lane_id,
     lane_id,
 )
-from anamnesis.extraction.vllm.runtime import CALIBRATION_FILES, load_fixtures
+from anamnesis.extraction.vllm.runtime import CALIBRATION_FILES
 from anamnesis.extraction.vllm.transfer import TransferReceipt
 from anamnesis.provenance import digest_of_shas, file_sha
 
@@ -73,8 +88,9 @@ class ExtensionLane(BaseModel):
     calibration_dir: Path
     calibration: dict[str, CalibrationPin]
     fixtures_dir: Path
-    transfer_receipt: Path
-    transfer_receipt_sha256: str = Field(pattern=HEX64)
+    transfer_receipt: Path | None = Field(
+        default=None, description="Optional: a lane-agreement audit of this fine-tune")
+    transfer_receipt_sha256: str | None = Field(default=None, pattern=HEX64)
     declared_in: Path
 
     @field_validator("calibration")
@@ -83,6 +99,12 @@ class ExtensionLane(BaseModel):
         if set(pins) != set(CALIBRATION_FILES):
             raise ValueError(f"calibration must pin exactly {list(CALIBRATION_FILES)}")
         return pins
+
+    @model_validator(mode="after")
+    def _receipt_pinned(self) -> Self:
+        if (self.transfer_receipt is None) != (self.transfer_receipt_sha256 is None):
+            raise ValueError("a transfer receipt is named with its digest, or not at all")
+        return self
 
     @property
     def lane_id(self) -> str:
@@ -207,6 +229,7 @@ class AdmittedLane:
     entry: ExtensionLane
     fixtures: FixtureSet
     tolerance: Tolerance
+    transfer_receipt: TransferReceipt | None
 
 
 def _refuse(key: str, reason: str) -> NoReturn:
@@ -222,30 +245,21 @@ def _require(key: str) -> ExtensionLane:
 
 
 def admit(key: str) -> AdmittedLane:
-    """``key``'s entry, fixtures and tolerance, after the guard.
+    """``key``'s entry, fixtures and tolerance, and its transfer receipt when it names
+    one, after the guard.
 
     Raises
     ------
     ValueError
-        Naming ``key`` and the first failure among: an undeclared key; a transfer
-        receipt missing, altered from its declared digest, refused, or naming another
-        key, base, lane id, checkpoint or calibration; fixtures or a tolerance other
-        than the receipt's or not carrying the extension's identity; a shipped base
-        tolerance other than the one the receipt scored against; and a preset that is
-        not a structural copy of the base's.
+        Naming ``key`` and the first failure among: an undeclared key; fixtures or a
+        tolerance that do not load or do not carry the extension's key, lane id,
+        checkpoint and calibration; a preset that is not a structural copy of the
+        base's; and, when the entry names a transfer receipt, one missing, altered
+        from its declared digest, or about another key, base, lane id, checkpoint,
+        calibration, fixtures or tolerance. The receipt's verdict is recorded, not
+        gated.
     """
     entry = _require(key)
-    path = entry.transfer_receipt
-    if not path.is_file():
-        _refuse(key, f"its transfer receipt {path} does not exist")
-    if file_sha(path) != entry.transfer_receipt_sha256:
-        _refuse(key, f"its transfer receipt {path} differs from the declared digest")
-    try:
-        receipt = TransferReceipt.model_validate_json(path.read_text())
-    except ValueError as exc:
-        _refuse(key, f"its transfer receipt is not one ({exc})")
-    if receipt.verdict != "pass":
-        _refuse(key, f"its transfer receipt refused it: {'; '.join(receipt.reasons[:3])}")
     try:
         fixtures = FixtureSet.load(entry.fixtures_dir)
         tolerance = Tolerance.model_validate_json(
@@ -253,20 +267,25 @@ def admit(key: str) -> AdmittedLane:
     except (OSError, ValueError) as exc:
         _refuse(key, f"its fixtures do not load ({exc})")
     expected = {
-        "receipt key": (receipt.key, key), "receipt extends": (receipt.extends, entry.extends),
-        "receipt base_lane_id": (receipt.base_lane_id, lane_id(entry.extends)),
-        "receipt lane_id": (receipt.lane_id, entry.lane_id),
-        "receipt checkpoint_sha256": (receipt.checkpoint_sha256, entry.checkpoint_sha256),
-        "receipt calibration_sha256": (receipt.calibration_sha256, entry.calibration_sha256),
         "fixtures model": (fixtures.model, key), "tolerance model": (tolerance.model, key),
         "fixtures lane_id": (fixtures.lane_id, entry.lane_id),
         "fixtures checkpoint_sha256": (fixtures.checkpoint_sha256, entry.checkpoint_sha256),
         "fixtures calibration_sha256": (fixtures.calibration_sha256, entry.calibration_sha256),
-        "fixtures digest": (fixtures.digest, receipt.fixture_digest),
-        "tolerance digest": (tolerance.digest, receipt.tolerance_digest),
-        "base tolerance digest": (load_fixtures(entry.extends)[1].digest,
-                                  receipt.base_tolerance_digest),
     }
+    receipt = None if entry.transfer_receipt is None else _receipt(key, entry)
+    if receipt is not None:
+        expected.update({
+            "receipt key": (receipt.key, key), "receipt extends": (receipt.extends, entry.extends),
+            "receipt base_lane_id": (receipt.base_lane_id, lane_id(entry.extends)),
+            "receipt lane_id": (receipt.lane_id, entry.lane_id),
+            "receipt checkpoint_sha256": (receipt.checkpoint_sha256, entry.checkpoint_sha256),
+            "receipt calibration_sha256": (receipt.calibration_sha256,
+                                           entry.calibration_sha256),
+        })
+        if receipt.fixture_digest is not None:
+            expected["fixtures digest"] = (fixtures.digest, receipt.fixture_digest)
+        if receipt.tolerance_digest is not None:
+            expected["tolerance digest"] = (tolerance.digest, receipt.tolerance_digest)
     for name, (found, wanted) in expected.items():
         if found != wanted:
             _refuse(key, f"{name} is {found!r}, expected {wanted!r}")
@@ -274,7 +293,22 @@ def admit(key: str) -> AdmittedLane:
         check_preset(entry.preset, entry.extends)
     except ValueError as exc:
         _refuse(key, str(exc))
-    return AdmittedLane(entry=entry, fixtures=fixtures, tolerance=tolerance)
+    return AdmittedLane(entry=entry, fixtures=fixtures, tolerance=tolerance,
+                        transfer_receipt=receipt)
+
+
+def _receipt(key: str, entry: ExtensionLane) -> TransferReceipt:
+    """The transfer receipt ``entry`` names, digest-checked."""
+    path = entry.transfer_receipt
+    assert path is not None
+    if not path.is_file():
+        _refuse(key, f"its transfer receipt {path} does not exist")
+    if file_sha(path) != entry.transfer_receipt_sha256:
+        _refuse(key, f"its transfer receipt {path} differs from the declared digest")
+    try:
+        return TransferReceipt.model_validate_json(path.read_text())
+    except ValueError as exc:
+        _refuse(key, f"its transfer receipt is not one ({exc})")
 
 
 def calibration_pins(directory: Path) -> dict[str, CalibrationPin]:

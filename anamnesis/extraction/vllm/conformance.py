@@ -1,30 +1,33 @@
-"""Install conformance: does this host compute what the lane's fixtures record?
+"""The install check: is this host a lane, and is it the qualified one?
 
-Each model's fixtures and tolerance come from one comparison of the vLLM lane
-with the numeric anchor (the hook path), per engine release: the fixture vectors
-are what the lane produced on a set of rows, and the tolerance is the largest
-deviation from them that comparison found harmless. Install conformance asks a
-smaller question that needs neither the anchor nor a second model: does *this*
-install reproduce those vectors, and if not exactly, does it stay inside that
-tolerance?
-
-The decision has three outcomes:
+A lane is self-consistency plus provenance: the same tokens give the same
+signature every time, under one declared model, engine, arithmetic and host.
+Each model ships fixtures (the vectors its qualified lane produced on a set of
+rows) and a tolerance (the spread its qualification measured between that lane
+and the numeric anchor). The install check captures the fixture rows on this
+host and decides one of three tiers:
 
 * **identical** — every fixture vector is byte-identical. The host runs the
-  fixtures' lane itself and keeps its lane id.
-* **conformant** — the vectors differ, but every row stays within its
-  component's recorded row-distance ceiling, every continuous coordinate within
-  its family's recorded maximum, and the ordinary (unselected) fixture rows'
-  median ratio within the recorded p90 and each of them within the recorded
-  p99. The median and tail gates refuse a host that sits near the ceiling on
-  many rows even though no single row crosses it. The host is its own lane, with
-  its own id: fully usable, and never row-joined with another lane's data.
-* **refused** — a checkpoint mismatch, a lane that disagrees with itself
-  across repeats or batching, or a deviation outside the tolerance.
+  qualified lane itself and keeps its lane id.
+* **own-lane** — the vectors differ, but the host agrees with itself (every
+  fixture row byte-identical across two single passes and a batched pass),
+  every feature is finite, and per component the median fixture ratio is at or
+  below the ratio the qualification recorded as its maximum. The host is a lane
+  of its own, with its own id: fully usable, and never row-joined with another
+  lane's data.
+* **refused** — a checkpoint mismatch, a lane that disagrees with itself across
+  repeats or batching, a non-finite feature, or a component whose median ratio
+  exceeds that maximum: a host that is not a lane, or is obviously broken.
+
+The per-row ceilings, the ordinary rows' median and p99 readings and the family
+maxima are reported in the receipt (:attr:`ConformanceReceipt.readings`) as how
+far this host sits from the qualified lane; none of them gates. Whether two
+lanes agree is an audit run when a claim needs it
+(:mod:`anamnesis.extraction.vllm.transfer`), not a condition of using either.
 
 This module is the decision alone. It takes vectors already captured and
 never touches an engine, so every rule here is testable without a GPU. The
-tolerance it applies is the shipped one; nothing here fits or chooses a number.
+tolerance it reads is the shipped one; nothing here fits or chooses a number.
 """
 
 from __future__ import annotations
@@ -41,9 +44,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 FIXTURE_CONTRACT = "conformance-fixtures/1"
 TOLERANCE_CONTRACT = "conformance-tolerance/2"
-RECEIPT_CONTRACT = "conformance-receipt/1"
+RECEIPT_CONTRACT = "conformance-receipt/2"
 
-Tier = Literal["identical", "conformant", "refused"]
+Tier = Literal["identical", "own-lane", "refused"]
 
 
 def _digest(payload: object) -> str:
@@ -161,18 +164,22 @@ class RowComponent(BaseModel):
 
     name: str = Field(min_length=1)
     feature_names: tuple[str, ...] = Field(min_length=1)
-    max_ratio: float = Field(gt=0, description="Gating: the recorded max of d/floor_b")
-    p90_ratio: float = Field(gt=0, description="Gates the ordinary stratum's median ratio")
+    max_ratio: float = Field(gt=0, description="The recorded max of d/floor_b; a host's "
+                                               "median ratio over the fixtures stays at or "
+                                               "below it")
+    p90_ratio: float = Field(gt=0, description="The recorded p90 of d/floor_b; reported "
+                                               "against the ordinary stratum's median")
     p99_ratio: float | None = Field(
         default=None, gt=0,
-        description="Tail gate: every ordinary-stratum row's ratio stays at or below it")
+        description="The recorded p99 of d/floor_b; ordinary-stratum rows over it are "
+                    "reported")
     source: str = Field(min_length=1, description="A provenance label for where the ratios "
                                                   "were read; not a path this package opens")
 
 
 class Tolerance(BaseModel):
-    """The largest deviations from the fixtures the anchor comparison found harmless,
-    per row component and per feature family.
+    """The deviations between the qualified lane and the numeric anchor that the
+    qualification measured, per row component and per feature family.
 
     Contract 2: every path floor behind the ratios is the anchor's full-vs-incremental
     disagreement under the lane's arithmetic (the cuBLAS workspace pin and
@@ -194,12 +201,12 @@ class Tolerance(BaseModel):
     median_gate_stratum: str | None = Field(
         default=None,
         description="Fixture rows selected by this rule sample the population without "
-                    "selection bias; the host's median ratio over them, per component, must "
-                    "stay at or below that component's recorded p90")
+                    "selection bias; the receipt reports the host's median ratio over them "
+                    "against each component's recorded p90")
     excluded_rows: tuple[int, ...] = Field(
         default=(), description="Rows whose reference floor is too fragile to divide by, "
                                 "left out when the ceilings and family maxima were computed; "
-                                "decide still gates every fixture row, these included")
+                                "the install check still captures and scores them")
     sources: dict[str, str] = Field(description="Provenance labels of every record read, "
                                                 "each with its sha256; not paths this package "
                                                 "opens")
@@ -219,7 +226,7 @@ class Tolerance(BaseModel):
 
 
 class HostFingerprint(BaseModel):
-    """What makes two installs the same host for conformance purposes."""
+    """What makes two installs the same host for the install check."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -259,24 +266,36 @@ class RowResult(BaseModel):
     generation_id: int
     byte_identical: bool
     component_ratios: dict[str, float]
-    components_within: bool
+    components_within: bool = Field(description="Every component's ratio at or below its "
+                                                "recorded max")
     worst_family: str | None
-    worst_family_excess: float = Field(description="max |δ|/σ over the family max; ≤ 1 passes")
+    worst_family_excess: float = Field(description="max |δ|/σ over the family max")
     discrete_crossings: int
 
 
 class ConformanceReceipt(BaseModel):
-    """The check's verdict, cached against the host fingerprint."""
+    """The check's tier, cached against the host fingerprint.
+
+    ``reasons`` say why a host is refused; ``readings`` report, for a host whose
+    vectors differ, where it sits against every recorded ceiling, and gate nothing.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    contract: Literal["conformance-receipt/1"] = RECEIPT_CONTRACT
+    contract: Literal["conformance-receipt/2"] = RECEIPT_CONTRACT
     tier: Tier
     lane_id: str | None
     qualified_lane_id: str
     reasons: tuple[str, ...]
     fingerprint: HostFingerprint
     rows: tuple[RowResult, ...]
+    component_medians: dict[str, float] = Field(
+        default_factory=dict, description="Per component, the median ratio over every "
+                                          "fixture row")
+    readings: tuple[str, ...] = Field(
+        default=(), description="Rows and families past a recorded ceiling, and the "
+                                "ordinary stratum's median and tail readings; reported, "
+                                "not gated")
     family_report: dict[str, float] = Field(
         description="Per family, the worst |δ|/σ seen on this host over the family max")
 
@@ -285,8 +304,8 @@ class ConformanceReceipt(BaseModel):
         return _digest(self.model_dump(mode="json"))
 
 
-def conformant_lane_id(qualified_lane_id: str, fingerprint: HostFingerprint) -> str:
-    """A within-tolerance host's own lane: the fixtures' lane id plus the host's."""
+def own_lane_id(qualified_lane_id: str, fingerprint: HostFingerprint) -> str:
+    """A host's own lane: the fixtures' lane id plus the host's."""
     return f"{qualified_lane_id}+host-{fingerprint.digest[:16]}"
 
 
@@ -379,13 +398,13 @@ def tolerance_reasons(
     *,
     exclude: Collection[int] = (),
 ) -> list[str]:
-    """Every way scored ``rows`` fall outside ``tolerance``; empty when none does.
+    """Every way scored ``rows`` sit past a ceiling of ``tolerance``; empty when none does.
 
-    Each row not in ``exclude`` must keep every component within its ceiling and
-    every family within its maximum. When the tolerance names a median-gate stratum,
-    the rows ``selected_by`` that stratum (``exclude`` left out) must keep each
-    component's median ratio at or below its p90 and, where a p99 is recorded, every
-    one of their ratios at or below it.
+    Each row not in ``exclude`` past a component's ceiling or a family's maximum is
+    named. When the tolerance names a median-gate stratum, the rows ``selected_by``
+    that stratum (``exclude`` left out) are named where a component's median ratio
+    exceeds its p90 and, where a p99 is recorded, where a ratio exceeds it. The
+    install check reports these; the transfer audit reads the median.
     """
     skip = set(exclude)
     kept = [r for r in rows if r.generation_id not in skip]
@@ -426,11 +445,14 @@ def decide(
     fingerprint: HostFingerprint,
     captured: Sequence[CapturedFixture],
 ) -> ConformanceReceipt:
-    """Apply the conformance procedure to vectors this host captured.
+    """Decide this host's tier from vectors it captured.
 
     The checkpoint must be the fixtures', the lane must agree with itself
-    (repeat and batched captures byte-identical to the first), and then the
-    deviation from the fixtures decides the tier. Every refusal names why.
+    (repeat and batched captures byte-identical to the first), and every feature
+    must be finite. Then byte-identical vectors are ``identical``; otherwise a
+    component whose median ratio over the fixture rows exceeds its recorded max
+    refuses, and the host is ``own-lane``. Every refusal names why; every other
+    ceiling is reported in ``readings``.
     """
     if tolerance.model != fixtures.model:
         raise ValueError("tolerance and fixtures belong to different models")
@@ -452,6 +474,10 @@ def decide(
         elif c.repeat.tobytes() != c.first.tobytes() or c.batched.tobytes() != c.first.tobytes():
             reasons.append(f"row {c.generation_id}: lane disagrees with itself "
                            "(repeat or batched capture differs)")
+        elif not np.isfinite(c.first).all():
+            reasons.append(f"row {c.generation_id}: "
+                           f"{int(np.count_nonzero(~np.isfinite(c.first)))} features are "
+                           "not finite")
     qualified = fixtures.lane_id
     if reasons:
         return ConformanceReceipt(tier="refused", lane_id=None, qualified_lane_id=qualified,
@@ -462,21 +488,29 @@ def decide(
         names, fixtures.sigma_cal, fixtures.weights,
         {r.generation_id: r.floor_b for r in fixtures.rows}, fixtures.vectors,
         {gid: by_gid[gid].first for gid in fixtures.vectors}, tolerance)
+    medians = {c.name: float(np.median([r.component_ratios[c.name] for r in rows]))
+               for c in tolerance.components}
     if all(r.byte_identical for r in rows):
-        tier: Tier = "identical"
-        lane_id: str | None = qualified
-    else:
-        reasons = tolerance_reasons(rows, tolerance,
-                                    {r.generation_id: r.selected_by for r in fixtures.rows})
-        tier = "refused" if reasons else "conformant"
-        lane_id = None if reasons else conformant_lane_id(qualified, fingerprint)
-    return ConformanceReceipt(tier=tier, lane_id=lane_id, qualified_lane_id=qualified,
-                              reasons=tuple(reasons), fingerprint=fingerprint,
-                              rows=tuple(rows), family_report=family_report)
+        return ConformanceReceipt(tier="identical", lane_id=qualified,
+                                  qualified_lane_id=qualified, reasons=(),
+                                  fingerprint=fingerprint, rows=tuple(rows),
+                                  component_medians=medians, family_report=family_report)
+    reasons = [f"{c.name}: median ratio {medians[c.name]:.3g} over the fixture rows exceeds "
+               f"the recorded max {c.max_ratio:.3g}"
+               for c in tolerance.components if medians[c.name] > c.max_ratio]
+    readings = tolerance_reasons(rows, tolerance,
+                                 {r.generation_id: r.selected_by for r in fixtures.rows})
+    return ConformanceReceipt(
+        tier="refused" if reasons else "own-lane",
+        lane_id=None if reasons else own_lane_id(qualified, fingerprint),
+        qualified_lane_id=qualified, reasons=tuple(reasons), fingerprint=fingerprint,
+        rows=tuple(rows), component_medians=medians, readings=tuple(readings),
+        family_report=family_report)
 
 
 class ReceiptCache:
-    """Receipts on disk, one per host fingerprint, reused only on exact equality."""
+    """Receipts on disk, one per host fingerprint, reused only on exact equality and
+    only under this receipt contract; a receipt of another contract is decided again."""
 
     def __init__(self, directory: Path) -> None:
         self.directory = Path(directory)
@@ -487,6 +521,11 @@ class ReceiptCache:
     def load(self, fingerprint: HostFingerprint) -> ConformanceReceipt | None:
         path = self._path(fingerprint)
         if not path.is_file():
+            return None
+        try:
+            if json.loads(path.read_text()).get("contract") != RECEIPT_CONTRACT:
+                return None
+        except (json.JSONDecodeError, AttributeError):
             return None
         receipt = ConformanceReceipt.model_validate_json(path.read_text())
         if receipt.fingerprint != fingerprint:

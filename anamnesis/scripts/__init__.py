@@ -42,9 +42,11 @@ reviewer reads for.
 **The vLLM lane, and checking a host for it.**
 
 * `qualify_vllm.py` — check this host's vLLM install against the shipped fixtures and
-  cache the tier it earns: identical, conformant or refused.
+  cache the tier it earns: identical, own-lane or refused.
 * `run_vllm_replay.py` — replay a banked run through the vLLM lane on a host whose check
   did not refuse it.
+* `transfer_vllm.py` — audit how far a fine-tune's vLLM lane sits from its fast lane,
+  read against its base's measured regime, and declare it as an extension lane.
 
 **Judging: the behavioural channel.**
 

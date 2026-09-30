@@ -112,6 +112,23 @@ What the split buys:
   worker produced it, and in what order, cannot reach the output. That is what makes
   `anamnesis/orchestration/` a cost decision rather than a scientific one.
 
+## What a lane is
+
+A lane is self-consistency plus provenance: under one declared model, engine,
+arithmetic and host, the same tokens give the same signature every time. The tokens and
+the signatures together are the record, and every contrast, null and experiment happens
+inside one lane. No engine *is* the model; a model is its weights plus a choice of
+arithmetic, and two lanes of one model agree to within measurable noise, not to the last
+digit. The hook path is the reference lane by convention, because it is simple and
+inspectable and the banks were made in it, not because it is ground truth.
+
+Whether two lanes agree is measured when a claim needs it: before a finding is said to
+hold beyond one lane, when two deployments are compared, and when conclusions from two
+lanes are joined at the effect level. Population-level effects are what such an audit
+finds to carry across arithmetic; row-level, token-level and threshold or count features
+are what it finds to move. `anamnesis/analysis/lane_guard.py` keeps lanes apart so that
+many of them are safe: rows from two lanes never meet inside one contrast.
+
 ## The fast lane, and `lane_id`
 
 `anamnesis/extraction/fast/` emits the anchor's named vector without materialising raw
@@ -145,7 +162,8 @@ first. Untagged historical banks stay readable and cannot be mixed with tagged o
 Whether a given machine's lane agrees with the anchor is a property of the machine, not of
 the code: floating-point reduction order differs across BLAS builds and thread counts.
 `anamnesis/extraction/equivalence/` holds the evidence checks and
-`anamnesis/scripts/qualify_box.py` is how an operator qualifies their own box.
+`anamnesis/scripts/qualify_box.py` is how an operator measures their own box; what that
+agreement means is in "What a lane is" above.
 
 ## The vLLM lane
 
@@ -157,16 +175,20 @@ exists for three models (`3b`, `8b`, `70b`), on one GPU, inside the envelope
 `anamnesis/extraction/vllm/envelope.py` declares, with the engine, torch and Triton
 pinned; everything else is refused by name before an engine is built.
 
-Its identity works differently from the fast lane's, because a vLLM lane is checked
-against its own recorded output rather than against the anchor. Each model's fixtures are
-what its lane produced on a set of rows when it was compared with the numeric anchor, and
-they ship with the package beside the tolerance that comparison found harmless.
-`qualify_vllm` checks a host against those fixtures and caches a receipt: a host that
-reproduces every fixture vector byte for byte carries the lane's recorded id; a host within
-the tolerance is a lane of its own, with an id derived from its fingerprint; anything else
-is refused. `run_vllm_replay` banks only on a host with a receipt that did not refuse it,
-and stamps each row with that lane id, so `lane_guard` keeps vLLM rows, fast-lane rows and
-two hosts' conformant rows apart. `docs/VLLM_LANE.md` is the operator's guide.
+Its identity works differently from the fast lane's, because a host is checked against the
+lane's own recorded output rather than against the anchor. Each model's fixtures are what
+its qualified lane produced on a set of rows, and they ship with the package beside the
+tolerance: the spread its qualification measured between that lane and the numeric anchor.
+`qualify_vllm` captures the fixtures on a host and caches a receipt with one of three
+tiers: **identical**, every fixture vector byte for byte, and the host carries the
+qualified lane's id; **own-lane**, a host that repeats itself byte for byte across single
+and batched passes, with finite features and a median deviation no larger than the largest
+the qualification recorded, which is a lane of its own with an id derived from its
+fingerprint; and **refused**, a host that does not repeat itself or is plainly broken.
+The receipt reports every other ceiling without gating on it. `run_vllm_replay` banks only
+on a host with a receipt that did not refuse it, and stamps each row with that lane id, so
+`lane_guard` keeps vLLM rows, fast-lane rows and two hosts' own lanes apart.
+`docs/VLLM_LANE.md` is the operator's guide.
 
 ## What runs on which model
 

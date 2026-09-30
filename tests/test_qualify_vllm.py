@@ -2,7 +2,7 @@
 
 The command is one call into :func:`anamnesis.extraction.vllm.runtime.check_install`
 and a report of the receipt. Its exit status is the contract a script around it
-reads — 0 identical or conformant, 1 refused, 2 the check could not run — so each
+reads — 0 identical or own-lane, 1 refused, 2 the check could not run — so each
 is pinned here with the check replaced by a stand-in that returns a receipt or
 raises.
 
@@ -65,9 +65,9 @@ def test_an_identical_host_exits_zero_and_names_the_qualified_lane(tmp_path, mon
     assert kwargs == {"refresh": False}
 
 
-def test_a_conformant_host_exits_zero_and_reports_its_worst_family(tmp_path, monkeypatch,
+def test_an_own_lane_host_exits_zero_and_reports_its_worst_family(tmp_path, monkeypatch,
                                                                    capsys):
-    _stand_in(monkeypatch, _receipt("conformant", lane="lane-8b+host-1",
+    _stand_in(monkeypatch, _receipt("own-lane", lane="lane-8b+host-1",
                                     family_report={"flow": 0.4, "residual": 0.7}))
     assert qualify_vllm.main(_argv(tmp_path)) == 0
     out = capsys.readouterr().out

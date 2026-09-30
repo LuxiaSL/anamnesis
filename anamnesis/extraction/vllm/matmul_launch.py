@@ -9,7 +9,7 @@ kernel itself stay the engine's.
 
 Only the capture process installs this launcher, before engine profiling. Its
 policy is recorded in the capture and hashed into the host's receipt; the full
-fixture check still decides repeatability, batch invariance and conformance.
+fixture check still decides repeatability, batch invariance and the host's tier.
 The upstream launch this adapter wraps is pinned with the engine:
 https://github.com/vllm-project/vllm/blob/v0.16.0/vllm/model_executor/layers/batch_invariant.py
 """

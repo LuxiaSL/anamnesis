@@ -1,15 +1,16 @@
-"""The install check's decision: identical, conformant or refused.
+"""The install check's decision: identical, own-lane or refused.
 
 :func:`anamnesis.extraction.vllm.conformance.decide` takes vectors a host has
 already captured and never touches an engine, so every rule it applies is
 exercised here on hand-built fixtures of five coordinates: the checkpoint
-match, the lane's agreement with itself, the per-row ceilings, the family
-maxima, the discrete coordinates that are reported and never gate, the median
-gate over the ordinary stratum and the tail gate beside it. The fixture set's
-round trip, its digest and the receipt cache are here too.
+match, the lane's agreement with itself, finiteness, and the median ratio per
+component against its recorded max, which decide; and the per-row ceilings, the
+family maxima, the discrete coordinates, and the ordinary stratum's median and
+tail readings, which are reported and never decide. The fixture set's round
+trip, its digest and the receipt cache are here too.
 
-What needs a device is the vectors themselves: whether a real host's captures
-land inside a real tolerance is the install check run on that host.
+What needs a device is the vectors themselves: which tier a real host earns is
+the install check run on that host.
 """
 
 from __future__ import annotations
@@ -25,8 +26,8 @@ from anamnesis.extraction.vllm.conformance import (
     ReceiptCache,
     RowComponent,
     Tolerance,
-    conformant_lane_id,
     decide,
+    own_lane_id,
 )
 
 NAMES = ("sub_a", "sub_b", "att_a", "att_b", "att_cov")
@@ -92,46 +93,67 @@ def test_byte_identical_vectors_keep_the_qualified_lane():
     assert all(r.byte_identical for r in receipt.rows)
 
 
-def test_small_deviation_is_its_own_conformant_lane():
+def test_small_deviation_is_its_own_lane():
     f, t = _fixtures(), _tolerance()
     fp = _fingerprint(f, t)
     shift = np.asarray([0.1, 0, 0.2, 0, 0], dtype=np.float32)
     receipt = decide(f, t, fp, _captures(f, shift))
-    assert receipt.tier == "conformant"
-    assert receipt.lane_id == conformant_lane_id("lane-8b", fp)
+    assert receipt.tier == "own-lane" and not receipt.reasons and not receipt.readings
+    assert receipt.lane_id == own_lane_id("lane-8b", fp)
     assert receipt.lane_id != "lane-8b" and receipt.lane_id.startswith("lane-8b+host-")
     assert receipt.rows[0].component_ratios["attention"] == pytest.approx(0.2, rel=1e-5)
+    assert receipt.component_medians["attention"] == pytest.approx(0.2, rel=1e-5)
 
 
-def test_a_conformant_lane_id_is_the_hosts_own():
+def test_an_own_lane_id_is_the_hosts_own():
     f, t = _fixtures(), _tolerance()
     fp = _fingerprint(f, t)
     other = fp.model_copy(update={"gpu_uuid": "GPU-2"})
-    assert conformant_lane_id("lane-8b", fp) != conformant_lane_id("lane-8b", other)
+    assert own_lane_id("lane-8b", fp) != own_lane_id("lane-8b", other)
 
 
-def test_a_row_past_its_recorded_ceiling_is_refused():
+def test_a_median_ratio_past_the_recorded_max_is_refused():
     f, t = _fixtures(), _tolerance(family_max=10)
-    shift = np.asarray([0.7, 0.7, 0, 0, 0], dtype=np.float32)
+    shift = np.asarray([0, 0, 0.9, 0, 0], dtype=np.float32)
     receipt = decide(f, t, _fingerprint(f, t), _captures(f, shift))
     assert receipt.tier == "refused" and receipt.lane_id is None
-    assert any("ceiling" in r for r in receipt.reasons)
+    assert list(receipt.reasons) == ["attention: median ratio 0.9 over the fixture rows "
+                                     "exceeds the recorded max 0.8"]
+    assert len(receipt.rows) == 2
 
 
-def test_a_coordinate_past_its_family_maximum_is_refused():
+def test_a_row_past_its_ceiling_is_reported_not_refused():
+    f, t = _fixtures(), _tolerance(family_max=10)
+    shift = np.asarray([0.7, 0.7, 0, 0, 0], dtype=np.float32)
+    receipt = decide(f, t, _fingerprint(f, t), _one_row_shifted(f, 5, shift))
+    assert receipt.tier == "own-lane" and not receipt.reasons
+    assert not receipt.rows[1].components_within
+    assert any(r.startswith("row 5:") and "ceiling" in r for r in receipt.readings)
+
+
+def test_a_coordinate_past_its_family_maximum_is_reported_not_refused():
     f, t = _fixtures(), _tolerance(family_max=0.05)
     shift = np.asarray([0, 0, 0.1, 0, 0], dtype=np.float32)
     receipt = decide(f, t, _fingerprint(f, t), _captures(f, shift))
-    assert receipt.tier == "refused"
+    assert receipt.tier == "own-lane"
     assert receipt.family_report["flow"] == pytest.approx(2.0, rel=1e-4)
+    assert any("family flow" in r for r in receipt.readings)
 
 
 def test_discrete_crossings_are_reported_never_gating():
     f, t = _fixtures(), _tolerance()
     shift = np.asarray([0, 0, 0, 0, 1.0], dtype=np.float32)
     receipt = decide(f, t, _fingerprint(f, t), _captures(f, shift))
-    assert receipt.tier == "conformant"
+    assert receipt.tier == "own-lane"
     assert all(r.discrete_crossings == 1 for r in receipt.rows)
+
+
+def test_a_non_finite_feature_is_refused():
+    f, t = _fixtures(), _tolerance()
+    shift = np.asarray([0, 0, 0, np.nan, 0], dtype=np.float32)
+    receipt = decide(f, t, _fingerprint(f, t), _one_row_shifted(f, 0, shift))
+    assert receipt.tier == "refused"
+    assert list(receipt.reasons) == ["row 0: 1 features are not finite"]
 
 
 def test_a_lane_that_disagrees_with_itself_is_refused():
@@ -245,58 +267,43 @@ def test_receipts_are_reused_only_for_the_same_fingerprint(tmp_path):
     assert cache.load(fp.model_copy(update={"engine_settings_sha256": "f" * 64})) is None
 
 
-def test_a_host_at_the_worst_ratio_everywhere_fails_the_median_gate():
+def test_a_receipt_of_another_contract_is_decided_again(tmp_path):
+    f, t = _fixtures(), _tolerance()
+    fp = _fingerprint(f, t)
+    cache = ReceiptCache(tmp_path)
+    path = cache.store(decide(f, t, fp, _captures(f)))
+    stored = path.read_text()
+    path.write_text(stored.replace('"conformance-receipt/2"', '"conformance-receipt/1"'))
+    assert cache.load(fp) is None
+    path.write_text("not json")
+    assert cache.load(fp) is None
+
+
+def test_the_ordinary_median_past_its_p90_is_a_reading():
     f = _fixtures()
     t = _tolerance(max_ratio=0.8, median_stratum="test", p90=0.3)
     shift = np.asarray([0, 0, 0.7, 0, 0], dtype=np.float32)
     receipt = decide(f, t, _fingerprint(f, t), _captures(f, shift))
-    assert receipt.tier == "refused"
-    assert any("median ratio" in r for r in receipt.reasons)
+    assert receipt.tier == "own-lane" and not receipt.reasons
+    assert any("median ratio" in r and "p90" in r for r in receipt.readings)
     assert all(r.components_within for r in receipt.rows)
 
 
-def test_the_median_gate_passes_a_typical_host():
-    f = _fixtures()
-    t = _tolerance(max_ratio=0.8, median_stratum="test", p90=0.3)
-    shift = np.asarray([0, 0, 0.2, 0, 0], dtype=np.float32)
-    assert decide(f, t, _fingerprint(f, t), _captures(f, shift)).tier == "conformant"
-
-
-def test_a_median_gate_whose_stratum_no_row_carries_is_refused():
+def test_a_median_stratum_no_row_carries_is_a_reading():
     f = _fixtures()
     t = _tolerance(median_stratum="absent")
     shift = np.asarray([0, 0, 0.1, 0, 0], dtype=np.float32)
     receipt = decide(f, t, _fingerprint(f, t), _captures(f, shift))
-    assert receipt.tier == "refused"
-    assert any("stratum" in r for r in receipt.reasons)
+    assert receipt.tier == "own-lane"
+    assert any("stratum" in r for r in receipt.readings)
 
 
-def test_the_tail_gate_refuses_one_ordinary_row_past_the_p99_with_a_clean_median():
-    f = _fixtures()
-    t = _tolerance(family_max=1.0, max_ratio=0.8, median_stratum="test", p90=0.35, p99=0.5)
-    shift = np.asarray([0, 0, 0.6, 0, 0], dtype=np.float32)
-    receipt = decide(f, t, _fingerprint(f, t), _one_row_shifted(f, 5, shift))
-    assert receipt.tier == "refused"
-    assert all(r.components_within for r in receipt.rows)
-    assert not any("median ratio" in r for r in receipt.reasons)
-    assert list(receipt.reasons) == [r for r in receipt.reasons if "p99" in r]
-    assert any(r.startswith("row 5: attention ratio") and "p99" in r for r in receipt.reasons)
-
-
-def test_a_tolerance_without_a_p99_has_no_tail_gate():
-    f = _fixtures()
-    t = _tolerance(family_max=1.0, max_ratio=0.8, median_stratum="test", p90=0.35)
-    shift = np.asarray([0, 0, 0.6, 0, 0], dtype=np.float32)
-    assert decide(f, t, _fingerprint(f, t), _one_row_shifted(f, 5, shift)).tier == "conformant"
-
-
-def test_the_tail_gate_reads_only_the_ordinary_stratum():
-    """A row selected for being unusual may sit past the p99; the gate is about the
-    ordinary rows, and the ceilings still bound the selected one."""
+def test_an_ordinary_row_past_the_p99_is_a_reading():
     f = _fixtures(selected_by=("test", "tail"))
     t = _tolerance(family_max=1.0, max_ratio=0.8, median_stratum="test", p90=0.35, p99=0.5)
     shift = np.asarray([0, 0, 0.6, 0, 0], dtype=np.float32)
-    assert decide(f, t, _fingerprint(f, t), _one_row_shifted(f, 5, shift)).tier == "conformant"
+    receipt = decide(f, t, _fingerprint(f, t), _one_row_shifted(f, 5, shift))
+    assert receipt.tier == "own-lane" and not receipt.readings
     receipt = decide(f, t, _fingerprint(f, t), _one_row_shifted(f, 0, shift))
-    assert receipt.tier == "refused"
-    assert any(r.startswith("row 0:") and "p99" in r for r in receipt.reasons)
+    assert receipt.tier == "own-lane"
+    assert any(r.startswith("row 0: attention ratio") and "p99" in r for r in receipt.readings)

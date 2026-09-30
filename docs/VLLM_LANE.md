@@ -6,6 +6,11 @@ exists for models whose replay is too large or too slow to run through Hugging F
 transformers on the hardware at hand, and it is a separate lane: its rows are never
 combined with fast-lane rows inside one contrast.
 
+A lane is self-consistency plus provenance (`docs/ARCHITECTURE.md`, "What a lane is"): the
+same tokens give the same signature every time, under one declared model, engine, arithmetic
+and host. Every host that runs this lane repeats itself byte for byte; whether it also
+reproduces the qualified lane, or is a lane of its own, is what the install check decides.
+
 ## What it covers, and what it refuses
 
 | | |
@@ -38,21 +43,15 @@ The lane reads the first GPU the process can see, and a receipt names that card.
 with several, `CUDA_VISIBLE_DEVICES` chooses one, and a different card is checked again.
 
 Global memory capacity is not the only hardware limit. The pinned engine's float16
-batch-invariant matrix multiply requests 104 KiB of shared memory per thread block
-with its three-stage pipeline, above the 99 KiB available on
-[Ada GPUs](https://docs.nvidia.com/cuda/ada-tuning-guide/index.html).
-`anamnesis/extraction/vllm/matmul_launch.py` caps float16 staging at two on devices
-below 104 KiB, or one below 56 KiB. It retains the engine's kernel, tiles, reduction
-order and dtype; other dtypes and devices fitting the stock launch keep their launch
-settings. This limit concerns on-chip scratch space, not the space holding the weights
-or KV cache, and occurs before the instrumented attention's statistics are collected.
-
-The cap is fixed for the device, independent of requests and batching. The capture
+batch-invariant matrix multiply requests 104 KiB of shared memory per thread block with its
+three-stage pipeline, and some devices offer less.
+`anamnesis/extraction/vllm/matmul_launch.py` caps float16 staging at two on devices below
+104 KiB, or one below 56 KiB, chosen from the device's capacity alone and independent of
+requests and batching. It retains the engine's kernel, tiles, reduction order and dtype;
+other dtypes and devices fitting the stock launch keep their launch settings. The capture
 record carries `matmul_policy`, and the host fingerprint hashes it along with the lane's
-source. A smaller launch still has to pass the full fixture check, including byte-identical
-repeated and batched captures; fitting in memory does not establish conformance. GPUs
-with other architectures or less global memory still have to satisfy the lane's full
-envelope and its install check.
+source, so a host with a smaller launch is checked like any other and lands in whichever
+tier its captures earn.
 
 The lane reduces every row with the calibration its fixtures were reduced with, not one
 fitted on the host, so banks from any host running the lane share one calibration. It is
@@ -66,8 +65,8 @@ anchor, the hook path (`anamnesis/extraction/state_extractor.py`), on the same p
 per engine release. The **fixture vectors** are what the lane produced on 44 rows of that
 comparison, chosen for where a host is likeliest to move: the largest attention shifts,
 coverage shifts and gate-sparsity displacements, the largest spectral deviations, and 16
-rows evenly spaced over the rest. The **tolerance** is the largest deviation from the anchor
-that comparison measured while the lane's effects were retained. Its row ceilings are
+rows evenly spaced over the rest. The **tolerance** is the spread between the lane and the
+anchor that comparison measured while the lane's effects were retained. Its row ceilings are
 ratios of a row's **distance** (its standardized L2 difference over one component of the
 vector: the **covered substrate**, which is every coordinate outside the attention
 families, or the **attention** families) to the row's **path floor** (how far the anchor's
@@ -90,40 +89,43 @@ python -m anamnesis.scripts.qualify_vllm --model 8b \
 ```
 
 It captures 44 fixture rows shipped with the package, twice one at a time and once in
-batches of eight, reduces them, and compares them with the vectors the lane produced when
-it was measured against the numeric anchor. The calibration those vectors were reduced with
-is fetched on first use and verified against its pinned digests; `--calib-dir` names a local
-copy instead.
+batches of eight, reduces them, and compares them with the qualified lane's vectors. The
+calibration those vectors were reduced with is fetched on first use and verified against its
+pinned digests; `--calib-dir` names a local copy instead.
 
 The work directory holds the raw captures of the three passes until each is reduced: about
-44 GB per pass for the 70B model, far less for the smaller ones. On one B200 the 70B check takes
-about 35 minutes, most of it the three capture passes and a first read of the checkpoint to
-digest it; a replay then runs at about 20 seconds a row, engine start included.
+44 GB per pass for the 70B model, far less for the smaller ones.
 
-The check ends in one of three tiers:
+Different hardware gives different numbers, and that is expected rather than wrong. The check
+ends in one of three tiers:
 
-- **identical** — every vector byte-identical to the fixtures. The host runs the lane
-  itself, and its outputs carry the lane's recorded id.
-- **conformant** — the vectors differ, but stay inside the perturbation the lane's
-  measurement against the anchor showed harmless: each row's distance within its recorded
-  ceiling, each continuous coordinate within its family's recorded maximum, and the
-  unselected rows' median and tail within the recorded 90th and 99th percentiles. The host
-  is a lane of its own, with an id derived from its fingerprint, and fully usable. A GPU
-  model other than the one the fixtures were produced on is expected to land here, because
-  floating-point reductions differ across hardware.
+- **identical** — every vector byte-identical to the fixtures. The host runs the qualified
+  lane itself, and its outputs carry that lane's id.
+- **own-lane** — the vectors differ, and the host is a lane of its own: every fixture row
+  byte-identical across its two single passes and its batched pass, every feature finite,
+  and per component (covered substrate, attention) the median of the rows' ratios at or below
+  the maximum ratio the qualification recorded. The host's lane id is derived from its
+  fingerprint, and it is fully usable.
 - **refused** — a different checkpoint, a host whose repeated or batched captures disagree,
-  or a deviation outside the tolerance. The reasons are printed.
+  a non-finite feature, or a component whose median ratio exceeds that maximum: not a lane,
+  or plainly broken. The reasons are printed.
+
+The median bound is coarse on purpose. It catches a host computing something else (the 3B
+model run in bfloat16 against its float16 fixtures sits at a substrate median of 3.55 against
+a recorded maximum of 2.87) and leaves arithmetic differences to the lane identity. Every
+other ceiling is **reported, not gated**: each row's distance against its recorded ceiling,
+each family's largest |δ|/σ_cal against its recorded maximum, the discrete crossings, and the
+evenly spaced rows' median and tail against the recorded 90th and 99th percentiles. They say
+how far this lane sits from the qualified one.
 
 The receipt is cached under the output root, keyed by the host's fingerprint (GPU, driver,
 CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures, tolerance, engine
-settings and the lane's source), and reused only while every field is equal. Change any of them and the check runs
-again; `--refresh` runs it regardless.
+settings and the lane's source), and reused only while every field is equal. Change any of them
+and the check runs again; `--refresh` runs it regardless. A receipt of another contract is
+decided again, never reinterpreted.
 
-Exit status 0 means identical or conformant, 1 refused, 2 that the check could not run (a
-missing engine, checkpoint or calibration, with the reason). A refusal lists what differed:
-a host whose repeated or batched captures disagree is not deterministic in this
-configuration, and a deviation outside the tolerance means this hardware and software do
-not compute what the lane computes closely enough to share its results.
+Exit status 0 means identical or own-lane, 1 refused, 2 that the check could not run (a
+missing engine, checkpoint or calibration, with the reason).
 
 ## Banking signatures
 
@@ -148,76 +150,73 @@ Every row carries `lane_id`, the id its host's receipt assigned, and an `extract
 record naming the tier, the receipt digest, the calibration and the feature schema.
 `anamnesis/analysis/lane_guard.py` refuses to combine rows of different lanes inside one
 contrast, so a bank from an `identical` host joins other `identical` banks of the same model,
-and a `conformant` host's bank joins only banks from that host. Every reader that takes a
+and an `own-lane` host's bank joins only banks from that host. Every reader that takes a
 signature directory reads it, `run_gauntlet` among them.
 
 ## Extension lanes (fine-tunes of a qualified model)
 
 A fine-tune of `3b`, `8b` or `70b` is the same network with different weights. It can use its
-base's lane as an **extension lane** of its own, without a qualification campaign and without
-editing this package, once a transfer check has shown that the lane measures it inside the
-regime its base was qualified in. The owner of the fine-tune runs the check and keeps the
-result; this package learns no fine-tune's paths.
+base's lane as an **extension lane** of its own, without editing this package: the owner of the
+fine-tune declares it, and this package learns no fine-tune's paths.
 
-### What carries over, and what the check measures
+### What carries over
 
 Everything that depends only on the architecture carries over from the base unchanged: the
 instrumented kernel, the determinism of the dispatch, the feature schema, the capture routes, the
 dtype, the logprob handling and every engine setting in `anamnesis/extraction/vllm/envelope.py`.
 An extension may not set any of them.
 
-What the weights can change is how far the vLLM lane drifts from the fast lane on a row. The
-base's qualification showed its effects surviving the lane as a function of the size of that
-drift, and its tolerance records the drift it measured. The check measures the fine-tune's drift
-on a sample of its own rows and scores it with the **base's** tolerance, under the **base's rule
-set** (`transfer_rules.json` beside the base's tolerance):
+An extension is admitted on its identity: a registry preset that `extends` the base's, its own
+calibration pinned by digest, its checkpoint digest, and its own fixtures and tolerance carrying
+that identity. Each host that runs it then passes the install check on those fixtures, with the
+same three tiers as a base.
 
-- the distance of each row over its path floor, per component (covered substrate, attention):
-  at most two rows over the base's maximum ratio;
+### The lane-agreement audit
+
+`transfer_vllm` measures how far the fine-tune's vLLM lane sits from its fast lane on a sample of
+its own rows, and reads that against the regime its base's qualification measured between the
+same two lanes. Run it when a claim needs the two lanes to agree: before a finding about the
+fine-tune is said to hold beyond one lane, when a serving change should have left the
+computation alone, or when conclusions from the two lanes are joined at the effect level. Its
+verdict is information, recorded with the extension when the entry names it; it is not a
+condition of using the lane. The scoring (`check_transfer` in
+`anamnesis/extraction/vllm/transfer.py`) takes matched vectors from any two lanes of one schema.
+
+The audit scores the sample with the **base's** tolerance, under the **base's rule set**
+(`transfer_rules.json` beside the base's tolerance), and reads it inside the base's regime when:
+
+- per component (covered substrate, attention), at most two rows are over the base's maximum
+  ratio of distance to path floor;
 - 16 ordinary rows, evenly spaced over the sample's generation ids and chosen before anything is
-  measured: their median ratio within the base's 90th percentile, and at most one of them over
-  its 99th;
-- per feature family, a **drift gate**: over the same 16 ordinary rows, the median of each row's
-  largest |δ|/σ_cal in the family must stay within the base's 90th percentile of that statistic.
-  A single row over a family's recorded maximum is listed in the receipt, not refused;
-- a single row's extremity is **reported, never gated**, whatever its size. Every row over a
-  component's or a family's base maximum is listed in the receipt with its multiple, beside the
-  bifurcation diagnostic, which the check runs itself: it compares the vLLM lane's residual
-  stream with the numeric anchor's, token by token, over the blocks from 35% of the depth, and
-  reports the largest divergence and, at that token, the largest one-sided channel (one side's
-  largest residual channel over its usual largest, with the other side's same channel beside
-  it). At 70B the largest single-row deviations are tokens where one engine forms a massive
-  activation and the other does not, which did not affect retained effects, and no per-row bound
-  read from a couple of hundred rows told them apart from a departure without refusing most
-  in-regime fine-tunes. The accepted trade: a fine-tune with one or two badly broken rows passes,
-  with those rows listed;
-- the path floor is the fine-tune's own: how far the numeric anchor's one-forward replay and its
-  token-by-token path disagree on the row under the lane's arithmetic, over a σ_cal fitted on the
-  sample, the same definition as the base's. A row whose floor
-  exceeds the base's limit (`BASE_MAX_FLOOR` in `anamnesis/extraction/vllm/transfer.py`) is named
-  and left out of the scoring, because on a fragile reference the deviation measures the
-  reference;
-- every row is captured again one at a time and in batches of eight, and all three vectors must
-  be byte-identical.
+  measured, keep their median ratio within the base's 90th percentile, with at most one of them
+  over its 99th;
+- per feature family, over the same 16 ordinary rows, the median of each row's largest
+  |δ|/σ_cal in the family stays within the base's 90th percentile of that statistic;
+- every row repeats byte for byte, one at a time and in batches of eight.
 
-These rules differ from the install check's because the deviations differ in size. A host
-reproducing a qualified lane departs from its fixtures by far less than the qualification's own
-deviations, so any row past a recorded quantile means the host is elsewhere, and the install
-check bounds every row. A fine-tune's deviation is a full vLLM-versus-fast-lane deviation,
-distributed like the base's own when the fine-tune is in regime: then some of its 44 rows land
-over a maximum read from a couple of hundred rows by chance alone, and the base's largest rows
-are single tokens where the engines split. So the transfer check counts rows rather than
-forbidding them, gates families by their median rather than their extremes, reads its medians
-and tails only from rows chosen by id (rows chosen by how far they deviate would leave the
-calmest ones to be tested), and reports single-row extremes rather than gating them.
+A single row's extremity is **reported, never gated**. Every row over a component's or a
+family's base maximum is listed with its multiple, beside a bifurcation diagnostic the audit
+runs itself: it compares the vLLM lane's residual stream with the numeric anchor's, token by
+token, over the blocks from 35% of the depth, and reports the largest divergence and, at that
+token, the largest one-sided channel. The largest single-row deviations found so far are tokens
+where one engine forms a massive activation and the other does not.
 
-**Each base's rule set is qualified on that base's own records.** Simulated fine-tunes are drawn
-from the base's qualification rows, 300 samples of 56, and scored against ceilings read from the
-rows left out; a rule set ships only when it refuses fewer than one in ten of these in-regime
-samples. The shipped sets refuse 9.3% (3B), 9.0% (8B) and 5.0% (70B). A base without a
-qualified rule set refuses every extension, naming the base. The drift gate is strong for the attention
-families and weaker for some substrate families: the rule set and every receipt name the
-families where a 1.5× drift is caught less than 80% of the time, with the drift it does catch.
+The path floor is the fine-tune's own: how far the anchor's one-forward replay and its
+token-by-token path disagree on the row under the lane's arithmetic, over a σ_cal fitted on the
+sample. A row whose floor exceeds the base's limit (`BASE_MAX_FLOOR` in
+`anamnesis/extraction/vllm/transfer.py`) is named and left out of the scoring, because on a
+fragile reference the deviation measures the reference.
+
+The audit counts rows and reads medians where the install check reads only a median, because
+its deviation is a full vLLM-versus-fast-lane deviation, distributed like the base's own: some of
+44 in-regime rows land over a maximum read from a couple of hundred rows by chance alone.
+
+**Measured characteristics of each base's rule set.** Simulated in-regime samples, 300 of 56 rows
+drawn from the base's qualification rows and scored against ceilings read from the rows left out,
+read outside the regime 9.3% (3B), 9.0% (8B) and 5.0% (70B) of the time. The family gate is strong
+for the attention families and weaker for some substrate families; the rule set and every receipt
+name the families where a 1.5× drift is caught less than 80% of the time, with the drift it does
+catch:
 
 | base | weakly guarded families (the drift caught 80% of the time) |
 |---|---|
@@ -225,20 +224,11 @@ families where a 1.5× drift is caught less than 80% of the time, with the drift
 | 8B | attention, attn-spectral, keys, qk, values (2×); gate, output (2.5×) |
 | 70B | keys, qk, values (2×); gate, attn-spectral (2.5×); residual (3×); output (4×) |
 
-The receipt records the rows over each maximum with their multiples, how many ordinary rows
-exceeded each percentile, each family's ordinary median, and the diagnostic for every row it
-measured.
+An audit against a base without a rule set is refused, naming the base.
 
-A fine-tune inside the base's regime inherits the base's evidence that effects survive the lane,
-for the same reason a conformant host does; one outside it needs a qualification of its own.
-Which contrasts the fine-tune resolves is a question for its owner's own experiments. A pass also
-writes the fine-tune's own fixtures and tolerance, built from the sample with the same
-id-chosen ordinary rows, so each host that runs the fine-tune checks its install as it would for
-a base.
+### Running the audit
 
-### Running the check
-
-The check needs, for the fine-tune:
+It needs, for the fine-tune:
 
 1. a registry preset that `extends` the base's preset with the same architecture, dtype and
    layer plan, in a file named by `ANAMNESIS_MODELS` (see `CONTRIBUTING.md`);
@@ -254,14 +244,15 @@ python -m anamnesis.scripts.transfer_vllm --key my-finetune --extends 70b \
 ```
 
 It captures the sample through the vLLM lane first, then loads the checkpoint through the fast
-lane and the anchor on the same GPU. `--out` receives `transfer_receipt.json`, and on a pass
-`fixtures/` and `lane-entry.json`. Exit status 0 means pass, 1 refuse (the reasons are
-printed and recorded in the receipt), 2 that the check could not run.
+lane and the anchor on the same GPU. `--out` receives `transfer_receipt.json`, and on a pass the
+fine-tune's `fixtures/` (the sample's vLLM vectors, with a tolerance read from the sample) and
+`lane-entry.json`. Exit status 0 means pass, 1 refuse (the reasons are printed and recorded in
+the receipt), 2 that the audit could not run.
 
 ### Declaring the lane
 
-`ANAMNESIS_VLLM_LANES` names lane files, separated the way `PATH` is. The `lane-entry.json`
-a pass writes is one, and can be named as it is:
+`ANAMNESIS_VLLM_LANES` names lane files, separated the way `PATH` is. The `lane-entry.json` a
+pass writes is one, and can be named as it is:
 
 ```json
 {"lanes": {"my-finetune": {
@@ -276,8 +267,8 @@ a pass writes is one, and can be named as it is:
   "transfer_receipt_sha256": "<the receipt's digest>"}}}
 ```
 
-Relative paths resolve against the lane file's directory. With the file named, both commands
-take the key:
+`transfer_receipt` and its digest are optional, and named together or not at all. Relative paths
+resolve against the lane file's directory. With the file named, both commands take the key:
 
 ```
 export ANAMNESIS_VLLM_LANES=transfer-my-finetune/lane-entry.json
@@ -291,13 +282,13 @@ python -m anamnesis.scripts.run_vllm_replay --model my-finetune \
 The calibration is read from the declared directory, or `--calib-dir`, and verified against
 the declared sizes and digests before anything reads it; nothing is downloaded.
 
-Every use passes the extension's guard (`anamnesis/extraction/vllm/extensions.py`): the lane
-is refused by name unless its receipt exists, matches its declared digest and passed; the
-receipt, entry and fixtures agree on base, checkpoint, calibration, fixtures and tolerance; the
-base's shipped tolerance is still the one scored against; and the preset still extends the
-base's with its architecture and layer plan unchanged. A file whose entry reuses a key, repeats
-a checkpoint on one base, extends anything but a shipped lane, or sets an inherited setting is
-refused whole.
+Every use passes the extension's guard (`anamnesis/extraction/vllm/extensions.py`): the lane is
+refused by name unless its fixtures and tolerance load and carry its key, lane id, checkpoint
+and calibration, and its preset still extends the base's with its architecture and layer plan
+unchanged. When the entry names a receipt, the receipt must exist, match its declared digest,
+and be about this key, base, lane id, checkpoint, calibration, fixtures and tolerance; its
+verdict is recorded, not gated. A file whose entry reuses a key, repeats a checkpoint on one
+base, extends anything but a shipped lane, or sets an inherited setting is refused whole.
 
 An extension's lane id is the digest of its base's lane identity, the base's key and its
 checkpoint digest. It differs from the base's and from every other extension's, so
