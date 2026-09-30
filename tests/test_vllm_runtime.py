@@ -413,7 +413,7 @@ def test_a_replay_is_refused_on_a_refused_host(host):
         runtime.usable_receipt(MODEL, host.model_path, host.cache)
 
 
-@pytest.mark.parametrize("tier", ["identical", "conformant"])
+@pytest.mark.parametrize("tier", ["identical", "own-lane"])
 def test_a_replay_uses_a_receipt_that_did_not_refuse(host, tier):
     stored = _stored(host, tier)
     assert runtime.usable_receipt(MODEL, host.model_path, host.cache) == stored

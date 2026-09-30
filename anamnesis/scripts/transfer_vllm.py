@@ -1,4 +1,9 @@
-"""Check that a fine-tune of a shipped lane's model can use that lane, and declare it.
+"""Audit how far a fine-tune's vLLM lane sits from its fast lane, against its base's regime.
+
+A lane-agreement audit (:mod:`anamnesis.extraction.vllm.transfer`): run it when a
+claim needs the two lanes to agree, before a finding is said to hold beyond one
+lane, or when a serving change should have left the computation alone. Its
+verdict is information, not a condition of using either lane.
 
 The fine-tune needs a registry preset extending the base's with the same
 architecture and layer plan (``ANAMNESIS_MODELS``), its own calibration fitted at
@@ -8,11 +13,12 @@ alone, once batched; all must agree byte for byte), then through the fast lane a
 the numeric anchor's two paths for the fine-tune's own σ_cal and path floors, and
 scores it with :func:`anamnesis.extraction.vllm.transfer.check_transfer`. The vLLM
 steps run first, in child processes that need the device to themselves; their
-capture records name the base's lane id, because the key is not a lane until its
-receipt exists.
+capture records name the base's lane id, because the key is not a lane until it
+is declared.
 
-``--out`` receives the transfer receipt and, on a pass, the fine-tune's fixtures
-and tolerance and a lane file declaring the extension, to be named in
+``--out`` receives the transfer receipt and, when it reads the sample inside the
+base's regime, the fine-tune's fixtures and tolerance and a lane file declaring
+the extension with the receipt as its evidence, to be named in
 ``ANAMNESIS_VLLM_LANES``.
 
 Exit status: 0 pass, 1 refuse, 2 the check could not run.

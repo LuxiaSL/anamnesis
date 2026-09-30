@@ -1,29 +1,38 @@
-"""The transfer check: does a fine-tune stay inside its base lane's measured regime?
+"""The lane-agreement audit: how far do two lanes sit apart on matched tokens?
 
-A shipped lane's tolerance records the vLLM-versus-hook deviation its
-qualification measured while the lane's effects were retained. A fine-tune of the
-base shares its architecture, so kernels, determinism and schema carry over; what
-its weights can change is the size of that deviation. :func:`check_transfer`
-scores a fine-tune's sample (fast-lane reference vs vLLM candidate, standardized
-by the fine-tune's own σ_cal and path floors) with the **base's** tolerance,
-through the install check's scoring. Inside it, the fine-tune inherits the base's
-evidence for the same reason a conformant host does; a pass also yields the
-fine-tune's own fixtures and tolerance (:func:`build_extension_fixtures`).
+No lane is ground truth: a lane is self-consistency plus provenance, and the hook
+path is the reference lane by convention. Whether two lanes agree is measured
+when a claim needs it: before claiming a finding generalizes beyond one lane,
+when comparing deployments or checking that a serving change left the computation
+alone, and when joining conclusions from two lanes at the effect level. It is
+never a condition of using a lane.
 
-It differs from the install check in two ways, both because the deviation here is
-a full engine-versus-hook deviation on new weights, distributed like the base's
-own, not a host's tiny departure from the qualified lane:
+:func:`check_transfer` scores any sample of matched vectors from two lanes
+(reference and candidate, standardized by the sample's own σ_cal and path floors)
+against the regime a shipped lane's qualification measured between the vLLM lane
+and the hook path while that lane's effects were retained: the **base's**
+tolerance, through the install check's scoring. ``anamnesis/scripts/transfer_vllm.py``
+runs it for a fine-tune of a shipped lane's model, whose architecture, kernels,
+determinism and schema are its base's, pairing the fine-tune's vLLM lane with its
+fast lane. Its verdict is information: ``pass`` reads the sample inside the
+base's measured regime. A pass also yields the fine-tune's fixtures and tolerance
+(:func:`build_extension_fixtures`); an extension lane records the receipt when it
+names one (:mod:`anamnesis.extraction.vllm.extensions`).
+
+Its readings differ from the install check's because the deviation here is a full
+engine-versus-hook deviation on new weights, distributed like the base's own:
 
 * the median and tail gates read 16 **ordinary rows chosen from the sampled ids
   alone** (:func:`ordinary_rows`); rows ranked by deviation would leave the
   calmest rows ordinary and make those gates lenient;
-* its row gates are counted, where the install check bounds every row: an in-regime
-  sample of 44 rows puts some row over a 190-row maximum about one time in five.
+* its component gates are counted: an in-regime sample of 44 rows puts some row over
+  a 190-row maximum about one time in five.
 
 **Each base carries its own rule set** (:class:`TransferRules`, shipped beside its
-tolerance), the one that passed a false-refusal probe on that base's own records:
-simulated fine-tunes drawn from the base's rows, scored against ceilings read from the
-rows left out. An extension of a base without one is refused by name. A rule set holds:
+tolerance), measured on that base's own records: simulated in-regime samples drawn
+from the base's rows, scored against ceilings read from the rows left out, give each
+rule set's false-refusal rate. An audit against a base without one is refused by
+name. A rule set holds:
 
 * per component, at most ``component_max_allowance`` rows over the base's max ratio,
   the ordinary median at or below the p90, and at most ``p99_allowance`` ordinary rows

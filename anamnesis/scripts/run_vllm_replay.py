@@ -8,8 +8,8 @@ not refuse it. The command refuses before building an engine otherwise.
 **What an output is.** The same banked format the fast lane writes: a feature
 vector and a metadata sidecar per generation, no raw tensors, beside a deployment
 record of what produced them. Every row carries the lane id the install check assigned
-(the fixtures' lane id on an ``identical`` host, the host's own otherwise) and
-an ``extraction_lane`` receipt naming the tier and the receipt digest. An
+(the qualified lane id on an ``identical`` host, the host's own on an ``own-lane``
+host) and an ``extraction_lane`` receipt naming the tier and the receipt digest. An
 extension lane (:mod:`anamnesis.extraction.vllm.extensions`) is accepted like a
 shipped one, its calibration verified against its declared pins.
 :mod:`anamnesis.analysis.lane_guard` refuses to combine rows of different lanes

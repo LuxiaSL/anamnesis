@@ -1,7 +1,8 @@
-"""Extension lanes: declared by a file, admitted only on a matching passing receipt.
+"""Extension lanes: declared by a file, admitted on their identity; a transfer
+receipt, when named, is evidence about this lane and never a condition.
 
-Each case writes a passing fine-tune of a synthetic ``8b`` (``synthetic_extension``),
-names its entry in ``ANAMNESIS_VLLM_LANES`` and breaks one thing: the admitted lane
+Each case writes a fine-tune of a synthetic ``8b`` (``synthetic_extension``), names
+its entry in ``ANAMNESIS_VLLM_LANES`` and changes one thing: the admitted lane
 resolves like a shipped one; the guard and the file each refuse by name; the
 calibration is verified against its pins; shipped lanes never read the file.
 """
@@ -124,14 +125,10 @@ def _tolerance_altered(declared, tmp_path, monkeypatch):
 @pytest.mark.parametrize("breakage,match", [
     (lambda d, *_: d.receipt.unlink(), "does not exist"),
     (lambda d, *_: rewrite_entry(d, transfer_receipt_sha256="0" * 64), "declared digest"),
-    (lambda d, *_: rewrite_receipt(d, verdict="refuse", reasons=["row 1: over"],
-                                   fixture_digest=None, tolerance_digest=None),
-     "refused it: row 1: over"),
     (lambda d, *_: rewrite_receipt(d, base_lane_id=lane_id("70b")), "receipt base_lane_id"),
     (lambda d, *_: rewrite_receipt(d, checkpoint_sha256="d" * 64), "receipt checkpoint"),
-    (lambda d, *_: rewrite_entry(d, checkpoint_sha256="d" * 64), "receipt lane_id"),
+    (lambda d, *_: rewrite_entry(d, checkpoint_sha256="d" * 64), "fixtures lane_id"),
     (_tolerance_altered, "tolerance digest"),
-    (_base_tolerance_changed, "base tolerance digest"),
     (lambda d, tmp, mp: registry(tmp / "m3.json", mp, row={"extends": "3b", "model_id": "x"}),
      "does not extend '8b'"),
     (lambda d, tmp, mp: registry(tmp / "mp.json", mp, row={
@@ -142,6 +139,29 @@ def test_the_guard_refuses_by_name(declared, tmp_path, monkeypatch, breakage, ma
     breakage(declared, tmp_path, monkeypatch)
     with pytest.raises(ValueError, match=f"extension lane '{KEY}' refused: .*{match}"):
         admit(KEY)
+
+
+def test_the_transfer_receipt_is_optional_evidence(declared, tmp_path, monkeypatch):
+    assert admit(KEY).transfer_receipt.verdict == "pass"
+    row = {k: v for k, v in entry_row(declared).items()
+           if k not in ("transfer_receipt", "transfer_receipt_sha256")}
+    declared.entry.write_text(json.dumps({"lanes": {KEY: row}}))
+    admitted = admit(KEY)
+    assert admitted.transfer_receipt is None
+    assert admitted.fixtures.digest == declared.result.fixtures.digest
+    declared.entry.write_text(json.dumps({"lanes": {KEY: dict(
+        row, transfer_receipt=str(declared.receipt))}}))
+    with pytest.raises(LaneFileError, match="named with its digest"):
+        lane_keys()
+
+
+def test_a_refused_audit_or_a_reissued_base_is_recorded_not_gated(declared, tmp_path,
+                                                                    monkeypatch):
+    rewrite_receipt(declared, verdict="refuse", reasons=["row 1: over"],
+                    fixture_digest=None, tolerance_digest=None)
+    assert admit(KEY).transfer_receipt.reasons == ("row 1: over",)
+    _base_tolerance_changed(declared, tmp_path, monkeypatch)
+    assert admit(KEY).transfer_receipt.verdict == "refuse"
 
 
 def test_an_undeclared_key_is_no_lane(declared):
