@@ -157,13 +157,14 @@ def lane_source_digest() -> str:
     return digest_of_shas({f"{p.parent.name}/{p.name}": file_sha(p) for p in files})
 
 
-def settings_digest(model: str) -> str:
+def settings_digest(model: str, *, matmul_policy: Mapping[str, int] | None = None) -> str:
     """Digest of every engine setting and capture switch a pass for ``model`` runs
     under, and of the source it runs. A receipt keyed by it is never served to a
     run with other settings or other code."""
     return canonical_digest(dict(
         settings={c: engine_settings(model, c) for c in CONDITIONS},
-        attention_rounding=ATTENTION_ROUNDING, source=lane_source_digest()))
+        attention_rounding=ATTENTION_ROUNDING, source=lane_source_digest(),
+        matmul_policy=matmul_policy))
 
 
 def child_environment(step: str, base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -239,8 +240,10 @@ def capture_rows(spec: Mapping[str, Any]) -> None:
     from vllm.inputs import TokensPrompt
 
     from anamnesis.config import resolve_preset
+    from anamnesis.extraction.vllm.matmul_launch import configure_matmul
     from anamnesis.extraction.vllm.runner import capture_groups
 
+    matmul_policy = configure_matmul()
     rows = [dict(generation_id=int(r["generation_id"]), input_ids=list(r["input_ids"]),
                  prompt_length=int(r["prompt_length"]), end=int(r["end"]))
             for r in spec["rows"]]
@@ -266,6 +269,7 @@ def capture_rows(spec: Mapping[str, Any]) -> None:
         lane_id=lane_id(model), condition=condition, settings=settings,
         passes=int(spec["passes"]), attention_rounding=ATTENTION_ROUNDING,
         startup_guard=guard, resolved_backend=resolved, packages=versions,
+        matmul_policy=matmul_policy,
         device=torch.cuda.get_device_name(0)), indent=2, default=str) + "\n")
 
 
@@ -380,6 +384,8 @@ def host_fingerprint(fixtures: FixtureSet, tolerance: Tolerance,
     import torch
 
     from anamnesis.extraction.fast.runtime import weight_file_digests
+    from anamnesis.extraction.vllm.matmul_launch import matmul_launch
+    from dataclasses import asdict
 
     properties = torch.cuda.get_device_properties(0)
     try:
@@ -397,7 +403,9 @@ def host_fingerprint(fixtures: FixtureSet, tolerance: Tolerance,
         cuda_runtime=str(torch.version.cuda), torch=torch.__version__,
         vllm=importlib.metadata.version("vllm"), anamnesis=anamnesis_version,
         checkpoint_sha256=digest_of_shas(weight_file_digests(model_path)),
-        engine_settings_sha256=settings_digest(fixtures.model),
+        engine_settings_sha256=settings_digest(
+            fixtures.model, matmul_policy=asdict(matmul_launch(
+                properties.shared_memory_per_block_optin))),
         fixture_digest=fixtures.digest, tolerance_digest=tolerance.digest)
 
 
