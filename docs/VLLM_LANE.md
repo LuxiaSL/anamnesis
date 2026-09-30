@@ -37,6 +37,23 @@ prints both digests.
 The lane reads the first GPU the process can see, and a receipt names that card. On a host
 with several, `CUDA_VISIBLE_DEVICES` chooses one, and a different card is checked again.
 
+Global memory capacity is not the only hardware limit. The pinned engine's float16
+batch-invariant matrix multiply requests 104 KiB of shared memory per thread block
+with its three-stage pipeline, above the 99 KiB available on
+[Ada GPUs](https://docs.nvidia.com/cuda/ada-tuning-guide/index.html).
+`anamnesis/extraction/vllm/matmul_launch.py` caps float16 staging at two on devices
+below 104 KiB, or one below 56 KiB. It retains the engine's kernel, tiles, reduction
+order and dtype; other dtypes and devices fitting the stock launch keep their launch
+settings. This limit concerns on-chip scratch space, not the space holding the weights
+or KV cache, and occurs before the instrumented attention's statistics are collected.
+
+The cap is fixed for the device, independent of requests and batching. The capture
+record carries `matmul_policy`, and the host fingerprint hashes it along with the lane's
+source. A smaller launch still has to pass the full fixture check, including byte-identical
+repeated and batched captures; fitting in memory does not establish conformance. GPUs
+with other architectures or less global memory still have to satisfy the lane's full
+envelope and its install check.
+
 The lane reduces every row with the calibration its fixtures were reduced with, not one
 fitted on the host, so banks from any host running the lane share one calibration. It is
 downloaded once into the output root; a copy elsewhere is named with `--calib-dir` and
