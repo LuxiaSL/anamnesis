@@ -65,6 +65,25 @@ def head_ownership(rank: int, world: int, local_heads: int, local_kv_heads: int)
                 kv_heads=[rank * local_kv_heads, (rank + 1) * local_kv_heads])
 
 
+def require_unreplicated(world: int, local_heads: int, local_kv_heads: int,
+                         total_heads: int, total_kv_heads: int) -> None:
+    """Refuse a split that replicates heads: every rank's query and KV heads times the
+    world must be the model's own counts. Above one rank per KV head the engine gives
+    each rank a copy of a KV head, and the gathered keys and values would repeat heads
+    while every rank's ownership record still looked contiguous.
+
+    Raises
+    ------
+    ValueError
+        Naming the counts, when either product differs from the model's.
+    """
+    if local_heads * world != total_heads or local_kv_heads * world != total_kv_heads:
+        raise ValueError(
+            f"{world} ranks of {local_heads} query and {local_kv_heads} KV heads do not "
+            f"partition the model's {total_heads} query and {total_kv_heads} KV heads; a "
+            "tensor-parallel lane needs no more ranks than KV heads")
+
+
 def ownership_problems(entries: Sequence[Mapping[str, Any]]) -> list[str]:
     """What is wrong with one layer's per-rank ownership records: a rank missing or
     repeated, or a head dropped, doubled or out of rank order."""
@@ -387,6 +406,7 @@ def capture_rows_tp(spec: Mapping[str, Any]) -> None:
         if rank["world"] != tp or not rank["disable_custom_all_reduce"] \
                 or rank["custom_allreduce"]:
             raise ValueError(f"rank {rank['rank']}: parallel settings differ from the lane's")
+        require_unreplicated(rank["world"], *rank["local_heads"], *rank["model_heads"])
     sampling = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=0, logprobs=0,
                               detokenize=False, seed=settings["seed"])
     preset = resolve_preset(lane_preset(model))

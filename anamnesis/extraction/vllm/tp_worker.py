@@ -38,6 +38,10 @@ class TPCaptureExtension:
             torch=torch.__version__, model_class=type(model).__name__,
             attention_impls=sorted({type(b.self_attn.attn.impl).__qualname__
                                     for b in model.model.layers}),
+            local_heads=sorted({(b.self_attn.attn.num_heads, b.self_attn.attn.num_kv_heads)
+                                for b in model.model.layers})[0],
+            model_heads=(self.vllm_config.model_config.hf_config.num_attention_heads,
+                         self.vllm_config.model_config.hf_config.num_key_value_heads),
             registered_backend=REGISTERED_BACKEND,
             tensor_parallel_size=parallel.tensor_parallel_size,
             disable_custom_all_reduce=parallel.disable_custom_all_reduce,

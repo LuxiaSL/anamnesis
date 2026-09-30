@@ -89,6 +89,20 @@ def test_qkv_shards_gather_back_to_full_width_queries_keys_and_values():
                            full)
 
 
+def test_replicated_kv_heads_are_refused():
+    tensor_parallel.require_unreplicated(8, 16, 1, 128, 8)
+    tensor_parallel.require_unreplicated(WORLD, HEADS // WORLD, KV_HEADS // WORLD, HEADS,
+                                         KV_HEADS)
+    # Sixteen ranks over eight KV heads: each rank holds a copy of one KV head, and
+    # contiguous ownership records would still cover sixteen "heads".
+    entries = [tensor_parallel.head_ownership(r, 16, 8, 1) for r in range(16)]
+    assert tensor_parallel.ownership_problems(entries) == []
+    with pytest.raises(ValueError, match="do not partition the model's 128 query and 8 KV"):
+        tensor_parallel.require_unreplicated(16, 8, 1, 128, 8)
+    with pytest.raises(ValueError, match="no more ranks than KV heads"):
+        tensor_parallel.require_unreplicated(8, 16, 2, 128, 8)
+
+
 def test_one_rank_is_returned_unchanged():
     tensor = torch.randn(2, 3)
     assert tensor_parallel.gather(tensor, dim=0, group=FakeGroup([tensor])) is tensor
@@ -203,7 +217,8 @@ def test_every_shipped_lane_keeps_its_id_and_settings():
 
 
 def test_every_shipped_fixture_file_keeps_its_bytes():
+    """A subset pin: each pinned file exists with its bytes; new files may join."""
     root = Path(envelope.__file__).parent / "fixtures"
-    found = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-             for p in sorted(root.rglob("*")) if p.is_file()}
+    found = {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+             if (root / name).is_file() else None for name in SHIPPED_FIXTURE_FILES}
     assert found == SHIPPED_FIXTURE_FILES
