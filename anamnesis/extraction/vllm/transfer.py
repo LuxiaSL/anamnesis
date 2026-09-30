@@ -15,9 +15,12 @@ tolerance, through the install check's scoring. ``anamnesis/scripts/transfer_vll
 runs it for a fine-tune of a shipped lane's model, whose architecture, kernels,
 determinism and schema are its base's, pairing the fine-tune's vLLM lane with its
 fast lane. Its verdict is information: ``pass`` reads the sample inside the
-base's measured regime. A pass also yields the fine-tune's fixtures and tolerance
-(:func:`build_extension_fixtures`); an extension lane records the receipt when it
-names one (:mod:`anamnesis.extraction.vllm.extensions`).
+base's measured regime. Every scored sample, whatever the verdict, yields the
+fine-tune's fixtures and tolerance (:func:`build_extension_fixtures`): they are the
+fine-tune's own lane output, the reference its hosts' install checks read, not a
+certificate of agreement. A sample that cannot be scored (a lane that disagrees with
+itself, a schema or sample outside the check's scope) yields none. An extension lane
+records the receipt when it names one (:mod:`anamnesis.extraction.vllm.extensions`).
 
 Its readings differ from the install check's because the deviation here is a full
 engine-versus-hook deviation on new weights, distributed like the base's own:
@@ -347,10 +350,11 @@ class TransferReceipt(BaseModel):
     @model_validator(mode="after")
     def _verdict_matches_contents(self) -> Self:
         passed = self.verdict == "pass"
-        if passed == bool(self.reasons) or passed != (self.fixture_digest is not None
-                                                       and self.tolerance_digest is not None):
-            raise ValueError("a pass names its fixtures and tolerance and no reason; "
-                             "a refusal carries its reasons")
+        built = self.fixture_digest is not None
+        if passed == bool(self.reasons) or built != (self.tolerance_digest is not None) \
+                or (passed and not built):
+            raise ValueError("a pass names its fixtures and tolerance and no reason; a "
+                             "refusal carries its reasons; fixtures and tolerance come together")
         return self
 
 
@@ -604,7 +608,7 @@ def check_transfer(*, key: str, extends: str, base_tolerance: Tolerance,
                 multiples[f"family:{family}"] = {g: values[g][family] / fmax
                                                   for g in family_over[family]}
     fixtures = tolerance = None
-    if not reasons:
+    if rows:
         fixtures, tolerance = build_extension_fixtures(
             key=key, extends=extends, checkpoint_sha256=checkpoint_sha256,
             calibration_sha256=calibration_sha256, sample=sample, strata=strata, rows=rows,

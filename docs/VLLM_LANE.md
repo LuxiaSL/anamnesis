@@ -244,15 +244,17 @@ python -m anamnesis.scripts.transfer_vllm --key my-finetune --extends 70b \
 ```
 
 It captures the sample through the vLLM lane first, then loads the checkpoint through the fast
-lane and the anchor on the same GPU. `--out` receives `transfer_receipt.json`, and on a pass the
-fine-tune's `fixtures/` (the sample's vLLM vectors, with a tolerance read from the sample) and
-`lane-entry.json`. Exit status 0 means pass, 1 refuse (the reasons are printed and recorded in
+lane and the anchor on the same GPU. `--out` receives `transfer_receipt.json` and, whatever the
+verdict, the fine-tune's `fixtures/` (the sample's vLLM vectors, with a tolerance read from the
+sample) and `lane-entry.json`: the fixtures are the fine-tune's own lane output, not a certificate
+of agreement. Only a sample the audit cannot score (a lane that disagrees with itself, a schema or
+sample outside its scope) yields no fixtures. Exit status 0 means pass, 1 refuse (the reasons are printed and recorded in
 the receipt), 2 that the audit could not run.
 
 ### Declaring the lane
 
-`ANAMNESIS_VLLM_LANES` names lane files, separated the way `PATH` is. The `lane-entry.json` a
-pass writes is one, and can be named as it is:
+`ANAMNESIS_VLLM_LANES` names lane files, separated the way `PATH` is. The `lane-entry.json` the
+audit writes is one, and can be named as it is:
 
 ```json
 {"lanes": {"my-finetune": {

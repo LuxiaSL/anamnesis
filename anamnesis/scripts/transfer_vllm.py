@@ -16,9 +16,9 @@ steps run first, in child processes that need the device to themselves; their
 capture records name the base's lane id, because the key is not a lane until it
 is declared.
 
-``--out`` receives the transfer receipt and, when it reads the sample inside the
-base's regime, the fine-tune's fixtures and tolerance and a lane file declaring
-the extension with the receipt as its evidence, to be named in
+``--out`` receives the transfer receipt and, whenever the sample was scored,
+whatever the verdict, the fine-tune's fixtures and tolerance and a lane file
+declaring the extension with the receipt as its evidence, to be named in
 ``ANAMNESIS_VLLM_LANES``.
 
 Exit status: 0 pass, 1 refuse, 2 the check could not run.
@@ -113,8 +113,8 @@ def hf_vectors(preset: str, model_path: Path, calib_dir: Path, entries: Mapping[
 
 def write_transfer(out: Path, result: TransferResult, *, calib_dir: Path,
                    preset: str) -> dict[str, Path]:
-    """Write the receipt, and on a pass the fixtures, tolerance and a lane file whose
-    entry names them relative to ``out``; ``out`` must not exist."""
+    """Write the receipt, and for a scored sample the fixtures, tolerance and a lane
+    file whose entry names them relative to ``out``; ``out`` must not exist."""
     from anamnesis.extraction.vllm.extensions import calibration_pins
     from anamnesis.provenance import file_sha
 
