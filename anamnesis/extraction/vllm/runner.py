@@ -9,6 +9,13 @@ declared batch capacity and prefilled every prompt whole, and writes each
 retained row's substrate as a torch file named for its generation id, beside a
 JSON receipt of its tensor contents, and each group's schedule record.
 
+A resident session (:mod:`anamnesis.extraction.vllm.session`) passes two
+things a pass through the disk path never does: a per-group plan of which groups
+run the unhooked comparison, and a publisher that takes each retained row's
+substrate in memory instead of a file beside it. A group that skips the
+comparison records ``noninterference: not_checked`` and claims nothing about its
+hooks.
+
 Nothing here builds an engine or deletes a file; the command that calls it owns
 both.
 """
@@ -24,6 +31,11 @@ import torch
 from anamnesis.extraction.vllm.capture import LaneCapture
 from anamnesis.extraction.vllm.receipts import assert_substrate_fields, capture_receipt
 from anamnesis.provenance import file_sha
+
+
+class NoninterferenceError(RuntimeError):
+    """The hooked run of a group produced other tokens or logprobs than its unhooked
+    run: capturing changed what the model computed."""
 
 
 def write_json(path, value) -> None:
@@ -205,6 +217,8 @@ def capture_groups(
     out,
     *,
     attention_rounding: bool,
+    checks=None,
+    publish=None,
 ):
     """Capture every group; return the row receipts and per-group evidence.
 
@@ -214,14 +228,30 @@ def capture_groups(
     environment and the engine. The engine queue must be empty on entry and is
     left empty.
 
+    Without ``checks`` and ``publish`` every group is run unhooked and hooked and
+    compared, and each retained row is written to ``out`` as a torch file beside
+    its JSON receipt. ``checks`` is one bool per group: False skips that group's
+    unhooked run and its comparison. ``publish(record, capture)`` takes each
+    retained row's substrate instead of a file; ``record`` carries the row's
+    identity, the group's schedule digest and its ``noninterference`` status, and
+    the returned row records are those, without a content receipt, which the
+    publisher owns. With a publisher a failed comparison refuses before any row
+    of its group is published.
+
     Raises
     ------
+    NoninterferenceError
+        When the hooks changed the generation.
     ValueError, RuntimeError
         On any departure from the declared groups, the scheduling or the
-        substrate, and when the hooks changed the generation. A failing group
-        leaves a failure record beside its captures naming why.
+        substrate. A failing group leaves a failure record beside its captures
+        naming why.
     """
     by_id = _validate_groups(rows, groups, condition)
+    if checks is not None:
+        checks = list(checks)
+        if len(checks) != len(groups) or any(type(c) is not bool for c in checks):
+            raise ValueError("a check plan names every group with a bool")
     if getattr(sampling, "max_tokens", None) != 1 or getattr(sampling, "n", 1) != 1:
         raise ValueError("one output token and one completion required")
     if (
@@ -241,6 +271,7 @@ def capture_groups(
         stem = f"group-{group_index:04d}"
         tap = None
         mapping = {}
+        checked = True if checks is None else checks[group_index]
         try:
             if llm.llm_engine.has_unfinished_requests():
                 raise RuntimeError("engine has requests before bounded group")
@@ -248,17 +279,20 @@ def capture_groups(
                 tokens_prompt(prompt_token_ids=by_id[m["generation_id"]]["input_ids"])
                 for m in members
             ]
-            control_outputs = llm.generate(prompts, sampling, use_tqdm=False)
-            controls = _normalized(control_outputs, members, by_id)
-            del control_outputs
-            write_json(
-                out / f"{stem}.control.json",
-                dict(
-                    condition=condition, group_index=group_index, occurrences=controls
-                ),
-            )
-            if llm.llm_engine.has_unfinished_requests():
-                raise RuntimeError("control left pending requests")
+            controls = None
+            if checked:
+                control_outputs = llm.generate(prompts, sampling, use_tqdm=False)
+                controls = _normalized(control_outputs, members, by_id)
+                del control_outputs
+                write_json(
+                    out / f"{stem}.control.json",
+                    dict(
+                        condition=condition, group_index=group_index,
+                        occurrences=controls
+                    ),
+                )
+                if llm.llm_engine.has_unfinished_requests():
+                    raise RuntimeError("control left pending requests")
             requests = {}
             expected_external = []
             for member, prompt in zip(members, prompts, strict=True):
@@ -292,10 +326,15 @@ def capture_groups(
                 tap.schedule, requests, condition["max_num_seqs"])
             if llm.llm_engine.has_unfinished_requests():
                 raise RuntimeError("capture left pending requests")
-            unchanged = all(
+            unchanged = checked and all(
                 a["generation"] == b["generation"]
                 for a, b in zip(controls, observed, strict=True)
             )
+            status = {}
+            if checks is not None:
+                status = dict(noninterference="checked" if checked else "not_checked")
+            if checked:
+                status["hook_noninterference"] = unchanged
             schedule = dict(
                 capture_contract="lane-capture/1",
                 condition=condition,
@@ -305,9 +344,9 @@ def capture_groups(
                 trace=tap.schedule,
                 evidence=evidence,
                 peak_fragment_bytes=tap.peak_fragment_bytes,
-                hook_noninterference=unchanged,
                 controls=controls,
                 observed=observed,
+                **status,
             )
             schedule_path = out / f"{stem}.schedule.json"
             write_json(schedule_path, schedule)
@@ -315,6 +354,27 @@ def capture_groups(
             expected_retained = {r for r, s in requests.items() if s["retain"]}
             if set(captures) != expected_retained:
                 raise ValueError("capture retained request set differs from protocol")
+            capture = None
+            if publish is not None:
+                if checked and not unchanged:
+                    raise NoninterferenceError(
+                        "the capture hooks changed the generation or its logprobs"
+                    )
+                for internal, capture in captures.items():
+                    gid = mapping[internal]["generation_id"]
+                    assert_substrate_fields(capture, context=f"retained row {gid}")
+                    record = dict(
+                        capture_contract="lane-capture/1",
+                        generation_id=gid,
+                        schedule_sha256=schedule_digest,
+                        schedule_file=schedule_path.name,
+                        occurrence_id=mapping[internal]["occurrence_id"],
+                        internal_request_id=internal,
+                        **status,
+                    )
+                    publish(record, capture)
+                    records.append(record)
+                captures.clear()
             # Rows are written before the comparison refuses, so a failure keeps its evidence.
             for internal, capture in captures.items():
                 gid = mapping[internal]["generation_id"]
@@ -335,7 +395,7 @@ def capture_groups(
                     generation_id=gid,
                     raw_sha256=file_sha(raw),
                     substrate=substrate,
-                    hook_noninterference=unchanged,
+                    **status,
                     schedule_sha256=schedule_digest,
                     schedule_file=schedule_path.name,
                     occurrence_id=mapping[internal]["occurrence_id"],
@@ -348,15 +408,16 @@ def capture_groups(
                     group_index=group_index,
                     schedule_file=schedule_path.name,
                     schedule_sha256=schedule_digest,
-                    retained_rows=len(captures),
+                    retained_rows=len(expected_retained),
                     seconds=time.perf_counter() - begun,
                     **evidence,
+                    **(status if checks is not None else {}),
                 )
             )
             del capture, captures, tap, prompts, observed, controls
             tap = None
-            if not unchanged:
-                raise RuntimeError(
+            if checked and not unchanged:
+                raise NoninterferenceError(
                     "the capture hooks changed the generation or its logprobs"
                 )
         except BaseException as exc:

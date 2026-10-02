@@ -223,6 +223,61 @@ def promote_logprob_inputs(sampler) -> None:
     sampler.compute_logprobs = promoted
 
 
+def build_engine(model: str, model_path: Path | str, condition_id: str) -> dict[str, Any]:
+    """Build ``model``'s single-GPU engine for ``condition_id`` inside the lane's envelope.
+
+    The order is the lane's startup and is never varied: the environment and the
+    pinned packages are checked, the settings pass the envelope's guard, the
+    instrumented backend is registered, the matmul staging cap is set, and only
+    then is the engine constructed. Returns ``llm``, ``runner`` (the model runner the
+    capture hooks), ``sampling`` (one greedy token with prompt and sample
+    logprobs), ``tokens_prompt``, ``condition``, ``sampled_layers`` and ``record``
+    (the settings, the guard's record, the packages, the matmul policy and the
+    device, as a capture record states them).
+
+    Raises
+    ------
+    RuntimeError
+        On a wrong environment or package set.
+    ValueError
+        On settings outside the envelope, or an engine that did not resolve the
+        model to its native Llama.
+    """
+    require_environment()
+    versions = require_pinned_packages()
+    settings = engine_settings(model, condition_id)
+    guard = enforce_lane_envelope(settings, os.environ, lane=lane_id(model), model=model)
+
+    from anamnesis.extraction.vllm.backend import register_instrumented_backend
+    resolved = register_instrumented_backend()
+    import torch
+    from vllm import LLM, SamplingParams
+    from vllm.inputs import TokensPrompt
+
+    from anamnesis.config import resolve_preset
+    from anamnesis.extraction.vllm.matmul_launch import configure_matmul
+
+    matmul_policy = configure_matmul()
+    condition = CONDITIONS[condition_id]
+    llm = LLM(model=str(model_path), **settings)
+    runner = (llm.llm_engine.engine_core.engine_core.model_executor
+              .driver_worker.worker.model_runner)
+    if type(runner.model).__name__ != "LlamaForCausalLM":
+        raise ValueError("the engine did not resolve the model to its native Llama")
+    if lane_model(model)["logprob_wrapper"] == "explicit-fp32-input":
+        promote_logprob_inputs(runner.sampler)
+    sampling = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=0, logprobs=0,
+                              detokenize=False, seed=settings["seed"])
+    preset = resolve_preset(lane_preset(model))
+    record = dict(
+        lane_id=lane_id(model), condition=condition, settings=settings,
+        attention_rounding=ATTENTION_ROUNDING, startup_guard=guard,
+        resolved_backend=resolved, packages=versions, matmul_policy=matmul_policy,
+        device=torch.cuda.get_device_name(0))
+    return dict(llm=llm, runner=runner, sampling=sampling, tokens_prompt=TokensPrompt,
+                condition=condition, sampled_layers=preset.sampled_layers, record=record)
+
+
 def capture_rows(spec: Mapping[str, Any]) -> None:
     """The engine step: capture every row of ``spec`` ``passes`` times.
 
@@ -238,50 +293,24 @@ def capture_rows(spec: Mapping[str, Any]) -> None:
 
         capture_rows_tp(spec)
         return
-    require_environment()
-    versions = require_pinned_packages()
     model, condition_id = spec["model"], spec["condition_id"]
-    settings = engine_settings(model, condition_id)
-    guard = enforce_lane_envelope(settings, os.environ, lane=lane_id(model), model=model)
-
-    from anamnesis.extraction.vllm.backend import register_instrumented_backend
-    resolved = register_instrumented_backend()
-    import torch
-    from vllm import LLM, SamplingParams
-    from vllm.inputs import TokensPrompt
-
-    from anamnesis.config import resolve_preset
-    from anamnesis.extraction.vllm.matmul_launch import configure_matmul
-    from anamnesis.extraction.vllm.runner import capture_groups
-
-    matmul_policy = configure_matmul()
     rows = [dict(generation_id=int(r["generation_id"]), input_ids=list(r["input_ids"]),
                  prompt_length=int(r["prompt_length"]), end=int(r["end"]))
             for r in spec["rows"]]
-    condition = CONDITIONS[condition_id]
-    groups = request_groups([r["generation_id"] for r in rows], condition["max_num_seqs"])
-    llm = LLM(model=str(spec["model_path"]), **settings)
-    runner = (llm.llm_engine.engine_core.engine_core.model_executor
-              .driver_worker.worker.model_runner)
-    if type(runner.model).__name__ != "LlamaForCausalLM":
-        raise ValueError("the engine did not resolve the model to its native Llama")
-    if lane_model(model)["logprob_wrapper"] == "explicit-fp32-input":
-        promote_logprob_inputs(runner.sampler)
-    sampling = SamplingParams(max_tokens=1, temperature=0.0, prompt_logprobs=0, logprobs=0,
-                              detokenize=False, seed=settings["seed"])
-    preset = resolve_preset(lane_preset(model))
+    groups = request_groups([r["generation_id"] for r in rows],
+                            CONDITIONS[condition_id]["max_num_seqs"])
+    engine = build_engine(model, spec["model_path"], condition_id)
+
+    from anamnesis.extraction.vllm.runner import capture_groups
+
     out = Path(spec["out"])
     out.mkdir(parents=True, exist_ok=False)
     for index in range(int(spec["passes"])):
-        capture_groups(llm, runner, rows, groups, condition, preset.sampled_layers, sampling,
-                       TokensPrompt, out / f"pass-{index}",
-                       attention_rounding=ATTENTION_ROUNDING)
+        capture_groups(engine["llm"], engine["runner"], rows, groups, engine["condition"],
+                       engine["sampled_layers"], engine["sampling"], engine["tokens_prompt"],
+                       out / f"pass-{index}", attention_rounding=ATTENTION_ROUNDING)
     (out / "capture.json").write_text(json.dumps(dict(
-        lane_id=lane_id(model), condition=condition, settings=settings,
-        passes=int(spec["passes"]), attention_rounding=ATTENTION_ROUNDING,
-        startup_guard=guard, resolved_backend=resolved, packages=versions,
-        matmul_policy=matmul_policy,
-        device=torch.cuda.get_device_name(0)), indent=2, default=str) + "\n")
+        engine["record"], passes=int(spec["passes"])), indent=2, default=str) + "\n")
 
 
 def verify_capture_receipt(path: Path, receipt: Mapping[str, Any], generation_id: int) -> None:
@@ -320,6 +349,27 @@ def readout_lane(model: str, calib_dir: Path, feature_names: Sequence[str],
                           replay_path="full")
 
 
+def prepare_readout_process() -> None:
+    """Fix the readout's arithmetic in this process and refuse one that is not clean:
+    deterministic algorithms on, TF32 off, then
+    :func:`anamnesis.extraction.vllm.readout.assert_clean_readout_process`.
+
+    Raises
+    ------
+    RuntimeError
+        When the engine was imported here, its overrides are on, or the workspace is
+        not :data:`anamnesis.extraction.vllm.envelope.READOUT_WORKSPACE`.
+    """
+    import torch
+
+    from anamnesis.extraction.vllm.readout import assert_clean_readout_process
+
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    assert_clean_readout_process(READOUT_DEVICE)
+
+
 def reduce_rows(spec: Mapping[str, Any]) -> None:
     """The readout step: reduce every captured pass of ``spec`` and delete its raws.
 
@@ -332,13 +382,10 @@ def reduce_rows(spec: Mapping[str, Any]) -> None:
     """
     import torch
 
-    from anamnesis.extraction.vllm.readout import assert_clean_readout_process, reduce_capture
+    from anamnesis.extraction.vllm.readout import reduce_capture
     from anamnesis.extraction.vllm.receipts import capture_receipt
 
-    torch.use_deterministic_algorithms(True)
-    torch.backends.cuda.matmul.allow_tf32 = False
-    torch.backends.cudnn.allow_tf32 = False
-    assert_clean_readout_process(READOUT_DEVICE)
+    prepare_readout_process()
     lane = readout_lane(spec["model"], Path(spec["calib_dir"]), spec["feature_names"])
     rows = {int(r["generation_id"]): r for r in spec["rows"]}
     passes = sorted(p for p in Path(spec["captures"]).glob("pass-*") if p.is_dir())

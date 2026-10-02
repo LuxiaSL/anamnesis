@@ -24,6 +24,7 @@ import torch
 from anamnesis.extraction.vllm.envelope import request_groups
 from anamnesis.extraction.vllm.receipts import SUBSTRATE_FIELDS, capture_receipt
 from anamnesis.extraction.vllm.runner import (
+    NoninterferenceError,
     capture_groups,
     generation_record,
     validate_schedule,
@@ -348,3 +349,73 @@ def test_write_json_is_sorted_and_refuses_nan(tmp_path):
     assert path.read_text() == '{\n  "a": [\n    1,\n    2\n  ],\n  "b": 1\n}\n'
     with pytest.raises(ValueError):
         write_json(path, {"a": math.nan})
+
+
+def run_with(engine, plan, path, checks=None, publish=None):
+    rows, groups, condition, sampling = plan
+    return capture_groups(
+        engine, engine.runner, rows, groups, condition, [0, 2], sampling, dict, path,
+        attention_rounding=True, checks=checks, publish=publish,
+    )
+
+
+def test_the_disk_path_records_no_cadence_status(plan, tmp_path):
+    result = execute(FakeEngine(), plan, tmp_path)
+    for r in result["rows"]:
+        assert r["hook_noninterference"] is True and "noninterference" not in r
+    assert all("noninterference" not in g and "hook_noninterference" not in g
+               for g in result["groups"])
+    schedule = json.loads((tmp_path / "group-0000.schedule.json").read_text())
+    assert "noninterference" not in schedule
+
+
+def test_a_check_plan_must_name_every_group_before_anything_runs(plan, tmp_path):
+    engine = FakeEngine()
+    for checks in ([True], [True, 1], [True, True, True]):
+        with pytest.raises(ValueError, match="check plan"):
+            run_with(engine, plan, tmp_path, checks=checks)
+    assert engine.generate_calls == engine.run_calls == 0
+
+
+def test_a_publisher_takes_every_retained_row_instead_of_a_file(plan, tmp_path):
+    taken = []
+    result = run_with(FakeEngine(), plan, tmp_path, checks=[True, False],
+                      publish=lambda record, capture: taken.append((dict(record), capture)))
+    assert [r["generation_id"] for r, _ in taken] == [0, 1, 10000]
+    assert not list(tmp_path.glob("row-*"))
+    for record, capture in taken:
+        assert set(capture) == SUBSTRATE_FIELDS
+        assert "substrate" not in record and "raw_sha256" not in record
+        assert file_sha(tmp_path / record["schedule_file"]) == record["schedule_sha256"]
+    assert [r["noninterference"] for r, _ in taken] == ["checked", "checked", "not_checked"]
+    assert [g["noninterference"] for g in result["groups"]] == ["checked", "not_checked"]
+    assert [g["retained_rows"] for g in result["groups"]] == [2, 1]
+
+
+def test_an_unchecked_group_runs_only_hooked_and_claims_nothing(plan, tmp_path):
+    engine = FakeEngine(changed=True)
+    taken = []
+    run_with(engine, plan, tmp_path, checks=[False, False],
+             publish=lambda record, capture: taken.append(record))
+    assert engine.generate_calls == 0 and engine.run_calls == 2
+    assert all("hook_noninterference" not in r for r in taken)
+    assert not list(tmp_path.glob("*.control.json"))
+    schedule = json.loads((tmp_path / "group-0000.schedule.json").read_text())
+    assert schedule["noninterference"] == "not_checked" and schedule["controls"] is None
+    assert "hook_noninterference" not in schedule
+
+
+def test_a_failed_check_publishes_nothing_of_its_group(plan, tmp_path):
+    taken = []
+    with pytest.raises(NoninterferenceError, match="changed the generation"):
+        run_with(FakeEngine(changed=True), plan, tmp_path, checks=[True, True],
+                 publish=lambda record, capture: taken.append(record))
+    assert taken == []
+    assert (tmp_path / "group-0000.failed.json").exists()
+    schedule = json.loads((tmp_path / "group-0000.schedule.json").read_text())
+    assert schedule["hook_noninterference"] is False
+
+
+def test_the_disk_paths_failed_check_is_a_noninterference_error(plan, tmp_path):
+    with pytest.raises(NoninterferenceError):
+        execute(FakeEngine(changed=True), plan, tmp_path)
