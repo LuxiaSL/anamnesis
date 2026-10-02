@@ -75,18 +75,49 @@ def run(cadence: session.Cadence, condition: str, n: int) -> list[bool]:
     return checks
 
 
-def test_every_group_is_checked_until_both_conditions_and_eight_groups_passed():
+def checked_indices(checks: list[bool], start: int = 0) -> list[int]:
+    return [start + i for i, c in enumerate(checks) if c]
+
+
+def test_a_one_condition_session_ends_its_warm_up_after_eight_groups():
     cadence = session.Cadence()
-    assert run(cadence, "full-b8-order0", 20) == [True] * 20
-    assert run(cadence, "full-b1-order0", 1) == [True]
-    after = run(cadence, "full-b8-order0", 40)
-    assert [21 + i for i, c in enumerate(after) if c] == [32, 48]
+    plan = run(cadence, "full-b8-order0", 64)
+    assert checked_indices(plan) == list(range(8)) + [16, 32, 48]
+    assert not cadence.warm
 
 
-def test_after_the_warm_up_every_sixteenth_group_by_index_is_checked():
+def test_a_one_condition_short_set_session_ends_its_warm_up_too():
+    cadence = session.Cadence()
+    plan = [c for _ in range(20) for c in run(cadence, "full-b1-order0", 3)]
+    assert checked_indices(plan) == list(range(8)) + [16, 32, 48]
+
+
+def test_a_two_condition_session_waits_for_a_passing_group_under_each():
     cadence = session.Cadence()
     first = run(cadence, "full-b1-order0", 3) + run(cadence, "full-b8-order0", 61)
-    assert [i for i, c in enumerate(first) if c] == list(range(8)) + [16, 32, 48]
+    assert checked_indices(first) == list(range(8)) + [16, 32, 48]
+
+
+def test_a_condition_first_used_after_the_warm_up_is_checked_on_its_first_group():
+    cadence = session.Cadence()
+    assert checked_indices(run(cadence, "full-b8-order0", 20)) == list(range(8)) + [16]
+    assert not cadence.warm
+    assert run(cadence, "full-b1-order0", 3) == [True, False, False]
+    after = run(cadence, "full-b8-order0", 40)
+    assert checked_indices(after, 23) == [32, 48]
+    assert run(cadence, "full-b1-order0", 1) == [False]
+
+
+def test_a_condition_used_during_the_warm_up_passes_inside_it():
+    """Every warm-up group is checked, so a condition first used during the warm-up has
+    its passing group there, and the warm-up ends with the eighth passing group."""
+    cadence = session.Cadence()
+    run(cadence, "full-b8-order0", 7)
+    assert cadence.warm
+    assert run(cadence, "full-b1-order0", 2) == [True, False]
+    assert not cadence.warm and cadence.passed_conditions == {"full-b1-order0",
+                                                              "full-b8-order0"}
+    assert checked_indices(run(cadence, "full-b8-order0", 8), 9) == [16]
 
 
 def test_the_plan_is_the_same_however_the_groups_are_split_into_calls():
@@ -95,6 +126,12 @@ def test_the_plan_is_the_same_however_the_groups_are_split_into_calls():
     split = run(many, "full-b1-order0", 1)
     for size in (3, 1, 16, 7, 36):
         split += run(many, "full-b8-order0", size)
+    assert whole == split
+    one, many = session.Cadence(), session.Cadence()
+    whole = run(one, "full-b8-order0", 30) + run(one, "full-b1-order0", 20)
+    split = run(many, "full-b8-order0", 11) + run(many, "full-b8-order0", 19)
+    for _ in range(4):
+        split += run(many, "full-b1-order0", 5)
     assert whole == split
 
 
@@ -339,8 +376,8 @@ def test_an_unchecked_group_runs_once_and_claims_nothing(lane, monkeypatch):
 def test_a_failed_check_stops_the_session_and_names_the_unverified_rows(lane, monkeypatch):
     monkeypatch.setattr(session, "WARMUP_GROUPS", 2)
     monkeypatch.setattr(session, "CHECK_EVERY", 4)
-    lane.capture(rows([0, 1, 2]))            # groups 0-2, b1, checked
-    lane.capture(rows(range(8)))             # group 3, b8, checked: the warm-up is over
+    lane.capture(rows([0, 1, 2]))            # groups 0-1 checked (the warm-up), 2 not
+    lane.capture(rows(range(8)))             # group 3, b8's first group: checked
     lane.capture(rows(range(16)))            # group 4 checked, group 5 not
     lane.engine.changed = True
     lane.capture(rows(range(100, 108)))      # group 6, not checked: nothing can see it
@@ -397,3 +434,104 @@ def test_closing_removes_the_shared_memory_directory(lane):
     lane.close()
     assert not Path(lane.segments).exists()
     assert lane.stopped == "closed"
+
+
+# ── engine_condition and stale hand-off directories ─────────────────────────
+
+
+def test_every_record_names_the_engine_beside_the_condition(lane):
+    for chosen, condition in ((rows([0, 1]), "full-b1-order0"),
+                              (rows(range(10, 20)), "full-b8-order0")):
+        result = lane.capture(chosen)
+        for gid, receipt in result.receipts.items():
+            assert receipt["condition_id"] == condition
+            assert receipt["engine_condition"] == "full-b8-order0"
+            on_disk = json.loads((result.directory / f"row-{gid:05d}.json").read_text())
+            assert on_disk["engine_condition"] == "full-b8-order0"
+        for group in result.groups:
+            assert group["condition_id"] == condition
+            assert group["engine_condition"] == "full-b8-order0"
+        record = lane.extraction_lane(chosen[0], result.receipts[chosen[0]["generation_id"]])
+        assert record["condition_id"] == condition
+        assert record["engine_condition"] == "full-b8-order0"
+
+
+def dead_pid() -> int:
+    import subprocess
+    import sys
+
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
+def test_open_removes_hand_off_directories_whose_process_is_gone(tmp_path):
+    import subprocess
+    import sys
+
+    live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        dead = tmp_path / f"anamnesis-lane-{dead_pid()}-abc123"
+        dead.mkdir()
+        (dead / "row-00001-x.seg").write_bytes(b"\0" * 100)
+        alive = tmp_path / f"anamnesis-lane-{live.pid}-def456"
+        alive.mkdir()
+        mine = tmp_path / f"anamnesis-lane-{os.getpid()}-aaa111"
+        mine.mkdir()
+        other = tmp_path / "anamnesis-lane-notapid"
+        other.mkdir()
+        unrelated = tmp_path / "something-else-1"
+        unrelated.mkdir()
+        removed = session.remove_stale_handoff_dirs(tmp_path)
+        assert removed == [dict(path=str(dead), pid=int(dead.name.split("-")[2]), bytes=100)]
+        assert not dead.exists()
+        assert alive.exists() and mine.exists() and other.exists() and unrelated.exists()
+    finally:
+        live.kill()
+        live.wait()
+
+
+def test_open_records_the_directories_it_removed(tmp_path, monkeypatch):
+    """open() runs the cleanup before its own directory exists, and writes the result
+    into the session record; the admission and the children are stood in for."""
+    from anamnesis.extraction.vllm import extensions
+
+    dead = tmp_path / "shm" / f"anamnesis-lane-{dead_pid()}-abc123"
+    dead.mkdir(parents=True)
+    calib = tmp_path / "calib"
+    calib.mkdir()
+    monkeypatch.setattr(extensions, "lane_keys", lambda: ("8b",))
+    monkeypatch.setattr(extensions, "declared_lane", lambda key: None)
+    monkeypatch.setattr(runtime, "load_fixtures", lambda key: (SimpleNamespace(
+        feature_names=NAMES, digest="f", calibration_sha256="c"), None))
+    monkeypatch.setattr(runtime, "require_fixture_calibration", lambda f, c: None)
+    monkeypatch.setattr(runtime, "usable_receipt", lambda m, p, c: SimpleNamespace(
+        lane_id="lane", qualified_lane_id="lane", tier="identical", digest="d"))
+    import anamnesis.extraction.vllm.hub as hub
+    import anamnesis.extraction.calibration as calibration
+
+    monkeypatch.setattr(hub, "verify_calibration", lambda key, d: None)
+    monkeypatch.setattr(calibration, "resolve_pca_model", lambda d: d / "pca")
+    monkeypatch.setattr(calibration, "read_pca_basis", lambda p: SimpleNamespace(
+        float32_arrays=lambda: (np.zeros((2, 2), dtype=np.float32), None)))
+
+    class Ready:
+        def __init__(self, step, spec, path, env):
+            self.ready = dict(record=dict(step=step))
+
+        def wait_ready(self, timeout):
+            return self.ready
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(session, "_Child", Ready)
+    lane_session = session.LaneSession.open(
+        "8b", tmp_path / "ckpt", work_dir=tmp_path / "work", cache_dir=tmp_path / "cache",
+        calib_dir=calib, handoff_root=tmp_path / "shm")
+    record = json.loads((tmp_path / "work" / "session.json").read_text())
+    assert [r["path"] for r in record["removed_stale_handoff_dirs"]] == [str(dead)]
+    assert not dead.exists() and lane_session.segments.exists()
+    assert record["engine_condition"] == "full-b8-order0"
+    lane_session.close()
+    assert not lane_session.segments.exists()

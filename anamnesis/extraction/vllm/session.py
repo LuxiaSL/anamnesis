@@ -23,9 +23,10 @@ runs, pays an engine build per call and a gigabyte-per-row disk round trip. A
   group's schedule record; :meth:`LaneSession.capture` releases no row's vector before its
   receipt is written and names the handle the readout took.
 * **The non-interference check on a cadence.** Every group is checked (run once unhooked,
-  once hooked, and compared) from the session's start until a group under each declared
-  condition and the session's first :data:`WARMUP_GROUPS` groups have all passed; from
-  then on every :data:`CHECK_EVERY`-th group by its index in the session. A group's record
+  once hooked, and compared) from the session's start until the session's first
+  :data:`WARMUP_GROUPS` groups have passed and each condition the session has used has a
+  passing group; from then on every :data:`CHECK_EVERY`-th group by its index in the
+  session, and the first group under a condition the session has not used before. A group's record
   says ``checked`` or ``not_checked``, and an unchecked group never claims
   ``hook_noninterference``. A failed check stops the session and names every row released
   since the last passing check as unverified (:class:`NoninterferenceFailure`). Banks,
@@ -35,8 +36,13 @@ runs, pays an engine build per call and a gigabyte-per-row disk round trip. A
   same capture, never read back, as :func:`anamnesis.extraction.vllm.envelope.request_groups`
   fills one). A capture of fewer rows runs one request at a time, as ``full-b1-order0``;
   each group's recorded schedule proves the concurrency it ran at, and the install check
-  certifies the two conditions byte-identical on this host. Every receipt names the
-  condition its row ran under.
+  certifies the two conditions byte-identical on this host. Every receipt, group record
+  and ``extraction_lane`` record names the condition its row ran under (``condition_id``)
+  beside the condition the engine was built for (``engine_condition``, always
+  :data:`ENGINE_CONDITION`).
+* **Stale hand-off directories are removed.** A session that ends without :meth:`LaneSession.close`
+  leaves its shared-memory directory behind; :meth:`LaneSession.open` removes every one
+  under the hand-off root whose owning process is gone, and records which.
 
 A single-GPU lane only: a tensor-parallel lane is refused.
 
@@ -144,38 +150,44 @@ class Cadence:
     """Which of a session's groups run the non-interference check.
 
     ``next_index`` is the session index the next group gets. Every group is checked
-    while the warm-up lasts: until a group under each condition in :data:`CONDITIONS`
-    has passed and the session's first :data:`WARMUP_GROUPS` groups have passed. After
-    it, a group is checked when its index is a multiple of :data:`CHECK_EVERY`. The
-    plan is a function of the indices and conditions alone, never chosen.
+    while the warm-up lasts: until the session's first :data:`WARMUP_GROUPS` groups
+    have passed and each condition the session has used has a passing group. The
+    warm-up ends once, and for good. After it, a group is checked when its index is a
+    multiple of :data:`CHECK_EVERY`, and the first group under a condition the session
+    has not used before is always checked. The plan is a function of the indices and
+    conditions alone, never chosen.
     """
 
     next_index: int = 0
+    used_conditions: set[str] = field(default_factory=set)
     passed_conditions: set[str] = field(default_factory=set)
     passed_groups: int = 0
-
-    def warm(self) -> bool:
-        return (self.passed_groups < WARMUP_GROUPS
-                or not set(CONDITIONS) <= self.passed_conditions)
+    warm: bool = True
 
     def plan(self, condition_id: str, n_groups: int) -> list[bool]:
         """The checks for the next ``n_groups`` groups under ``condition_id``, given
         that every checked group before them passes (a failure stops the session)."""
         if condition_id not in CONDITIONS or n_groups < 1:
             raise ValueError("a declared condition and at least one group are required")
-        trial = Cadence(self.next_index, set(self.passed_conditions), self.passed_groups)
+        trial = Cadence(self.next_index, set(self.used_conditions),
+                        set(self.passed_conditions), self.passed_groups, self.warm)
         checks = []
         for _ in range(n_groups):
-            checked = trial.warm() or trial.next_index % CHECK_EVERY == 0
+            checked = (trial.warm or trial.next_index % CHECK_EVERY == 0
+                       or condition_id not in trial.used_conditions)
             trial.advance(condition_id, checked)
             checks.append(checked)
         return checks
 
     def advance(self, condition_id: str, checked: bool) -> None:
         """Record one group that ran and, when checked, passed."""
+        self.used_conditions.add(condition_id)
         if checked:
             self.passed_conditions.add(condition_id)
             self.passed_groups += 1
+        if (self.warm and self.passed_groups >= WARMUP_GROUPS
+                and self.used_conditions <= self.passed_conditions):
+            self.warm = False
         self.next_index += 1
 
 
@@ -222,6 +234,45 @@ def check_release(handle: Mapping[str, Any], receipt: Mapping[str, Any]) -> None
     if named != receipted:
         raise LaneSessionError(f"row {gid}: its receipt describes other tensors than the "
                                "hand-off it was reduced from")
+
+
+HANDOFF_PREFIX = "anamnesis-lane-"
+"""A session's shared-memory directory is named ``anamnesis-lane-<pid>-<token>``, the
+pid being the process that opened the session."""
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def remove_stale_handoff_dirs(root: Path) -> list[dict[str, Any]]:
+    """Remove every session directory under ``root`` whose opening process is gone.
+
+    A directory whose name carries no pid, whose pid is alive, or that cannot be
+    removed (another user's) is left alone. Returns ``{"path", "pid", "bytes"}`` for
+    each directory removed.
+    """
+    removed = []
+    for path in sorted(Path(root).glob(f"{HANDOFF_PREFIX}*")):
+        parts = path.name[len(HANDOFF_PREFIX):].split("-")
+        if not path.is_dir() or len(parts) != 2 or not parts[0].isdecimal():
+            continue
+        pid = int(parts[0])
+        if pid == os.getpid() or _pid_alive(pid):
+            continue
+        try:
+            size = sum(f.stat().st_size for f in path.iterdir() if f.is_file())
+            shutil.rmtree(path)
+        except OSError:
+            continue
+        removed.append(dict(path=str(path), pid=pid, bytes=size))
+    return removed
 
 
 # ── the children ─────────────────────────────────────────────────────────────
@@ -287,7 +338,8 @@ def _engine_main(spec: Mapping[str, Any], reply,  # type: ignore[no-untyped-def]
         substrate = capture_receipt(handoff.substrate(view))
         handoff.release(view)
         receipt = dict(record, receipt_id=handle["receipt_id"], substrate=substrate,
-                       condition_id=condition_id, handoff="memory")
+                       condition_id=condition_id, engine_condition=ENGINE_CONDITION,
+                       handoff="memory")
         write_json(out / f"row-{record['generation_id']:05d}.json", receipt)
         reply(dict(event="receipt", generation_id=record["generation_id"], receipt=receipt,
                    receipt_s=time.perf_counter() - began))
@@ -325,7 +377,9 @@ def _engine_main(spec: Mapping[str, Any], reply,  # type: ignore[no-untyped-def]
                 checks=message["checks"], publish=publish)
             for job in pending:
                 job.result()
-            reply(dict(event="done", ok=True, groups=result["groups"],
+            groups = [dict(g, condition_id=condition_id,
+                           engine_condition=ENGINE_CONDITION) for g in result["groups"]]
+            reply(dict(event="done", ok=True, groups=groups,
                        seconds=time.perf_counter() - began))
         except NoninterferenceError as exc:
             for job in pending:
@@ -574,7 +628,10 @@ class LaneSession:
         schedule records and capture receipts. ``handoff_root`` is a shared-memory
         directory; the session's segments live in a private directory under it, at most
         ``max_in_flight`` rows waiting for the readout at a time (about a gigabyte each
-        for the largest model). ``cache_dir`` holds the install-check receipts.
+        for the largest model). Before it makes its own, it removes every session directory
+        under ``handoff_root`` whose opening process is gone
+        (:func:`remove_stale_handoff_dirs`) and lists them in the session record under
+        ``removed_stale_handoff_dirs``. ``cache_dir`` holds the install-check receipts.
 
         Raises
         ------
@@ -627,8 +684,9 @@ class LaneSession:
         except (ValueError, RuntimeError, OSError, ImportError) as exc:
             raise LaneSessionError(f"vLLM lane {model!r} refused: {exc}") from exc
 
+        stale = remove_stale_handoff_dirs(Path(handoff_root))
         token = secrets.token_hex(6)
-        segments = Path(handoff_root) / f"anamnesis-lane-{os.getpid()}-{token}"
+        segments = Path(handoff_root) / f"{HANDOFF_PREFIX}{os.getpid()}-{token}"
         segments.mkdir(mode=0o700)
         engine = readout = None
         try:
@@ -658,8 +716,12 @@ class LaneSession:
             fixture_digest=fixtures.digest, calibration_sha256=fixtures.calibration_sha256,
             engine_condition=ENGINE_CONDITION, short_condition=SHORT_CONDITION,
             cadence=dict(warmup_groups=WARMUP_GROUPS, check_every=CHECK_EVERY,
-                         conditions=sorted(CONDITIONS)),
+                         conditions=sorted(CONDITIONS),
+                         warm_up_ends="first warmup_groups groups passed and every used "
+                                      "condition has a passing group",
+                         new_condition="first group under an unused condition is checked"),
             handoff="memory", max_in_flight=int(max_in_flight),
+            removed_stale_handoff_dirs=stale,
             engine=engine.ready.get("record"), readout=readout.ready.get("record")),
             indent=2, default=str) + "\n")
         return session
@@ -703,6 +765,7 @@ class LaneSession:
             input_tokens_sha256=hashlib.sha256(input_ids.tobytes()).hexdigest(),
             feature_schema_sha256=feature_schema_sha256(self.feature_names),
             calibration_sha256=self.fixtures.calibration_sha256, certified=False,
+            engine_condition=receipt["engine_condition"],
             resident=True, capture_receipt_sha256=receipt["substrate"]["sha256"],
             noninterference=receipt["noninterference"])
 

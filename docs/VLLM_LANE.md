@@ -181,8 +181,9 @@ the processes live and three things that follow from that:
   No row's vector is returned before its receipt is written beside the call's schedule
   records in the session's work directory.
 - **The non-interference check runs on a cadence.** Every group is run unhooked and hooked
-  and compared until a group under each condition and the session's first eight groups have
-  passed; after that, every sixteenth group by its index in the session. Each group's record
+  and compared until the session's first eight groups have passed and each condition the
+  session has used has a passing group; after that, every sixteenth group by its index in the
+  session, and the first group under a condition the session has not used before. Each group's record
   and each row's receipt say `checked` or `not_checked`, and an unchecked group never claims
   `hook_noninterference`. A failed check stops the session and names every row it returned
   since the last passing check as unverified, to be captured again or dropped. Banks, install
@@ -191,8 +192,14 @@ the processes live and three things that follow from that:
   rows or more runs as `full-b8-order0` (a short final batch filled with other rows of the
   capture, never read back); a capture of fewer runs one request at a time, as
   `full-b1-order0`, with no filler rows. The install check certifies the two conditions
-  byte-identical on the host, each group's recorded schedule proves the concurrency it ran
-  at, and each receipt names its row's condition.
+  byte-identical on the host, and each group's recorded schedule proves the concurrency it
+  ran at. Every receipt, group record and `extraction_lane` record names the condition its
+  row ran under (`condition_id`) beside the condition the engine was built for
+  (`engine_condition: full-b8-order0`).
+
+A session that ends without closing leaves its shared-memory directory
+(`anamnesis-lane-<pid>-<token>`) behind. Opening a session removes every such directory whose
+process is gone, and lists them in `session.json` as `removed_stale_handoff_dirs`.
 
 A session holds one GPU: the engine and the readout share the first visible device. A
 tensor-parallel lane is refused.
