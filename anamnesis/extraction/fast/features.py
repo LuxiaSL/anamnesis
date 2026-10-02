@@ -65,6 +65,43 @@ class GpuFeatureResult:
     metadata: dict
 
 
+SOURCE_EQUIVALENCE = Path(__file__).with_name("source_equivalence.json")
+"""Measured equivalences between lane source files: an entry names a file's new
+digest, the digest it computes byte-identically to, and the evidence. Append-only;
+a change that moves any feature byte gets no entry."""
+
+
+def canonical_sources(digests: dict[str, str]) -> dict[str, str]:
+    """Each file's digest replaced by its earliest measured equivalent.
+
+    Raises
+    ------
+    ValueError
+        When the equivalence file is malformed, an entry lacks its evidence or
+        authority, or a
+        chain of equivalences returns to a digest it already passed.
+    """
+    entries = json.loads(SOURCE_EQUIVALENCE.read_text())["equivalences"]
+    earlier: dict[tuple[str, str], str] = {}
+    for entry in entries:
+        if not entry.get("evidence") or not entry.get("authority"):
+            raise ValueError(f"source equivalence {entry} names no evidence or authority")
+        key = (entry["file"], entry["sha256"])
+        if key in earlier:
+            raise ValueError(f"source equivalence lists {key} twice")
+        earlier[key] = entry["equivalent_to"]
+    canonical = {}
+    for name, digest in digests.items():
+        seen = {digest}
+        while (name, digest) in earlier:
+            digest = earlier[(name, digest)]
+            if digest in seen:
+                raise ValueError(f"source equivalences for {name} form a cycle")
+            seen.add(digest)
+        canonical[name] = digest
+    return canonical
+
+
 class GpuFeatureLane:
     def __init__(
         self,
@@ -167,7 +204,9 @@ class GpuFeatureLane:
                 pca_mean, device=self.device, dtype=torch.float64
             )
         self.calibration_sha256 = calibration_sha256
-        sources = {
+        # The files' own digests are provenance; the identity hashes each one's
+        # earliest measured equivalent, so a bit-identical edit keeps the lane id.
+        self.source_sha256 = {
             p.name: hashlib.sha256(p.read_bytes()).hexdigest()
             for p in [
                 Path(__file__),
@@ -178,7 +217,7 @@ class GpuFeatureLane:
             ]
         }
         identity = dict(
-            sources=sources,
+            sources=canonical_sources(self.source_sha256),
             extraction=extraction.model_dump(mode="json"),
             families=families.model_dump(mode="json"),
             calibration=calibration_sha256,
@@ -577,7 +616,10 @@ class GpuFeatureLane:
     ):
         steps = end - start - 1
         layers = decoder_layers(loaded.model)
-        h2d_bytes = 0
+        # The row's positional means for every block, uploaded once.
+        pm = np.ascontiguousarray(self.pm[1 : len(layers) + 1, start : start + steps])
+        h2d_bytes = pm.nbytes
+        positional = torch.as_tensor(pm, device=self.device)
         previous = None
         for layer in range(len(layers)):
             h = (
@@ -585,9 +627,7 @@ class GpuFeatureLane:
                 .to(self.device)
                 .float()
             )
-            pm = np.ascontiguousarray(self.pm[layer + 1, start : start + steps])
-            h2d_bytes += pm.nbytes
-            corrected = h - torch.as_tensor(pm, device=self.device)
+            corrected = h - positional[layer]
             norms = corrected.norm(dim=-1).float()
             collector.put(f"activation_norm_mean_L{layer}", norms.mean())
             collector.put(f"activation_norm_std_L{layer}", std(norms))
@@ -667,6 +707,7 @@ class GpuFeatureLane:
         ancillary = 8 + (knnlm.nbytes if knnlm is not None else 0)
         receipt = dict(
             lane_id=self.lane_id,
+            lane_source_sha256=dict(self.source_sha256),
             replay_id=str(uuid.uuid4()),
             fresh_cache=True,
             replay_path=self.replay_path,

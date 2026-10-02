@@ -1,0 +1,19 @@
+{
+  "description": "Measured equivalences between fast-lane source files. Each entry says a file's new sha256 computes byte-identically to an earlier one; the lane identity hashes the earliest. Append-only. A change that moves any feature byte gets no entry.",
+  "equivalences": [
+    {
+      "file": "families.py",
+      "sha256": "9899ae23be0484ec1c48663c34f228fb349e200ce36b828137bcdde3f9b69f84",
+      "equivalent_to": "a9d80a60350e52f1c8c158c6b51fba1f4882f9a8f3669c86c032935bc07c5dea",
+      "authority": "governing ruling §53",
+      "evidence": "Measured on node2 (8xB200), old source 3ba9794 against the new: the vLLM install check identical at 3b, 8b and 70b under unchanged lane ids; reduce_capture byte-identical on 64 retained 70B captures (32 native, 32 null); the fast lane byte-identical on 8 70B rows with lane id unchanged (torch-eager-reduce-v1-fa7e1942eea837a5fea0); the gate top-k equal to the frozen earlier form on tie-forced surfaces (tests/test_gate_topk_equivalence.py). Records: node2:/models/anamnesis-vllm-integration/readout-p2-001/{install2-*,readout-compare,fast-compare}."
+    },
+    {
+      "file": "features.py",
+      "sha256": "a8737153447b48fe81d1aeb295afa252f751d4e1e7841489fc114ffd0a42bdf0",
+      "equivalent_to": "dd59f0cec50c827de5a70d04930c1ba4000d37624c18f0529b97d6c295ff0815",
+      "authority": "governing ruling §53",
+      "evidence": "Measured on node2 (8xB200), old source 3ba9794 against the new: the vLLM install check identical at 3b, 8b and 70b under unchanged lane ids; reduce_capture byte-identical on 64 retained 70B captures (32 native, 32 null); the fast lane byte-identical on 8 70B rows with lane id unchanged (torch-eager-reduce-v1-fa7e1942eea837a5fea0); the gate top-k equal to the frozen earlier form on tie-forced surfaces (tests/test_gate_topk_equivalence.py). Records: node2:/models/anamnesis-vllm-integration/readout-p2-001/{install2-*,readout-compare,fast-compare}."
+    }
+  ]
+}

@@ -240,10 +240,12 @@ def reduce_capture(lane: GpuFeatureLane, capture: dict, *, start: int, end: int,
     )
     sampled = set(lane.config.sampled_layers)
     previous = None
+    # The row's positional means for every block, uploaded once.
+    positional = torch.as_tensor(
+        np.ascontiguousarray(lane.pm[1 : n + 1, start : start + steps]), device=lane.device)
     for layer in range(n):
         h = capture["hidden"][layer].float()
-        pm = np.ascontiguousarray(lane.pm[layer + 1, start : start + steps])
-        corrected = h - torch.as_tensor(pm, device=lane.device)
+        corrected = h - positional[layer]
         norms = corrected.norm(dim=-1).float()
         out.put(f"activation_norm_mean_L{layer}", norms.mean())
         out.put(f"activation_norm_std_L{layer}", std(norms))
