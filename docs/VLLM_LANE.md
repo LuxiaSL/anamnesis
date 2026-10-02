@@ -120,10 +120,16 @@ evenly spaced rows' median and tail against the recorded 90th and 99th percentil
 how far this lane sits from the qualified one.
 
 The receipt is cached under the output root, keyed by the host's fingerprint (GPU, driver,
-CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures, tolerance, engine
-settings and the lane's source), and reused only while every field is equal. Change any of them
-and the check runs again; `--refresh` runs it regardless. A receipt of another contract is
-decided again, never reinterpreted.
+CUDA runtime, torch, vLLM and anamnesis versions, NumPy's CPU dispatch, checkpoint, fixtures,
+tolerance, engine settings and the lane's source), and reused only while every field is equal.
+Change any of them and the check runs again; `--refresh` runs it regardless. A receipt of another
+contract is decided again, never reinterpreted.
+
+NumPy's CPU dispatch is in the fingerprint because the readout sorts on the host: the gate's top-k
+overlap takes NumPy's `argsort` tie order, which differs between AVX-512, AVX2 and scalar loops.
+Two hosts that differ only in CPU can therefore compute that feature differently on tied rows.
+The dispatch is recorded, not hashed into the lane id; comparing lanes on two such hosts is a
+lane-agreement audit.
 
 Exit status 0 means identical or own-lane, 1 refused, 2 that the check could not run (a
 missing engine, checkpoint or calibration, with the reason).

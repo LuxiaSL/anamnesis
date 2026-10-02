@@ -51,7 +51,7 @@ from anamnesis.extraction.calibration import (
 )
 from anamnesis.extraction.layer_split import LayerSplit
 from anamnesis.extraction.replay_config import native_replay_configs
-from anamnesis.provenance import digest_of_shas, file_sha
+from anamnesis.provenance import digest_of_shas, file_sha, numpy_dispatch
 
 if TYPE_CHECKING:
     from anamnesis.config import ExtractionConfig, FeaturePipelineConfig
@@ -581,6 +581,7 @@ class PreparedLane:
             model_files_sha256=self.model_files,
             model_config=self.loaded.model.config.to_dict(),
             lane_runtime_source_sha256=file_sha(Path(__file__)),
+            numpy_dispatch=numpy_dispatch(),
         )
         if self.layer_split is not None and not self.layer_split.is_single:
             import torch

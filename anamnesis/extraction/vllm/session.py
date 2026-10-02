@@ -305,10 +305,13 @@ def _wait_for_room(directory: Path, limit: int, timeout: float) -> float:
 def _device_record() -> dict[str, Any]:
     import torch
 
+    from anamnesis.provenance import numpy_dispatch
+
     if not torch.cuda.is_available():
-        return dict(device=None, device_uuid=None)
+        return dict(device=None, device_uuid=None, numpy_dispatch=numpy_dispatch())
     return dict(device=torch.cuda.get_device_name(0),
-                device_uuid=str(torch.cuda.get_device_properties(0).uuid))
+                device_uuid=str(torch.cuda.get_device_properties(0).uuid),
+                numpy_dispatch=numpy_dispatch())
 
 
 def _engine_main(spec: Mapping[str, Any], reply,  # type: ignore[no-untyped-def]

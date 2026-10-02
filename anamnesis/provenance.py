@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 BLOCK_BYTES = 8 * 1024**2
 """How much of a file is read at a time. Large enough that hashing a checkpoint is
@@ -35,6 +35,27 @@ def file_sha(path: Path) -> str:
         for block in iter(lambda: stream.read(BLOCK_BYTES), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def numpy_dispatch() -> dict[str, Any]:
+    """NumPy's version and the CPU instruction sets its compiled loops dispatch to here.
+
+    NumPy picks a loop per CPU at runtime, and its ``argsort`` orders tied values
+    differently under AVX-512, AVX2 and scalar loops, which the gate's top-k overlap
+    reads. So a reduction's record names the dispatch, beside the device: the
+    baseline the build assumes, and each dispatch target this CPU enables.
+    """
+    import numpy
+
+    try:
+        from numpy._core import _multiarray_umath as umath
+    except ImportError:  # NumPy 1.x
+        from numpy.core import _multiarray_umath as umath  # type: ignore[no-redef]
+    features = dict(getattr(umath, "__cpu_features__", {}))
+    return dict(numpy=numpy.__version__,
+                baseline=list(getattr(umath, "__cpu_baseline__", [])),
+                dispatch=[name for name in getattr(umath, "__cpu_dispatch__", [])
+                          if features.get(name)])
 
 
 def digest_of_shas(shas: Mapping[str, str]) -> str:

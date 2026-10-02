@@ -36,7 +36,7 @@ import hashlib
 import json
 from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
@@ -243,6 +243,10 @@ class HostFingerprint(BaseModel):
                     "receipt never outlives a change to either")
     fixture_digest: str
     tolerance_digest: str
+    numpy_dispatch: dict[str, Any] = Field(
+        default_factory=dict,
+        description="NumPy's version and the CPU instruction sets its loops dispatch to; "
+                    "the readout's host-side sorts depend on them")
 
     @property
     def digest(self) -> str:
