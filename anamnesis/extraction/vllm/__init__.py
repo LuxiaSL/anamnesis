@@ -44,6 +44,9 @@ declared there, and on a host only after that host's install check.
 * :mod:`~anamnesis.extraction.vllm.runtime` and
   :mod:`~anamnesis.extraction.vllm.steps` — the two processes a pass runs as, the
   host fingerprint, and the check and replay flows the commands call.
+* :mod:`~anamnesis.extraction.vllm.session` and
+  :mod:`~anamnesis.extraction.vllm.handoff` — the same two processes held open across
+  captures, with each row handed from the engine to the readout in shared memory.
 
 This module imports none of them: the engine is an optional dependency, and
 nothing here should require it to be importable.

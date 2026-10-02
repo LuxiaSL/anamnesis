@@ -31,7 +31,8 @@ one of these models can join as an extension lane of its own (see
 Install from a clone into a virtual environment of its own, because the extra pins torch
 exactly: `uv pip install -e ".[vllm]"`. Triton compiles a small launcher when it first runs,
 so the Python interpreter's development headers must be present; the interpreters `uv`
-installs carry them.
+installs carry them. An interpreter without its C headers runs the lane only from a Triton
+cache prebuilt where they exist, named by `TRITON_CACHE_DIR`.
 
 `--model-path` is a local directory holding the checkpoint's `config.json` and its
 `*.safetensors` shards at the top level: Meta's Instruct release of the model, as published
@@ -152,6 +153,56 @@ record naming the tier, the receipt digest, the calibration and the feature sche
 contrast, so a bank from an `identical` host joins other `identical` banks of the same model,
 and an `own-lane` host's bank joins only banks from that host. Every reader that takes a
 signature directory reads it, `run_gauntlet` among them.
+
+## Resident sessions
+
+A caller that captures a few rows at a time for as long as it runs (a server harvesting one
+draw at a time, say) holds the lane open instead of starting it per call:
+
+```python
+from anamnesis.extraction.vllm.session import LaneSession
+
+with LaneSession.open("8b", model_path, work_dir=work, cache_dir=receipts) as lane:
+    result = lane.capture(rows)   # rows: generation_id, input_ids, prompt_length
+    result.vectors[gid], result.receipts[gid], lane.extraction_lane(row, result.receipts[gid])
+```
+
+It is the same lane, with the same id: the same two processes, started the same way, with the
+same engine settings and readout, behind the same install-check receipt, which it refuses to
+start without. `anamnesis/extraction/vllm/session.py` holds it. What differs is how long
+the processes live and three things that follow from that:
+
+- **Rows cross in memory.** Each row's substrate goes from the engine to the readout through a
+  shared-memory segment (`anamnesis/extraction/vllm/handoff.py`), not a file, and the readout
+  reduces it while the engine captures the next group. The engine still computes each row's
+  content receipt, the sha256 of every tensor's native bytes, over the bytes it handed off,
+  on a background thread; the readout checks that the segment is the one the engine published
+  for that row (row id, receipt id, tensor names, shapes and dtypes) instead of re-hashing it.
+  No row's vector is returned before its receipt is written beside the call's schedule
+  records in the session's work directory.
+- **The non-interference check runs on a cadence.** Every group is run unhooked and hooked
+  and compared until the session's first eight groups have passed and each condition the
+  session has used has a passing group; after that, every sixteenth group by its index in the
+  session, and the first group under a condition the session has not used before. Each group's record
+  and each row's receipt say `checked` or `not_checked`, and an unchecked group never claims
+  `hook_noninterference`. A failed check stops the session and names every row it returned
+  since the last passing check as unverified, to be captured again or dropped. Banks, install
+  checks and transfer audits check every group.
+- **One engine, two conditions.** The engine is built for batches of eight. A capture of eight
+  rows or more runs as `full-b8-order0` (a short final batch filled with other rows of the
+  capture, never read back); a capture of fewer runs one request at a time, as
+  `full-b1-order0`, with no filler rows. The install check certifies the two conditions
+  byte-identical on the host, and each group's recorded schedule proves the concurrency it
+  ran at. Every receipt, group record and `extraction_lane` record names the condition its
+  row ran under (`condition_id`) beside the condition the engine was built for
+  (`engine_condition: full-b8-order0`).
+
+A session that ends without closing leaves its shared-memory directory
+(`anamnesis-lane-<pid>-<token>`) behind. Opening a session removes every such directory whose
+process is gone, and lists them in `session.json` as `removed_stale_handoff_dirs`.
+
+A session holds one GPU: the engine and the readout share the first visible device. A
+tensor-parallel lane is refused.
 
 ## Extension lanes (fine-tunes of a qualified model)
 

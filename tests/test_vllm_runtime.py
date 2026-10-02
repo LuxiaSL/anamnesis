@@ -580,6 +580,8 @@ READOUT_SIDE = (
     "anamnesis.extraction.vllm.readout",
     "anamnesis.extraction.vllm.runtime",
     "anamnesis.extraction.vllm.steps",
+    "anamnesis.extraction.vllm.handoff",
+    "anamnesis.extraction.vllm.session",
     "anamnesis.scripts.qualify_vllm",
     "anamnesis.scripts.run_vllm_replay",
 )
