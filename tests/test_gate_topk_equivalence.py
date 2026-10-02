@@ -101,7 +101,7 @@ def test_every_lane_source_canonicalizes_to_its_identity_digest():
 
 def test_every_equivalence_names_its_evidence():
     entries = json.loads(features_mod.SOURCE_EQUIVALENCE.read_text())["equivalences"]
-    assert entries and all(e["evidence"] and e["evidence"] != "PENDING" and e["authority"]
+    assert entries and all(e["evidence"] and "PENDING" not in e["evidence"] and e["authority"]
                            for e in entries)
 
 
