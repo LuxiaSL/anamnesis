@@ -1,0 +1,19 @@
+{
+  "description": "Measured equivalences between fast-lane source files. Each entry says a file's new sha256 computes byte-identically to an earlier one; the lane identity hashes the earliest. Append-only. A change that moves any feature byte gets no entry.",
+  "equivalences": [
+    {
+      "file": "families.py",
+      "sha256": "9899ae23be0484ec1c48663c34f228fb349e200ce36b828137bcdde3f9b69f84",
+      "equivalent_to": "a9d80a60350e52f1c8c158c6b51fba1f4882f9a8f3669c86c032935bc07c5dea",
+      "authority": "anamnesis #43",
+      "evidence": "Old source 3ba9794 against the new, on 8x B200: the vLLM install check decided identical at 3b, 8b and 70b under unchanged lane ids; reduce_capture gave byte-identical vectors on 64 captured 70B rows (32 native, 32 null); the fast lane gave byte-identical vectors on 8 70B rows with its lane id unchanged; the 128-row spec70 bank of a 70B extension lane, re-banked through the new source after its install check decided identical, was array_equal on 128 of 128 rows under its unchanged lane id; and tests/test_gate_topk_equivalence.py holds the gate top-k equal to its earlier form on tie-forced surfaces."
+    },
+    {
+      "file": "features.py",
+      "sha256": "a8737153447b48fe81d1aeb295afa252f751d4e1e7841489fc114ffd0a42bdf0",
+      "equivalent_to": "dd59f0cec50c827de5a70d04930c1ba4000d37624c18f0529b97d6c295ff0815",
+      "authority": "anamnesis #43",
+      "evidence": "Old source 3ba9794 against the new, on 8x B200: the vLLM install check decided identical at 3b, 8b and 70b under unchanged lane ids; reduce_capture gave byte-identical vectors on 64 captured 70B rows (32 native, 32 null); the fast lane gave byte-identical vectors on 8 70B rows with its lane id unchanged; the 128-row spec70 bank of a 70B extension lane, re-banked through the new source after its install check decided identical, was array_equal on 128 of 128 rows under its unchanged lane id; and tests/test_gate_topk_equivalence.py holds the gate top-k equal to its earlier form on tie-forced surfaces."
+    }
+  ]
+}

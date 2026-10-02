@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from itertools import combinations
 
 import numpy as np
@@ -49,6 +50,43 @@ def half_drift(x: Tensor) -> Tensor:
     return 1 - cos(x[:mid].mean(dim=0).float(), x[mid:].mean(dim=0).float())
 
 
+_TOPK_POOL: ThreadPoolExecutor | None = None
+
+
+def _topk_pool() -> ThreadPoolExecutor:
+    """One small pool per process for the gate's host-side top-k work. NumPy releases
+    the GIL in its ufuncs and sorts, so the sampled layers' work runs concurrently."""
+    global _TOPK_POOL
+    if _TOPK_POOL is None:
+        _TOPK_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gate-topk")
+    return _TOPK_POOL
+
+
+def gate_topk_overlap(host: np.ndarray) -> float:
+    """The historical top-k Jaccard of one gate surface ``[T, I]`` (float32, on host).
+
+    The SiLU is ``a * (1 / (1 + exp(-clip(a, -88, 88))))`` in float64, applied through
+    the same ufuncs in the same operand order, in place rather than through
+    temporaries; the top-k comes from NumPy's ``argsort``, whose tie order is part of
+    the feature.
+    """
+    activated = host.astype(np.float64)
+    scale = np.clip(activated, -88, 88)
+    np.negative(scale, out=scale)
+    np.exp(scale, out=scale)
+    np.add(1, scale, out=scale)
+    np.divide(1, scale, out=scale)
+    np.multiply(activated, scale, out=activated)
+    del scale
+    k = min(100, activated.shape[1] // 10)
+    top = np.argsort(np.abs(activated, out=activated), axis=1)[:, -k:]
+    overlaps = []
+    for a, b in zip(top[:-1], top[1:], strict=True):
+        sa, sb = set(a), set(b)
+        overlaps.append(len(sa & sb) / len(sa | sb) if sa | sb else 0.0)
+    return float(np.mean(overlaps))
+
+
 class FamilyReducer:
     def __init__(self, out: FeatureCollector, extraction, families):
         self.out = out
@@ -63,6 +101,7 @@ class FamilyReducer:
         self.epochs: list[tuple[Tensor, Tensor, Tensor]] = []
         self.gate_tie_exception_d2h_bytes = 0
         self.gate_family_present = False
+        self.gate_topk: dict[str, Future] = {}
 
     def operators(self, prefix: str, x: Tensor) -> None:
         self.out.operators(
@@ -211,19 +250,13 @@ class FamilyReducer:
         # Named CPU exception: NumPy's unstable argsort tie ordering is part of
         # the historical top-k Jaccard. bf16 gate ties are common. CUDA topk or
         # a newly chosen stable sort would change the feature definition.
-        # Transfer only this sampled gate surface, reproduce its exact SiLU and
-        # argsort, and price the bytes/time; all other gate reductions stay here.
+        # Transfer only this sampled gate surface and reproduce its exact SiLU and
+        # argsort on the host, concurrently with the other layers and the GPU
+        # reductions; finish() collects it. All other gate reductions stay here.
         host = pre_silu.float().cpu().numpy()
         self.gate_tie_exception_d2h_bytes += host.nbytes
-        activated = host.astype(np.float64)
-        activated = activated * (1 / (1 + np.exp(-np.clip(activated, -88, 88))))
-        k = min(100, activated.shape[1] // 10)
-        top = np.argsort(np.abs(activated), axis=1)[:, -k:]
-        overlaps = []
-        for a, b in zip(top[:-1], top[1:], strict=True):
-            sa, sb = set(a), set(b)
-            overlaps.append(len(sa & sb) / len(sa | sb) if sa | sb else 0.0)
-        self.out.put(prefix + "_topk_overlap_mean", float(np.mean(overlaps)))
+        self.gate_topk[prefix + "_topk_overlap_mean"] = _topk_pool().submit(
+            gate_topk_overlap, host)
         self.operators(prefix + "_sparsity", sp)
         self.operators(prefix + "_drift", dr)
 
@@ -263,6 +296,9 @@ class FamilyReducer:
             )
 
     def finish(self) -> None:
+        for name, overlap in self.gate_topk.items():
+            self.out.put(name, overlap.result())
+        self.gate_topk.clear()
         for index, name in enumerate(
             ("epoch_n_transitions", "epoch_max_transition", "epoch_regularity")
         ):
