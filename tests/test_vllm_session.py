@@ -205,12 +205,18 @@ def test_the_child_command_line_is_checked(capsys):
 
 REFUSE: dict[str, str | None] = dict(reason=None)
 """Set a reason here and the stand-in reduction refuses with it."""
+DELAY: dict[str, float] = dict(seconds=0.0)
+"""Seconds the stand-in reduction takes, so concurrent readouts overlap."""
 
 
 def fake_reduce(lane, capture, *, start, end, model):
     """A stand-in reduction: a few sums over the substrate, in float32."""
     if REFUSE["reason"]:
         raise ValueError(REFUSE["reason"])
+    if DELAY["seconds"]:
+        import time
+
+        time.sleep(DELAY["seconds"])
     values = [capture["hidden"].float().sum(), capture["logits"].float().sum(),
               capture["keys"][0].float().sum(), capture["chosen"].float().sum()]
     return SimpleNamespace(features=np.asarray([float(v) for v in values], dtype=np.float32))
@@ -259,9 +265,9 @@ class ThreadChild(session._Child):
 
 
 @pytest.fixture
-def lane(tmp_path, monkeypatch):
-    """A session whose engine child drives the stand-in engine and whose readout child
-    reduces with the stand-in reduction, both through real segments."""
+def lane(request, tmp_path, monkeypatch):
+    """A session whose engine child drives the stand-in engine and whose readout children
+    (one, or ``request.param``) reduce with the stand-in reduction, through real segments."""
     engine = FakeEngine()
     monkeypatch.setattr(runtime, "build_engine", lambda model, path, condition: dict(
         llm=engine, runner=engine.runner, tokens_prompt=dict, sampled_layers=[0, 2],
@@ -281,9 +287,16 @@ def lane(tmp_path, monkeypatch):
         model="8b", model_path="unused", segments=str(segments), max_in_flight=2,
         token="tok"))
     engine_child.wait_ready(30)
-    readout_child = ThreadChild("readout", session._readout_main, dict(
-        model="8b", calib_dir="unused", segments=str(segments), feature_names=NAMES))
-    readout_child.wait_ready(30)
+    readouts = []
+    for index in range(getattr(request, "param", 1)):
+        readouts.append(ThreadChild(f"readout-{index + 1}", session._readout_main, dict(
+            model="8b", calib_dir="unused", segments=str(segments), feature_names=NAMES)))
+        readouts[-1].wait_ready(30)
+        sends = []
+        readouts[-1].sent = sends
+        original = readouts[-1].send
+        readouts[-1].send = lambda message, original=original, sends=sends: (
+            sends.append(message), original(message))[1]
     work = tmp_path / "work"
     work.mkdir()
     lane_session = session.LaneSession(
@@ -292,7 +305,7 @@ def lane(tmp_path, monkeypatch):
                                 digest="d"),
         fixtures=SimpleNamespace(feature_names=NAMES, calibration_sha256="c"),
         work_dir=work, segments=segments, schema_inputs=None, engine=engine_child,
-        readout=readout_child, idle_timeout=60)
+        readouts=readouts, idle_timeout=60)
     lane_session._schemas = {steps: True for steps in range(1, 64)}
     lane_session.engine = engine
     yield lane_session
@@ -344,6 +357,46 @@ def test_a_session_gives_the_disk_paths_vectors_and_receipts(lane, tmp_path, ids
         assert result.knnlm[gid].tobytes() == knnlm[gid].tobytes()
     assert not list(lane.segments.iterdir())
     assert not list(result.directory.glob("*.pt"))
+
+
+@pytest.mark.parametrize("lane", [2, 3], indirect=True)
+def test_parallel_readouts_give_the_disk_paths_vectors_in_order(lane, tmp_path, monkeypatch):
+    monkeypatch.setitem(DELAY, "seconds", 0.2)
+    ids = list(range(11))
+    result = lane.capture(rows(ids))
+    vectors, receipts, knnlm = disk_path(tmp_path, rows(ids), "full-b8-order0")
+    for gid in ids:
+        assert result.vectors[gid].tobytes() == vectors[gid].tobytes()
+        assert result.knnlm[gid].tobytes() == knnlm[gid].tobytes()
+        assert result.receipts[gid]["substrate"] == receipts[gid]["substrate"]
+    given = [m["row"]["generation_id"] for child in lane._readouts for m in child.sent
+             if m.get("op") == "reduce"]
+    assert sorted(given) == ids
+    assert sum(1 for child in lane._readouts if child.sent) >= 2
+    assert not list(lane.segments.iterdir())
+
+
+def test_every_readout_child_runs_the_readout_step_under_its_own_name(tmp_path, monkeypatch):
+    launched = []
+
+    class Popen:
+        def __init__(self, argv, **kwargs):
+            launched.append(argv)
+
+    monkeypatch.setattr(session.subprocess, "Popen", Popen)
+    child = session._Child("readout", {}, tmp_path / "readout-2.spec.json", {},
+                           name="readout-2")
+    assert child.step == "readout-2"
+    assert launched[0][launched[0].index(session.STEP_MODULE) + 1] == "readout"
+    with pytest.raises(ValueError, match="engine or a readout"):
+        session._Child("readout-2", {}, tmp_path / "x.json", {})
+
+
+def test_a_session_takes_one_to_eight_readouts(tmp_path):
+    for readers in (0, 9):
+        with pytest.raises(session.LaneSessionError, match="readers must be 1..8"):
+            session.LaneSession.open("8b", tmp_path / "m", work_dir=tmp_path / "w",
+                                     cache_dir=tmp_path / "c", readers=readers)
 
 
 def test_a_session_keeps_one_engine_across_captures(lane):
@@ -516,7 +569,7 @@ def test_open_records_the_directories_it_removed(tmp_path, monkeypatch):
         float32_arrays=lambda: (np.zeros((2, 2), dtype=np.float32), None)))
 
     class Ready:
-        def __init__(self, step, spec, path, env):
+        def __init__(self, step, spec, path, env, name=None):
             self.ready = dict(record=dict(step=step))
 
         def wait_ready(self, timeout):
