@@ -848,6 +848,11 @@ class LaneSession:
                         if child is self._engine:
                             done = self._on_engine(reply, by_id, handles, receipts, timing,
                                                    done, waiting)
+                            if done is not None:
+                                # An engine that failed exits after answering; its pipe's
+                                # end is not this call's answer.
+                                selector.unregister(self._engine.fd)
+                                break
                         else:
                             if reply.get("generation_id") not in busy:
                                 raise LaneSessionError(

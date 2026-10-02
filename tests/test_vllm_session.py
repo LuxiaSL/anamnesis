@@ -188,10 +188,19 @@ class ThreadChild(session._Child):
         self.fd, self._buf, self.ready = read_fd, b"", {}
         self.requests: queue.Queue = queue.Queue()
         self.returncode = None
-        reply = session._reply_writer(write_fd)
+        stream = os.fdopen(write_fd, "w", buffering=1)
+        lock = threading.Lock()
+
+        def reply(payload):
+            with lock:
+                stream.write(json.dumps(dict(payload), default=str) + "\n")
 
         def body():
-            self.returncode = target(spec, reply, iter(self.requests.get, None))
+            # A child that returns closes its answers, as a process that exits does.
+            try:
+                self.returncode = target(spec, reply, iter(self.requests.get, None))
+            finally:
+                stream.close()
 
         self.proc = SimpleNamespace(wait=lambda timeout=None: self.thread.join(timeout),
                                     returncode=None)
