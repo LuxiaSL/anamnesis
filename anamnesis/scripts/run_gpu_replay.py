@@ -40,7 +40,7 @@ from anamnesis.extraction.fast.runtime import (
     require_lane_arithmetic,
     resolve_fast_lane,
 )
-from anamnesis.provenance import file_sha
+from anamnesis.provenance import file_sha, numpy_dispatch
 
 
 def parser() -> argparse.ArgumentParser:
@@ -158,6 +158,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             Path(__file__).parents[1] / "extraction/fast/runtime.py"
         ),
         model_config=loaded.model.config.to_dict(),
+        numpy_dispatch=numpy_dispatch(),
         selected_ids=ids,
         source_metadata_sha256=file_sha(source_path)
         if source_path is not None

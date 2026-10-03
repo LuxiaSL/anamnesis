@@ -37,6 +37,7 @@ import pytest
 import torch
 from test_fast_lane_equivalence import tiny_loaded
 
+from anamnesis.provenance import numpy_dispatch
 from anamnesis.config import ModelPreset
 from anamnesis.extraction import model_loader
 from anamnesis.extraction.fast import runtime
@@ -390,6 +391,7 @@ def test_main_runs_from_argv_on_a_registered_preset_and_banks_what_harvest_retur
     deployment = json.loads((out / "deployment.json").read_text())
     assert deployment["device"] == "cpu"
     assert set(deployment["model_files_sha256"]) == {"config.json", "model.safetensors"}
+    assert deployment["numpy_dispatch"] == numpy_dispatch()
 
     lane = prepare_fast_lane(tiny_preset(), calib_dir, device="cpu", loaded=loaded)
     harvested: HarvestResult = harvest_loaded(lane, ids, prompt_len=PROMPT)
