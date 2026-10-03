@@ -65,7 +65,7 @@ from anamnesis.extraction.vllm.envelope import (
     require_pinned_packages,
     required_environment,
 )
-from anamnesis.provenance import digest_of_shas, file_sha
+from anamnesis.provenance import digest_of_shas, file_sha, numpy_dispatch
 
 CALIBRATION_FILES = ("positional_means.npz", "pca_model.pkl")
 """The calibration artifacts the lane reads, and whose digest the fixtures pin."""
@@ -464,7 +464,8 @@ def host_fingerprint(fixtures: FixtureSet, tolerance: Tolerance,
         engine_settings_sha256=settings_digest(
             fixtures.model, matmul_policy=asdict(matmul_launch(
                 properties.shared_memory_per_block_optin))),
-        fixture_digest=fixtures.digest, tolerance_digest=tolerance.digest)
+        fixture_digest=fixtures.digest, tolerance_digest=tolerance.digest,
+        numpy_dispatch=numpy_dispatch())
 
 
 def fixture_rows(fixtures: FixtureSet) -> list[dict[str, Any]]:

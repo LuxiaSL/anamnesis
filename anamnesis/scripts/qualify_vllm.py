@@ -36,9 +36,9 @@ An extension lane (:mod:`anamnesis.extraction.vllm.extensions`) is checked again
 its own fixtures, with its calibration verified against its declared pins.
 
 The receipt is cached under the output root against the host's fingerprint (GPU,
-driver, CUDA runtime, torch, vLLM and anamnesis versions, checkpoint, fixtures,
-tolerance, engine settings and the lane's source), and reused only while every field
-is equal.
+driver, CUDA runtime, torch, vLLM and anamnesis versions, NumPy's CPU dispatch,
+checkpoint, fixtures, tolerance, engine settings and the lane's source), and reused
+only while every field is equal.
 `run_vllm_replay.py` refuses to run on a host without one.
 
 **A pass here is not a certification.** It says this host repeats itself, which
