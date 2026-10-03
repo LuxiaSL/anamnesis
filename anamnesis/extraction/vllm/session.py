@@ -491,8 +491,10 @@ class _Child:
     """One child process: JSON requests on its stdin, JSON answers on a dedicated pipe."""
 
     def __init__(self, step: str, spec: Mapping[str, Any], spec_path: Path,
-                 env: Mapping[str, str]) -> None:
-        self.step = step
+                 env: Mapping[str, str], *, name: str | None = None) -> None:
+        if step not in ("engine", "readout"):
+            raise ValueError(f"a session child is an engine or a readout, not {step!r}")
+        self.step = name or step
         spec_path.write_text(json.dumps(dict(spec), indent=2, default=str) + "\n")
         read_fd, write_fd = os.pipe()
         self.fd = read_fd
@@ -610,7 +612,7 @@ class LaneSession:
         self.segments: Path = state["segments"]
         self._schema_inputs = state["schema_inputs"]
         self._engine: _Child = state["engine"]
-        self._readout: _Child = state["readout"]
+        self._readouts: list[_Child] = list(state.get("readouts") or [state["readout"]])
         self.idle_timeout = float(state["idle_timeout"])
         self.cadence = Cadence()
         self._ledger: list[dict[str, Any]] = []
@@ -623,7 +625,8 @@ class LaneSession:
     @classmethod
     def open(cls, model: str, model_path: Path, *, work_dir: Path, cache_dir: Path,
              calib_dir: Path | None = None, handoff_root: Path = Path("/dev/shm"),
-             max_in_flight: int = 8, startup_timeout: float = STARTUP_TIMEOUT_S,
+             max_in_flight: int = 8, readers: int = 1,
+             startup_timeout: float = STARTUP_TIMEOUT_S,
              idle_timeout: float = IDLE_TIMEOUT_S) -> LaneSession:
         """Admit ``model``'s lane on this host and start its two processes.
 
@@ -635,6 +638,11 @@ class LaneSession:
         under ``handoff_root`` whose opening process is gone
         (:func:`remove_stale_handoff_dirs`) and lists them in the session record under
         ``removed_stale_handoff_dirs``. ``cache_dir`` holds the install-check receipts.
+        ``readers`` readout processes (1 to 8) reduce rows concurrently on the session's
+        device: each holds at most one row, rows are dispatched to them in the order the
+        engine publishes them, and a call releases its rows only when all are reduced.
+        Every reader builds the same readout lane, so which one reduced a row does not
+        reach its vector.
 
         Raises
         ------
@@ -659,6 +667,8 @@ class LaneSession:
         work_dir, model_path = Path(work_dir), Path(model_path)
         if not 1 <= int(max_in_flight) <= 64:
             raise LaneSessionError(f"max_in_flight must be 1..64, got {max_in_flight}")
+        if not 1 <= int(readers) <= 8:
+            raise LaneSessionError(f"readers must be 1..8, got {readers}")
         try:
             if model not in extensions.lane_keys():
                 raise ValueError(f"{model!r} is not a vLLM lane here (lanes: "
@@ -691,28 +701,32 @@ class LaneSession:
         token = secrets.token_hex(6)
         segments = Path(handoff_root) / f"{HANDOFF_PREFIX}{os.getpid()}-{token}"
         segments.mkdir(mode=0o700)
-        engine = readout = None
+        engine = None
+        readouts: list[_Child] = []
         try:
             engine = _Child("engine", dict(
                 model=model, model_path=str(model_path), segments=str(segments),
                 max_in_flight=int(max_in_flight), token=token),
                 work_dir / "engine.spec.json", child_environment("capture", model=model))
             engine.wait_ready(startup_timeout)
-            readout = _Child("readout", dict(
-                model=model, calib_dir=str(calib), segments=str(segments),
-                feature_names=list(fixtures.feature_names)),
-                work_dir / "readout.spec.json", child_environment("reduce"))
-            readout.wait_ready(startup_timeout)
+            for index in range(int(readers)):
+                name = "readout" if index == 0 else f"readout-{index + 1}"
+                readouts.append(_Child("readout", dict(
+                    model=model, calib_dir=str(calib), segments=str(segments),
+                    feature_names=list(fixtures.feature_names)),
+                    work_dir / f"{name}.spec.json", child_environment("reduce"), name=name))
+                readouts[-1].wait_ready(startup_timeout)
         except BaseException:
-            for child in (readout, engine):
+            for child in (*readouts, engine):
                 if child is not None:
                     child.close()
             shutil.rmtree(segments, ignore_errors=True)
             raise
+        readout = readouts[0]
         session = cls(cls._OPENING, model=model, receipt=receipt, fixtures=fixtures,
                       work_dir=work_dir, segments=segments,
                       schema_inputs=(extraction, families, components, int(preset.num_layers)),
-                      engine=engine, readout=readout, idle_timeout=idle_timeout)
+                      engine=engine, readouts=readouts, idle_timeout=idle_timeout)
         (work_dir / "session.json").write_text(json.dumps(dict(
             model=model, lane_id=receipt.lane_id, qualified_lane_id=receipt.qualified_lane_id,
             conformance_tier=receipt.tier, conformance_receipt_sha256=receipt.digest,
@@ -723,9 +737,10 @@ class LaneSession:
                          warm_up_ends="first warmup_groups groups passed and every used "
                                       "condition has a passing group",
                          new_condition="first group under an unused condition is checked"),
-            handoff="memory", max_in_flight=int(max_in_flight),
+            handoff="memory", max_in_flight=int(max_in_flight), readers=int(readers),
             removed_stale_handoff_dirs=stale,
-            engine=engine.ready.get("record"), readout=readout.ready.get("record")),
+            engine=engine.ready.get("record"), readout=readout.ready.get("record"),
+            readouts=[child.ready.get("record") for child in readouts]),
             indent=2, default=str) + "\n")
         return session
 
@@ -736,8 +751,9 @@ class LaneSession:
         self.close()
 
     def close(self) -> None:
-        """Shut both processes down and remove the session's shared-memory directory."""
-        self._readout.close()
+        """Shut the processes down and remove the session's shared-memory directory."""
+        for readout in self._readouts:
+            readout.close()
         self._engine.close()
         shutil.rmtree(self.segments, ignore_errors=True)
         if self.stopped is None:
@@ -877,22 +893,26 @@ class LaneSession:
         timing: dict[int, dict[str, float]] = {g: {} for g in by_id}
         errors: list[str] = []
         done: dict[str, Any] | None = None
-        # The readout is given one row at a time: a handle is tens of kilobytes, and a
+        # Each readout is given one row at a time: a handle is tens of kilobytes, and a
         # readout blocked answering while this process blocks feeding it would deadlock.
+        # Rows go to free readouts in the order the engine published them.
         waiting: deque[int] = deque()
-        busy: list[int] = []
+        busy: dict[_Child, int | None] = {child: None for child in self._readouts}
 
         def feed() -> None:
-            if not busy and waiting:
-                gid = waiting.popleft()
-                row = by_id[gid]
-                self._readout.send(dict(op="reduce", handle=handles[gid], row=dict(
-                    generation_id=gid, prompt_length=row["prompt_length"], end=row["end"])))
-                busy.append(gid)
+            for child in self._readouts:
+                if busy[child] is None and waiting:
+                    gid = waiting.popleft()
+                    row = by_id[gid]
+                    child.send(dict(op="reduce", handle=handles[gid], row=dict(
+                        generation_id=gid, prompt_length=row["prompt_length"],
+                        end=row["end"])))
+                    busy[child] = gid
 
         selector = selectors.DefaultSelector()
         selector.register(self._engine.fd, selectors.EVENT_READ, self._engine)
-        selector.register(self._readout.fd, selectors.EVENT_READ, self._readout)
+        for child in self._readouts:
+            selector.register(child.fd, selectors.EVENT_READ, child)
         last = time.monotonic()
         try:
             while done is None or len(vectors) + sum(
@@ -902,7 +922,7 @@ class LaneSession:
                     if time.monotonic() - last > self.idle_timeout:
                         raise LaneSessionError(f"no answer from the session's processes in "
                                                f"{self.idle_timeout:.0f} s")
-                    for child in (self._engine, self._readout):
+                    for child in (self._engine, *self._readouts):
                         if not child.alive() and not (child is self._engine and done):
                             raise LaneSessionError(f"the {child.step} process exited "
                                                    f"{child.proc.returncode} mid-capture")
@@ -920,11 +940,11 @@ class LaneSession:
                                 selector.unregister(self._engine.fd)
                                 break
                         else:
-                            if reply.get("generation_id") not in busy:
+                            if reply.get("generation_id") != busy[child]:
                                 raise LaneSessionError(
-                                    f"the readout answered for row {reply.get('generation_id')}"
-                                    ", which it was not given")
-                            busy.clear()
+                                    f"the {child.step} process answered for row "
+                                    f"{reply.get('generation_id')}, which it was not given")
+                            busy[child] = None
                             self._on_readout(reply, handles, vectors, knnlm, timing, errors)
                         feed()
         finally:
