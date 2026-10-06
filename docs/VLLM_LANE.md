@@ -208,7 +208,39 @@ A session that ends without closing leaves its shared-memory directory
 process is gone, and lists them in `session.json` as `removed_stale_handoff_dirs`.
 
 A session holds one GPU: the engine and the readout share the first visible device. A
-tensor-parallel lane is refused.
+tensor-parallel lane is refused. `LaneSession.open(..., readers=N)` starts N readout processes
+(1 to 8) on that device; each holds one row at a time, rows go to them in the order the engine
+publishes them, and every reader builds the same readout, so which one reduced a row does not
+reach its vector.
+
+## What it costs
+
+Measured on main at `483be3b`, one B200 on an otherwise idle host (2× Intel Xeon 6767P, NumPy on the
+AVX-512 dispatch), over each size's 44 fixture rows. Every vector came back byte-identical to
+the fixtures, and each host's install check returned `identical`.
+
+| Model | Mean span (tokens) | Install check | Bank (`run_vllm_replay`) | Session open | Session, per call of 8 rows |
+|---|---|---|---|---|---|
+| `3b` | 479 | 9 min | 5.3 s/row | 35 s | 9.4 s (1.2 s/row) |
+| `8b` | 491 | 12 min | 5.9 s/row | 34 s | 12.3 s (1.5 s/row) |
+| `70b` | 469 | 36 min | 21.3 s/row | 167 s | 24.9 s (3.1 s/row) |
+
+A bank's time per row includes starting the lane for every chunk and the non-interference
+check on every group; a session pays its start once and checks on a cadence. Inside a session, the median per-row stage times (in seconds) are:
+
+| Model | Capture | Hand-off write | Content receipt | Reduce | Upload to device |
+|---|---|---|---|---|---|
+| `3b` | 0.42 | 0.19 | 0.38 | 0.69 | 0.09 |
+| `8b` | 0.56 | 0.31 | 0.56 | 0.84 | 0.12 |
+| `70b` | 1.31 | 0.66 | 1.76 | 1.59 | 0.20 |
+
+The stages overlap: the receipt is hashed on a background thread and the readout reduces one
+row while the engine captures the next, so a call costs less than the sum. Hand-off, receipt and
+reduce are host work over each row's substrate, which grows with the model's width and depth,
+so the cost follows host-memory bandwidth as well as the GPU. The same 70B session on a GPU attached to a socket with about a third of
+the memory bandwidth took 42.4 s per call of 8 rows, against 24.9 s here. Time a lane on the
+host it will run on. A second reader (`readers=2`) cut a 70B fine-tune's call of 8 rows with
+spans of about 250 tokens from 10.0 s to 8.2 s.
 
 ## Extension lanes (fine-tunes of a qualified model)
 
