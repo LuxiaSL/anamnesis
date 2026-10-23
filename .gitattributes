@@ -1,0 +1,4 @@
+# The registries, fixtures and lane sources are pinned by the SHA-256 of their bytes,
+# so a checkout must hold the same bytes on every platform. Git stores them with LF;
+# eol=lf keeps a Windows checkout with core.autocrlf from rewriting them to CRLF.
+* text=auto eol=lf
