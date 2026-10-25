@@ -12,9 +12,15 @@ away, never emit per-token. Six bounded quantities per routing point, each summa
 position (mean / std / half-split drift), fanned across the sampled layers, with an explicit
 ANCHOR-versus-RECENCY contrast — the block-routing echo of the anamnesis how-axis, which is
 anchor/sink against recency at mid layers. Every value is bounded in [0,1] or [-1,1], so the family
-carries no length confound, and the output dimension is fixed (a missing slot is zero-filled) so
-banks stay column-comparable. Fanning across blocks is deliberate; pruning depth is the decompose's
-job, not the extractor's.
+carries no length confound, and the output dimension is fixed per architecture (a missing slot is
+zero-filled) so banks stay column-comparable. Fanning across blocks is deliberate; pruning depth is
+the decompose's job, not the extractor's.
+
+The committed-state read covers ``max(N_COMMITTED_PAIRS, n_committed - 1)`` consecutive pairs. A
+model's committed-block count is fixed by its architecture, so the width is fixed per model: an
+architecture of up to seven blocks reads exactly the six pairs ``b0b1`` … ``b5b6`` (zero-filled
+where it has fewer), and one with more blocks reads every pair it has, gaining ``b6b7`` and on.
+The pair columns two architectures share carry the same names and meanings.
 
 **This family is the reference example of an optional per-architecture hook.** The pattern, which any
 new architecture-specific capability should follow:
@@ -57,7 +63,14 @@ RoutingPoint = tuple[str, int, NDArray[np.floating]]
 EPS = 1e-8
 QNAMES = ("entropy", "top1", "eff_src", "anchor_w", "partial_w", "recency_cent")
 SUMM = ("mean", "std", "drift")
-N_COMMITTED_PAIRS = 6                      # consecutive committed-block pairs read, which fixes the dim
+N_COMMITTED_PAIRS = 6                      # consecutive committed-block pairs always read (the minimum width)
+
+
+def committed_pairs(n_committed: int) -> int:
+    """How many consecutive committed-block pairs the family reads for ``n_committed`` blocks."""
+    if n_committed < 0:
+        raise ValueError(f"n_committed={n_committed}; a block count is not negative")
+    return max(N_COMMITTED_PAIRS, n_committed - 1)
 
 
 def _summ(ts: np.ndarray) -> list[float]:
@@ -142,11 +155,12 @@ def extract_attn_res(
         names.append(f"attnres_final_{qn}_mean")
 
     # (F) committed-state geometry: consecutive-block direction preservation (cosine ∈[-1,1], bounded)
-    cos_means = [0.0] * N_COMMITTED_PAIRS
+    n_pairs = committed_pairs(len(committed) if committed is not None else 0)
+    cos_means = [0.0] * n_pairs
     overall = [0.0, 0.0]
     if committed is not None and len(committed) >= 2:
         cos_all = []
-        for b in range(min(len(committed) - 1, N_COMMITTED_PAIRS)):
+        for b in range(len(committed) - 1):
             a = np.asarray(committed[b], dtype=np.float64)
             c = np.asarray(committed[b + 1], dtype=np.float64)
             if a.ndim == 2 and a.shape == c.shape and a.shape[0] > 0:
@@ -157,7 +171,7 @@ def extract_attn_res(
         if cos_all:
             allc = np.concatenate(cos_all)
             overall = [float(allc.mean()), float(allc.std())]
-    for b in range(N_COMMITTED_PAIRS):
+    for b in range(n_pairs):
         feats.append(cos_means[b])
         names.append(f"attnres_committed_cos_b{b}b{b + 1}_mean")
     feats.append(overall[0]); names.append("attnres_committed_cos_overall_mean")
