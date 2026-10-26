@@ -63,6 +63,22 @@ correct are — a teacher-forced pass over banked ids — and sampling, which is
 the cost, carries none of the capture. The manifest is written beside the basis, so a
 basis or a table width can be refitted over the same text without sampling again.
 
+**Sampling shards; the fit does not.** Each prompt is seeded by its own index, so
+one prompt's sequence does not depend on which prompts ran before it or where, and
+the sampling can be split over processes: :func:`shard_range` names the prompts one
+shard samples, :class:`TokenShard` is what it writes, and :func:`merge_token_shards`
+rebuilds the full manifest after checking every shard was sampled under one model,
+one ruler and one decode policy, and that together they cover every prompt exactly
+once. The replay and the fit then run once, over the merged manifest, exactly as
+they do over a manifest sampled in one pass. Shards reproduce the one-pass sequences
+when they run on the same kind of device with the same kernels, as any two runs of
+one sampling do.
+
+**The basis is an exact decomposition.** :func:`_fit_one` takes the full singular
+value decomposition, not a randomized one: a randomized solver draws its projection
+afresh on every fit, so two fits over identical samples rotate the near-tied tail of
+the basis differently and the basis file is not reproducible.
+
 The fit takes an iterable of :class:`PromptStates` rather than a loaded model, so
 the arithmetic runs — and is tested — on a machine with no weights on it. The two
 functions that run a model import the model runtime inside themselves.
@@ -70,6 +86,7 @@ functions that run a model import the model runtime inside themselves.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import logging
@@ -81,7 +98,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Iterator, Literal, Mapping, Seq
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sklearn.decomposition import PCA
 
 from anamnesis.config import GenerationConfig, ModelPreset, resolve_preset
@@ -131,6 +148,10 @@ the replay reads every position anyway, so sampling densely costs no generation.
 TOKENS_SUFFIX = ".tokens.json"
 """What replaces the basis file's suffix to name the replay manifest of the sequences
 the calibration was fitted over, keyed by prompt index."""
+
+TOKEN_SHARD_SUFFIX = ".tokens.shard-{index}-of-{count}.json"
+"""What replaces the basis file's suffix to name one sampling shard's sequences;
+``index`` counts from 1."""
 
 
 class CalibrationFitError(RuntimeError):
@@ -312,6 +333,7 @@ def generate_calibration_tokens(
     *,
     suppress_eos: bool = False,
     chat_template: bool = True,
+    indices: Sequence[int] | None = None,
 ) -> ReplayManifest:
     """Sample each prompt under ``settings`` and keep only the token ids.
 
@@ -326,13 +348,28 @@ def generate_calibration_tokens(
 
     ``suppress_eos`` generates with no stop token, so every generation runs to
     ``settings.max_new_tokens`` and continues past any end-of-turn token it samples.
+
+    ``indices`` samples only those prompts (a shard, :func:`shard_range`), each still
+    seeded by its own index, so a shard's sequences are the ones a pass over every
+    prompt produces.
+
+    Raises
+    ------
+    IndexError
+        When an index is outside ``prompts``.
     """
     import torch
+
+    chosen = list(range(len(prompts))) if indices is None else [int(i) for i in indices]
+    outside = [i for i in chosen if not 0 <= i < len(prompts)]
+    if outside:
+        raise IndexError(f"prompt indices {outside[:5]} are outside the {len(prompts)} prompts")
 
     device = next(loaded.model.parameters()).device
     entries = {}
     started = time.perf_counter()
-    for index, text in enumerate(prompts):
+    for done, index in enumerate(chosen):
+        text = prompts[index]
         prompt = encode_prompt(loaded.tokenizer, text, chat_template=chat_template)
         input_ids = torch.tensor([prompt], device=device)
         torch.manual_seed(index)
@@ -352,12 +389,217 @@ def generate_calibration_tokens(
         # Every prompt, with a rate and what is left: on a CPU one prompt can take a
         # minute, and a pass that reports every tenth one looks hung for ten.
         elapsed = time.perf_counter() - started
-        left = elapsed / (index + 1) * (len(prompts) - index - 1)
+        left = elapsed / (done + 1) * (len(chosen) - done - 1)
         logger.info(
             f"calibration tokens {index + 1}/{len(prompts)}: {entries[index].n_gen} generated, "
             f"{elapsed:.0f}s elapsed, about {left:.0f}s left"
         )
     return manifest_from_entries(entries)
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """``I/N``, as a command line spells a shard, as ``(index from 0, count)``.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        When ``text`` is not two integers ``I/N`` with ``1 <= I <= N``, so a parser that
+        takes this as an argument type reports the reason.
+    """
+    try:
+        index, count = (int(part) for part in text.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--shard takes I/N, such as 2/6; got {text!r}") from None
+    if not 1 <= index <= count:
+        raise argparse.ArgumentTypeError(f"--shard {text}: I must be between 1 and N")
+    return index - 1, count
+
+
+def shard_range(n_prompts: int, index: int, count: int) -> range:
+    """The prompts shard ``index`` of ``count`` samples, counting from 0: a contiguous
+    run, the runs of all ``count`` shards partitioning ``range(n_prompts)`` with sizes
+    that differ by at most one.
+
+    Raises
+    ------
+    ValueError
+        When ``count`` is not between 1 and ``n_prompts``, or ``index`` is outside it.
+    """
+    if not 1 <= count <= n_prompts:
+        raise ValueError(f"{count} shards over {n_prompts} prompts; a shard samples at least one")
+    if not 0 <= index < count:
+        raise ValueError(f"shard index {index} is outside 0..{count - 1}")
+    return range(n_prompts * index // count, n_prompts * (index + 1) // count)
+
+
+class ShardIdentity(BaseModel):
+    """What every shard of one calibration must agree on, so their sequences can be
+    fitted as one pass: the model, the ruler, and the decode policy."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    model: str = Field(description="The preset row the shards sample under")
+    model_id: str = Field(description="The checkpoint that samples")
+    prompt_set_sha256: str = Field(description="SHA-256 of the prompts, in order")
+    n_prompts: int = Field(gt=0)
+    settings: GenerationConfig = Field(description="The decode policy, token budget included")
+    suppress_eos: bool
+    chat_template: bool
+
+
+def shard_identity(
+    *,
+    model: str,
+    model_id: str,
+    prompts: Sequence[str],
+    settings: GenerationConfig,
+    suppress_eos: bool,
+    chat_template: bool,
+) -> ShardIdentity:
+    """The identity a shard is sampled under, as both the sampling and the merging pass
+    compute it from the same arguments."""
+    return ShardIdentity(
+        model=model,
+        model_id=model_id,
+        prompt_set_sha256=prompts_digest(prompts),
+        n_prompts=len(prompts),
+        settings=settings,
+        suppress_eos=suppress_eos,
+        chat_template=chat_template,
+    )
+
+
+class TokenShard(BaseModel):
+    """One sampling shard: the identity it ran under, which shard it is, and the
+    sequences of exactly the prompts :func:`shard_range` gives it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    identity: ShardIdentity
+    index: int = Field(ge=0, description="Which shard, counting from 0")
+    count: int = Field(ge=1, description="How many shards the prompts are split into")
+    manifest: ReplayManifest
+
+    @model_validator(mode="after")
+    def _covers_its_range(self) -> TokenShard:
+        expected = tuple(shard_range(self.identity.n_prompts, self.index, self.count))
+        if self.manifest.gen_ids() != expected or self.manifest.n_flagged:
+            raise ValueError(
+                f"shard {self.index + 1} of {self.count} must hold prompts "
+                f"{expected[0]}..{expected[-1]} and flag none; it holds "
+                f"{len(self.manifest.entries)} and flags {self.manifest.n_flagged}"
+            )
+        return self
+
+
+def token_shard_path(basis_path: Path, index: int, count: int) -> Path:
+    """Where shard ``index`` (from 0) of ``count`` is written beside a basis at ``basis_path``."""
+    return Path(basis_path).with_suffix(TOKEN_SHARD_SUFFIX.format(index=index + 1, count=count))
+
+
+def write_token_shard(path: Path, shard: TokenShard) -> Path:
+    """Write ``shard`` to ``path`` whole or not at all: through a temporary file, so a
+    shard killed mid-write leaves nothing a merge would read."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_name(target.name + ".partial")
+    partial.write_text(json.dumps(shard.model_dump(mode="json")))
+    partial.replace(target)
+    return target
+
+
+def merge_token_shards(paths: Iterable[Path], identity: ShardIdentity) -> ReplayManifest:
+    """The manifest of a whole calibration from its shards, refusing any set that is
+    not one calibration's.
+
+    Raises
+    ------
+    CalibrationFitError
+        When no shard is given, when a shard was sampled under another identity than
+        ``identity`` (naming the fields that differ), when the shards disagree on how
+        many there are, or when a shard is missing or present twice.
+    """
+    shards = [TokenShard.model_validate_json(Path(p).read_text()) for p in paths]
+    if not shards:
+        raise CalibrationFitError("no sampling shards to merge")
+    want = identity.model_dump(mode="json")
+    for shard in shards:
+        got = shard.identity.model_dump(mode="json")
+        differ = sorted(key for key in want if got.get(key) != want[key])
+        if differ:
+            raise CalibrationFitError(
+                f"shard {shard.index + 1} of {shard.count} was sampled under another "
+                f"{', '.join(differ)} than this fit's"
+            )
+    counts = sorted({shard.count for shard in shards})
+    if len(counts) != 1:
+        raise CalibrationFitError(f"the shards disagree on how many there are: {counts}")
+    (count,) = counts
+    seen = sorted(shard.index for shard in shards)
+    if seen != list(range(count)):
+        missing = sorted(set(range(count)) - set(seen))
+        twice = sorted({index for index in seen if seen.count(index) > 1})
+        raise CalibrationFitError(
+            f"{count} shards make this calibration; missing {[i + 1 for i in missing]}, "
+            f"present twice {[i + 1 for i in twice]}"
+        )
+    entries = {}
+    for shard in shards:
+        entries.update(shard.manifest.entries)
+    return manifest_from_entries(entries)
+
+
+def token_shard_paths(basis_path: Path) -> list[Path]:
+    """Every sampling shard written beside a basis at ``basis_path``, in name order."""
+    basis = Path(basis_path)
+    pattern = basis.with_suffix(TOKEN_SHARD_SUFFIX.format(index="*", count="*")).name
+    return sorted(basis.parent.glob(pattern))
+
+
+def calibration_tokens(
+    loaded: LoadedModel,
+    prompts: Sequence[str],
+    settings: GenerationConfig,
+    identity: ShardIdentity,
+    basis_path: Path,
+    *,
+    shard: tuple[int, int] | None = None,
+    from_shards: bool = False,
+    suppress_eos: bool = False,
+    chat_template: bool = True,
+) -> ReplayManifest | None:
+    """The sequences a calibration fits over, sampled the way the caller asked.
+
+    With neither option, every prompt is sampled in this pass. ``shard=(index, count)``
+    samples only that shard, writes it beside the basis (:func:`token_shard_path`) and
+    returns None: there is nothing to fit yet. ``from_shards`` samples nothing and
+    returns the merge of the shards beside the basis, checked against ``identity``.
+
+    Raises
+    ------
+    CalibrationFitError
+        When both options are given, or the shards do not merge.
+    """
+    if shard is not None and from_shards:
+        raise CalibrationFitError("a pass either samples one shard or fits them all, not both")
+    if from_shards:
+        tokens = merge_token_shards(token_shard_paths(basis_path), identity)
+        logger.info(f"merged {tokens.n_ok} sequences from the shards beside {basis_path}")
+        return tokens
+    indices = None if shard is None else shard_range(len(prompts), *shard)
+    tokens = generate_calibration_tokens(
+        loaded, prompts, settings, suppress_eos=suppress_eos, chat_template=chat_template,
+        indices=indices,
+    )
+    if shard is None:
+        return tokens
+    index, count = shard
+    written = write_token_shard(
+        token_shard_path(basis_path, index, count),
+        TokenShard(identity=identity, index=index, count=count, manifest=tokens),
+    )
+    logger.info(f"shard {index + 1} of {count} -> {written}")
+    return None
 
 
 def replay_prompt_states(
@@ -534,8 +776,13 @@ def means_from_totals(sums: NDArray[np.float64], counts: I64) -> F32:
 
 
 def _fit_one(matrix: NDArray[np.float64], n_components: int) -> dict[str, Any]:
-    """One PCA over a sample matrix, as the mapping both readers accept."""
-    fitted = PCA(n_components=min(n_components, *matrix.shape)).fit(matrix)
+    """One PCA over a sample matrix, as the mapping both readers accept.
+
+    The full singular value decomposition: exact, and the same basis from the same
+    samples. A randomized solver draws its projection afresh on every fit, and the
+    near-tied components at the end of a basis then come out rotated differently.
+    """
+    fitted = PCA(n_components=min(n_components, *matrix.shape), svd_solver="full").fit(matrix)
     return {
         "components": fitted.components_.astype(np.float32),
         "mean": fitted.mean_.astype(np.float32),
