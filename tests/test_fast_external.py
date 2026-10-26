@@ -139,7 +139,7 @@ def test_a_span_is_finished_once_and_takes_no_attention_after():
 def test_nondeterministic_arithmetic_is_refused():
     lane, capture, kwargs, weights = make_example(torch.float32)
     torch.use_deterministic_algorithms(False)
-    with pytest.raises(ExternalCaptureError, match="deterministic"):
+    with pytest.raises(ExternalCaptureError, match="deterministic|arithmetic settings changed"):
         external_reduction(lane, capture, weights, start=kwargs["start"], end=kwargs["end"])
 
 
@@ -156,3 +156,17 @@ def test_the_lane_id_names_the_capture():
     assert a == external_lane_id(lane, dict(IDENTITY))
     assert a != external_lane_id(lane, {**IDENTITY, "source_sha256": "1" * 64})
     assert a != lane.lane_id
+
+
+def test_a_span_past_the_calibrated_positions_is_refused():
+    lane, capture, kwargs, weights = make_example(torch.float32)
+    covered = lane.positions_calibrated
+    with pytest.raises(ExternalCaptureError, match="calibration covers"):
+        ExternalSpan(lane, start=covered - 1, end=covered + 2, num_layers=N_LAYERS)
+
+
+def test_arithmetic_changed_after_the_lane_was_built_is_refused():
+    lane, capture, kwargs, weights = make_example(torch.float32)
+    torch.use_deterministic_algorithms(not lane.identity["deterministic"])
+    with pytest.raises(ExternalCaptureError, match="arithmetic settings changed"):
+        ExternalSpan(lane, start=kwargs["start"], end=kwargs["end"], num_layers=N_LAYERS)

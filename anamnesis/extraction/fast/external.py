@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -69,6 +70,18 @@ def external_lane_id(lane: GpuFeatureLane, capture_identity: Mapping[str, Any]) 
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def _require_lane_arithmetic(lane: GpuFeatureLane) -> None:
+    """Refuse arithmetic other than the one the lane was built under (its identity records it)."""
+    identity = lane.identity
+    if (torch.are_deterministic_algorithms_enabled() != identity["deterministic"]
+            or torch.backends.cuda.matmul.allow_tf32 != identity["tf32"]
+            or os.environ.get("CUBLAS_WORKSPACE_CONFIG") != identity["cublas_workspace_config"]
+            or lane.config.model_dump(mode="json") != identity["extraction"]
+            or lane.families.model_dump(mode="json") != identity["families"]
+            or str(torch.backends.cuda.preferred_blas_library()) != identity["preferred_blas_library"]):
+        raise ExternalCaptureError("arithmetic settings changed after lane construction")
+
+
 class ExternalSpan:
     """One span through the fast lane's reducers, fed by an outside forward.
 
@@ -82,6 +95,11 @@ class ExternalSpan:
             raise ExternalCaptureError(f"invalid span start={start} end={end}")
         if num_layers < 1:
             raise ExternalCaptureError("a capture has at least one layer")
+        if end - 2 >= lane.positions_calibrated:
+            raise ExternalCaptureError(
+                f"the span reads position {end - 2}; the lane's positional calibration covers "
+                f"0..{lane.positions_calibrated - 1}")
+        _require_lane_arithmetic(lane)
         self.lane, self.start, self.end, self.num_layers = lane, start, end, num_layers
         self.steps = end - start - 1
         self.collector = FeatureCollector(lane.device)
