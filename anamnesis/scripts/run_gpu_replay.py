@@ -139,7 +139,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         lane=lane.identity,
         lane_id=lane.lane_id,
         manifest_sha256=file_sha(args.manifest),
-        calibration_files=runtime.calibration_files,
+        **runtime.calibration_provenance,
         model_path=args.model_path,
         device=args.device,
         model_files_sha256=runtime.model_files,

@@ -29,6 +29,9 @@ layer a key happened to hold.
 A calibration corrects only the positions its fit reached. :func:`require_positions_covered`
 is the refusal a pass makes before reading a position past them, since the correction
 there would subtract a row of zeros.
+:mod:`anamnesis.extraction.calibration_extension` reaches further without changing
+the identity a fast lane hashes, by a table whose rows within the base's reach are the
+base's own bytes.
 
 Absence is returned, not raised, by :func:`load_positional_means` and
 :func:`load_calibration`. A caller that cannot proceed without a calibration says so
@@ -477,7 +480,10 @@ class Calibration:
     ``files`` maps each artifact's filename to the SHA-256 of its bytes, and
     ``sha256`` is :func:`anamnesis.provenance.digest_of_shas` over that mapping —
     the same digest :mod:`anamnesis.extraction.fast.runtime` stamps for a
-    directory holding the written names. A result stamped with it names the
+    directory holding the written names and no extension record; under a verified
+    one, the fast lane's identity is the base's digest
+    (:mod:`anamnesis.extraction.calibration_extension`), and this digest is the one
+    it records as the bytes read. A result stamped with it names the
     correction it was computed under, which a path does not: a directory is
     replaced in place, and two bases of the same shape give features with the same
     names and different values.
