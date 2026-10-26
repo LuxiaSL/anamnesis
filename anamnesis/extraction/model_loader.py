@@ -19,6 +19,8 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
+import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -299,6 +301,79 @@ def _make_o_proj_hook(
         hook_state.attn_outputs[layer_idx].append(output.detach())
 
     return hook_fn
+
+
+# ── DeepSeek-V2 softmax scale: the YaRN mscale² the native port omits ───────────
+# DeepSeek's own modeling code multiplies the attention softmax scale by yarn_get_mscale(factor,
+# mscale_all_dim)**2 when rope_scaling carries mscale_all_dim; transformers' native deepseek_v2
+# port sets scaling = qk_head_dim**-0.5 and omits it (deepseek_v3 applies it). On DeepSeek-V2-Lite
+# the factor is 1.590: without it every attention layer is that much too soft, a different network
+# from the released one (next-token NLL on text no model generated: official 0.301, native 0.347).
+# A load must say which network it wants; the choice is recorded on the LoadedModel.
+
+DEEPSEEK_V2_SOFTMAX_CHOICES = ("official", "native_unscaled")
+DEEPSEEK_V2_SOFTMAX_ENV = "ANAMNESIS_DEEPSEEK_V2_SOFTMAX"
+"""Environment variable naming the choice for loads whose caller passes none (every script)."""
+"""``official`` applies the missing mscale² (DeepSeek's network); ``native_unscaled`` keeps the
+native port's scale on purpose, to reproduce runs made with it."""
+
+
+class DeepseekV2SoftmaxScaleError(ValueError):
+    """A DeepSeek-V2 load that has not said which softmax scale it wants, or asked for one the
+    loaded port cannot give."""
+
+
+def deepseek_v2_mscale_factor(config: Any) -> float | None:
+    """The factor DeepSeek's code applies to the softmax scale, or None when rope_scaling has none."""
+    rs = getattr(config, "rope_scaling", None) or getattr(config, "rope_parameters", None) or {}
+    mscale_all_dim = rs.get("mscale_all_dim", 0) if isinstance(rs, dict) else 0
+    if not mscale_all_dim:
+        return None
+    factor = float(rs["factor"])
+    mscale = 0.1 * float(mscale_all_dim) * math.log(factor) + 1.0 if factor > 1 else 1.0
+    return mscale * mscale
+
+
+def resolve_deepseek_v2_softmax(model: nn.Module, choice: str | None) -> str | None:
+    """Make a DeepSeek-V2 model's attention softmax scale the one ``choice`` names.
+
+    Returns the choice in force (None for a model this does not concern). Raises
+    :class:`DeepseekV2SoftmaxScaleError` when a native-port DeepSeek-V2 checkpoint whose attention
+    omits the mscale² is loaded without a choice, when the choice is unknown, or when
+    ``native_unscaled`` is asked of a port that already applies the factor.
+    """
+    config = getattr(model, "config", None)
+    if "deepseek_v2" not in str(getattr(config, "model_type", "")):
+        return None
+    factor = deepseek_v2_mscale_factor(config)
+    attentions = [m for m in model.modules() if hasattr(m, "scaling") and hasattr(m, "qk_head_dim")]
+    if factor is None or not attentions:
+        return None
+    if choice is not None and choice not in DEEPSEEK_V2_SOFTMAX_CHOICES:
+        raise DeepseekV2SoftmaxScaleError(
+            f"deepseek_v2_softmax={choice!r}; choose one of {DEEPSEEK_V2_SOFTMAX_CHOICES}")
+    base = attentions[0].qk_head_dim ** (-0.5)
+    omits = all(math.isclose(m.scaling, base, rel_tol=1e-6) for m in attentions)
+    if not omits:
+        if choice == "native_unscaled":
+            raise DeepseekV2SoftmaxScaleError(
+                "this transformers port already applies the DeepSeek-V2 mscale²; "
+                "native_unscaled cannot be reproduced with it")
+        return "official"
+    if choice is None:
+        raise DeepseekV2SoftmaxScaleError(
+            f"this DeepSeek-V2 checkpoint loads through transformers' native port, whose attention "
+            f"omits the YaRN softmax factor mscale**2 = {factor:.4f} that DeepSeek's own code applies: "
+            f"a different network from the released one. Pass deepseek_v2_softmax='official' (or set "
+            f"{DEEPSEEK_V2_SOFTMAX_ENV}=official) for DeepSeek's network, the fix; or 'native_unscaled' "
+            f"to reproduce runs made with the native port.")
+    if choice == "official":
+        for m in attentions:
+            m.scaling = m.scaling * factor
+        logger.info(f"DeepSeek-V2 softmax scale: applied mscale**2 = {factor:.4f} to {len(attentions)} attentions")
+    else:
+        logger.warning(f"DeepSeek-V2 softmax scale: native_unscaled kept (mscale**2 = {factor:.4f} omitted)")
+    return choice
 
 
 # ── MLA + MoE capture hooks (DeepSeek-V2-Lite class) ───────────────────────────
@@ -727,6 +802,7 @@ class LoadedModel:
     hook_state: HookState
     hook_handles: list[torch.utils.hooks.RemovableHook]
     config: ModelConfig
+    deepseek_v2_softmax: str | None = None
 
     def remove_hooks(self) -> None:
         """Remove all registered hooks."""
@@ -839,6 +915,7 @@ def load_model(
     attn_output_layers: list[int] | None = None,
     adapter_path: str | None = None,
     device_map: dict[str, str] | None = None,
+    deepseek_v2_softmax: str | None = None,
 ) -> LoadedModel:
     """Load model, tokenizer, and register hooks.
 
@@ -873,6 +950,12 @@ def load_model(
             :meth:`anamnesis.extraction.layer_split.LayerSplit.hf_device_map`.
             Each capture hook keeps its tensors on its own layer's device.
 
+        deepseek_v2_softmax: For a DeepSeek-V2 checkpoint, which attention softmax scale to
+            run: ``"official"`` (DeepSeek's, the YaRN mscale² the native port omits) or
+            ``"native_unscaled"`` (the native port's, to reproduce runs made with it). Required
+            when the native port omits the factor; a caller that passes none reads
+            ``ANAMNESIS_DEEPSEEK_V2_SOFTMAX``. See :func:`resolve_deepseek_v2_softmax`.
+
     Returns:
         LoadedModel with everything wired up.
     """
@@ -897,6 +980,9 @@ def load_model(
         model = PeftModel.from_pretrained(model, adapter_path)
         model = model.merge_and_unload()
         model.eval()
+
+    softmax_choice = resolve_deepseek_v2_softmax(
+        model, deepseek_v2_softmax or os.environ.get(DEEPSEEK_V2_SOFTMAX_ENV) or None)
 
     tokenizer = AutoTokenizer.from_pretrained(config.model_id)
     if tokenizer.pad_token is None:
@@ -1011,4 +1097,5 @@ def load_model(
         hook_state=hook_state,
         hook_handles=hook_handles,
         config=config,
+        deepseek_v2_softmax=softmax_choice,
     )
