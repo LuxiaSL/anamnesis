@@ -31,6 +31,15 @@ read its states. Every write leaves the sampled sequences beside the basis as a
 replay manifest, ``<basis stem>.tokens.json``, and a build receipt,
 ``<basis stem>.build.json``, recording the settings, the coverage reached and the
 digests of every file written.
+
+The sampling, which is most of the cost, can be split over processes. ``--shard I/N``
+samples only the I-th of N contiguous runs of prompts (each prompt still seeded by its
+own index) and writes ``<basis stem>.tokens.shard-I-of-N.json`` beside the basis,
+fitting nothing. ``--from-shards`` then samples nothing: it merges every shard beside
+the basis, refusing a set sampled under another model, ruler or decode policy, or one
+with a shard missing or doubled, and replays and fits the merged sequences as one pass.
+Both are invoked with the same arguments otherwise, since those arguments are what the
+shards are checked against.
 """
 
 from __future__ import annotations
@@ -111,8 +120,32 @@ def parser() -> argparse.ArgumentParser:
         help="Tokenise each prompt bare rather than as a user turn in the chat template, "
              "for a base checkpoint whose tokenizer carries one anyway",
     )
+    sharding = p.add_mutually_exclusive_group()
+    sharding.add_argument(
+        "--shard",
+        type=parse_shard,
+        default=None,
+        metavar="I/N",
+        help="Sample only the I-th of N runs of prompts, write them beside the basis, fit nothing",
+    )
+    sharding.add_argument(
+        "--from-shards",
+        action="store_true",
+        help="Sample nothing: merge the shards beside the basis and fit over them",
+    )
     p.add_argument("--dry-run", action="store_true", help="Print the configuration and stop")
     return p
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """``I/N`` as ``(index from 0, count)``, with ``1 <= I <= N``."""
+    try:
+        index, count = (int(part) for part in text.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--shard takes I/N, such as 2/6; got {text!r}") from None
+    if not 1 <= index <= count:
+        raise argparse.ArgumentTypeError(f"--shard {text}: I must be between 1 and N")
+    return index - 1, count
 
 
 def resolve_paths(args: argparse.Namespace) -> tuple[ModelPreset, Path, Path]:
@@ -260,6 +293,12 @@ def main(argv: list[str] | None = None) -> None:
             f"{width} positions wide; raise --max-positions past it"
         )
 
+    if args.shard is not None:
+        try:
+            calibration_fit.shard_range(len(prompts), *args.shard)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+
     if args.dry_run:
         describe(args, preset, settings, prompts, means_path, basis_path, required)
         return
@@ -306,13 +345,26 @@ def main(argv: list[str] | None = None) -> None:
                     f"from a {min(lengths)}-token prompt; it needs {needed}, or leave it unset"
                 )
             width = table_width(args, settings, required)
-        tokens = calibration_fit.generate_calibration_tokens(
+        tokens = calibration_fit.calibration_tokens(
             loaded,
             prompts,
             settings,
+            calibration_fit.shard_identity(
+                model=args.model,
+                model_id=config.model_id,
+                prompts=prompts,
+                settings=settings,
+                suppress_eos=args.suppress_eos,
+                chat_template=not args.no_chat_template,
+            ),
+            basis_path,
+            shard=args.shard,
+            from_shards=args.from_shards,
             suppress_eos=args.suppress_eos,
             chat_template=not args.no_chat_template,
         )
+        if tokens is None:
+            return
         fit = calibration_fit.fit_calibration(
             calibration_fit.replay_prompt_states(loaded, tokens),
             preset=preset,
