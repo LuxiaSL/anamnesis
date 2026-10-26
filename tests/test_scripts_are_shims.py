@@ -201,12 +201,32 @@ def test_no_two_scripts_define_the_same_name() -> None:
     )
 
 
+CODE_TOKENS = frozenset(
+    {tokenize.NAME, tokenize.OP, tokenize.NUMBER, tokenize.STRING}
+    | {
+        getattr(tokenize, name)
+        for name in (
+            "FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END",
+            "TSTRING_START", "TSTRING_MIDDLE", "TSTRING_END",
+        )
+        if hasattr(tokenize, name)
+    }
+)
+"""Token types that make a line code: names, operators, numbers and strings, f- and
+t-strings included however the running interpreter tokenizes them."""
+
+
 def body_code_lines(source: str) -> int:
     """Code lines outside ``parser()``: not blank, not comment, not docstring.
 
     A line is code when a name, operator, number or non-docstring string token starts
     or continues on it, which is `tools/surface_report.py`'s definition of a code
     token applied to lines. A line holding code and a trailing comment is code.
+
+    An f-string is one string token before Python 3.12 and a run of
+    ``FSTRING_START`` / ``FSTRING_MIDDLE`` / ``FSTRING_END`` tokens after it (t-strings
+    likewise from 3.14). Both spellings count as a string, so every interpreter
+    measures a script the same way.
     """
     tree = ast.parse(source)
     docstrings: set[tuple[int, int]] = set()
@@ -231,7 +251,7 @@ def body_code_lines(source: str) -> int:
             prose.add(token.start[0])
         elif token.type == tokenize.STRING and token.start in docstrings:
             prose.update(range(token.start[0], token.end[0] + 1))
-        elif token.type in (tokenize.NAME, tokenize.OP, tokenize.NUMBER, tokenize.STRING):
+        elif token.type in CODE_TOKENS:
             code.update(range(token.start[0], token.end[0] + 1))
 
     argument_surface: set[int] = set()
@@ -251,6 +271,22 @@ def test_no_script_body_grows_past_the_ceiling(path: Path) -> None:
         f"is not raised to fit a command: move the capability into the package and call it "
         f"from here."
     )
+
+
+def test_an_f_string_line_counts_as_code_on_every_interpreter() -> None:
+    """A line holding only f-string text is code whichever way the interpreter
+    tokenizes f-strings: one string token before 3.12, a run of f-string tokens after.
+    The middle piece has no replacement field, so no name or operator token marks
+    its line; only its being a string does."""
+    source = (
+        "def main() -> None:\n"
+        "    raise SystemExit(\n"
+        "        f\"the first line {main}, \"\n"
+        "        f\"a line of text alone, \"\n"
+        "        \"and a plain string\"\n"
+        "    )\n"
+    )
+    assert body_code_lines(source) == 6
 
 
 @pytest.mark.parametrize("path", _script_paths(), ids=lambda p: p.name)
