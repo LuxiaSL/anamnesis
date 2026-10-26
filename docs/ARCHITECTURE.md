@@ -159,6 +159,21 @@ same quantity, and `anamnesis/analysis/lane_guard.py` refuses the join on the re
 every loader that assembles a matrix from more than one file passes its metadata through it
 first. Untagged historical banks stay readable and cannot be mixed with tagged ones.
 
+A calibration can reach further without a new lane. `write_calibration_extension` in
+`anamnesis/extraction/calibration_extension.py` compares a base calibration directory
+with one whose positional means fill more positions, and writes `calibration_extension.json`
+into the longer one only when the residual basis is the same file byte for byte, the means
+(and their per-position counts, when the base carries them) are the base's own bytes at
+every position the base covers, on every layer, at the same dtype and width, and the
+extension reaches at least as far. A span within the base's reach then reads exactly the
+bytes it read before and computes the same vector, so the lane hashes the base's
+calibration digest: a fast lane built over the extension carries the base lane's id, and
+a chain of extensions resolves to the first base. Every load re-checks the record against
+the files beside it and refuses a directory whose record does not verify. The digest of
+the bytes actually read, the record, and the reach stay in the provenance and in each
+harvested span's receipt. The vLLM lane does not take extensions; it reduces with the
+calibration its fixtures pin.
+
 Whether a given machine's lane agrees with the anchor is a property of the machine, not of
 the code: floating-point reduction order differs across BLAS builds and thread counts.
 `anamnesis/extraction/equivalence/` holds the evidence checks and

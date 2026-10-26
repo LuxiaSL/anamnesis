@@ -42,12 +42,15 @@ from numpy.typing import NDArray
 
 from anamnesis.config import ModelConfig, ModelPreset, resolve_preset
 from anamnesis.extraction.calibration import (
-    CALIBRATION_ARTIFACT_NAMES,
     load_position_counts,
     load_positional_means,
     positions_calibrated,
     read_pca_basis,
     resolve_pca_model,
+)
+from anamnesis.extraction.calibration_extension import (
+    CalibrationExtension,
+    read_calibration_identity,
 )
 from anamnesis.extraction.layer_split import LayerSplit
 from anamnesis.extraction.replay_config import native_replay_configs
@@ -188,6 +191,7 @@ class FastLaneRuntime:
     model_files: dict[str, str] | None
     loaded: Any
     lane: Any
+    calibration_provenance: dict[str, Any] = field(default_factory=dict)
 
     @property
     def gen_ids(self) -> tuple[int, ...]:
@@ -281,6 +285,11 @@ class LaneCalibration:
 
     Everything a lane needs except a model, so a caller can refuse an incomplete
     calibration or an unsupported span before paying for a load.
+
+    ``calibration_sha256`` is the identity the lane hashes, and ``calibration_files``
+    the digests of the bytes read. They name the same thing except for a verified
+    extension (``extension``, from
+    :mod:`anamnesis.extraction.calibration_extension`), whose identity is its base's.
     """
 
     preset: ModelPreset
@@ -292,6 +301,7 @@ class LaneCalibration:
     calibration_files: dict[str, str]
     calibration_sha256: str
     position_counts: NDArray[np.int64] | None = None
+    extension: CalibrationExtension | None = None
 
     @property
     def positions_calibrated(self) -> int:
@@ -302,6 +312,19 @@ class LaneCalibration:
         number: rows past the last filled one are zeros and correct nothing.
         """
         return positions_calibrated(self.positional_means, self.position_counts)
+
+    def provenance(self) -> dict[str, Any]:
+        """Which table corrected a row: the identity, the bytes read, the reach, and
+        the extension record when the identity is a base's."""
+        return dict(
+            calibration_sha256=self.calibration_sha256,
+            calibration_files=dict(self.calibration_files),
+            calibration_files_sha256=digest_of_shas(self.calibration_files),
+            positions_calibrated=self.positions_calibrated,
+            calibration_extension=(
+                None if self.extension is None else self.extension.model_dump(mode="json")
+            ),
+        )
 
     def schema(self, n_steps: int) -> GpuFeatureSchema:
         """The feature names and family slices a span of ``n_steps`` resolves to.
@@ -348,12 +371,19 @@ def read_lane_calibration(preset: ModelPreset, calib_dir: Path) -> LaneCalibrati
     calibrations hold, and the per-layer basis
     :mod:`anamnesis.extraction.calibration_fit` writes by default.
 
+    The digest is :func:`anamnesis.extraction.calibration_extension.read_calibration_identity`:
+    the files' own, or for a directory holding a verified extension record, the
+    base's, so a lane over the extension has the base lane's id.
+
     Raises
     ------
     ValueError
         When the directory lacks the positional means or the residual basis, or the
         basis stores no mean to centre on. A lane with any of them missing would
         correct its features against nothing and emit them under the corrected names.
+    anamnesis.extraction.calibration_extension.CalibrationExtensionRefused
+        When the directory holds an extension record that does not verify against
+        the files beside it. A subclass of :class:`ValueError`.
     """
     extraction, families = native_replay_configs(preset)
     positional_means = load_positional_means(Path(calib_dir))
@@ -363,9 +393,7 @@ def read_lane_calibration(preset: ModelPreset, calib_dir: Path) -> LaneCalibrati
     pca_components, pca_mean = read_pca_basis(pca_path).float32_arrays()
     if pca_mean is None:
         raise ValueError(f"{pca_path} holds a basis with no mean to centre on")
-    calibration_files = {
-        name: file_sha(Path(calib_dir) / name) for name in CALIBRATION_ARTIFACT_NAMES
-    }
+    identity = read_calibration_identity(Path(calib_dir))
     return LaneCalibration(
         preset=preset,
         extraction=extraction,
@@ -373,9 +401,10 @@ def read_lane_calibration(preset: ModelPreset, calib_dir: Path) -> LaneCalibrati
         positional_means=positional_means,
         pca_components=pca_components,
         pca_mean=pca_mean,
-        calibration_files=calibration_files,
-        calibration_sha256=digest_of_shas(calibration_files),
+        calibration_files=identity.files,
+        calibration_sha256=identity.sha256,
         position_counts=load_position_counts(calib_dir),
+        extension=identity.extension,
     )
 
 
@@ -576,8 +605,7 @@ class PreparedLane:
         provenance = dict(
             preset=self.preset.name,
             device=str(self.device),
-            calibration_files=dict(self.calibration.calibration_files),
-            calibration_sha256=self.calibration.calibration_sha256,
+            **self.calibration.provenance(),
             model_files_sha256=self.model_files,
             model_config=self.loaded.model.config.to_dict(),
             lane_runtime_source_sha256=file_sha(Path(__file__)),
@@ -767,4 +795,5 @@ def resolve_fast_lane(
         model_files=model_files,
         loaded=prepared.loaded,
         lane=lane,
+        calibration_provenance=calibration.provenance(),
     )

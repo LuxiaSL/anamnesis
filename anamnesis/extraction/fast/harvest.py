@@ -95,7 +95,11 @@ class HarvestResult:
         battery does not bank it.
     receipt
         The lane's per-span metadata: ``lane_id``, the token digest, the
-        calibration digest, and the transfer accounting.
+        calibration digest the identity hashes, and the transfer accounting; with
+        the digest of the calibration bytes actually read
+        (``calibration_files_sha256``) and how far they reach
+        (``positions_calibrated``), which differ from the identity's only under a
+        calibration extension.
     prompt_length
         Where the prompt ends in ``input_ids``.
     input_ids
@@ -231,6 +235,7 @@ def harvest_loaded(
     if logit_series_top_k is not None and logit_series_top_k < 1:
         raise ValueError(f"logit_series_top_k must be positive, got {logit_series_top_k}")
     lane, schema = prepared.lane(span.n_steps)
+    calibration = prepared.calibration.provenance()
     loaded = prepared.loaded
     captured: list[Tensor] = []
     handle = None
@@ -263,7 +268,11 @@ def harvest_loaded(
         family_slices=dict(schema.family_slices),
         mean_logprob=result.mean_logprob,
         knnlm_baseline=result.knnlm_baseline,
-        receipt=result.metadata,
+        receipt={
+            **result.metadata,
+            "calibration_files_sha256": calibration["calibration_files_sha256"],
+            "positions_calibrated": calibration["positions_calibrated"],
+        },
         prompt_length=span.prompt_length,
         input_ids=np.asarray(ids, dtype=np.int32),
         logit_series=series,
