@@ -51,6 +51,7 @@ from pathlib import Path
 
 from anamnesis.config import GenerationConfig, ModelPreset, preset_names, resolve_preset
 from anamnesis.extraction import calibration_fit
+from anamnesis.extraction.calibration_fit import parse_shard
 from anamnesis.extraction.calibration import PCA_MODEL_NAME, POSITIONAL_MEANS_NAME
 
 logger = logging.getLogger(__name__)
@@ -135,17 +136,6 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--dry-run", action="store_true", help="Print the configuration and stop")
     return p
-
-
-def parse_shard(text: str) -> tuple[int, int]:
-    """``I/N`` as ``(index from 0, count)``, with ``1 <= I <= N``."""
-    try:
-        index, count = (int(part) for part in text.split("/"))
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"--shard takes I/N, such as 2/6; got {text!r}") from None
-    if not 1 <= index <= count:
-        raise argparse.ArgumentTypeError(f"--shard {text}: I must be between 1 and N")
-    return index - 1, count
 
 
 def resolve_paths(args: argparse.Namespace) -> tuple[ModelPreset, Path, Path]:

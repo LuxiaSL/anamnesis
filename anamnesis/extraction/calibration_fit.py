@@ -86,6 +86,7 @@ functions that run a model import the model runtime inside themselves.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import logging
@@ -394,6 +395,24 @@ def generate_calibration_tokens(
             f"{elapsed:.0f}s elapsed, about {left:.0f}s left"
         )
     return manifest_from_entries(entries)
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """``I/N``, as a command line spells a shard, as ``(index from 0, count)``.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        When ``text`` is not two integers ``I/N`` with ``1 <= I <= N``, so a parser that
+        takes this as an argument type reports the reason.
+    """
+    try:
+        index, count = (int(part) for part in text.split("/"))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"--shard takes I/N, such as 2/6; got {text!r}") from None
+    if not 1 <= index <= count:
+        raise argparse.ArgumentTypeError(f"--shard {text}: I must be between 1 and N")
+    return index - 1, count
 
 
 def shard_range(n_prompts: int, index: int, count: int) -> range:
