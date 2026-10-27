@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import warnings
+import weakref
 from dataclasses import dataclass, field, replace
 from typing import Sequence
 
@@ -38,9 +39,67 @@ from scipy import linalg as la
 from scipy.stats import entropy as scipy_entropy
 
 from anamnesis.config import ExtractionConfig
-from anamnesis.extraction.calibration import calibrated_reach, refuse_uncovered_position
 
 logger = logging.getLogger(__name__)
+
+
+class PositionsUncovered(ValueError):
+    """A pass would read a position its positional means do not fill."""
+
+
+_REACH_BY_TABLE: dict[int, tuple[weakref.ref, int]] = {}
+
+
+def calibrated_reach(positional_means: F32) -> int:
+    """How many leading positions a means table fills, computed once per table object.
+
+    The anchor's statement of :func:`anamnesis.extraction.calibration.positions_calibrated`
+    without counts: a position is filled when every layer's row is not all zeros, and only
+    the tail shortens coverage. A fit leaves the rows it did not reach at zeros, so this is
+    the same reach the fit's counts give. The extractors correct one position at a time
+    inside per-step loops, so the scan is cached per table; callers treat the means as
+    read-only, as they already must.
+    """
+    key = id(positional_means)
+    hit = _REACH_BY_TABLE.get(key)
+    if hit is not None and hit[0]() is positional_means:
+        return hit[1]
+    means = np.asarray(positional_means)
+    filled = np.flatnonzero(np.any(means != 0, axis=2).all(axis=0))
+    reach = int(filled[-1]) + 1 if filled.size else 0
+    try:
+        ref = weakref.ref(positional_means)
+    except TypeError:  # an object that cannot be weakly referenced is not cached
+        return reach
+    if len(_REACH_BY_TABLE) > 64:
+        for stale in [k for k, (r, _) in _REACH_BY_TABLE.items() if r() is None]:
+            del _REACH_BY_TABLE[stale]
+    _REACH_BY_TABLE[key] = (ref, reach)
+    return reach
+
+
+def refuse_uncovered_position(positional_means: F32, position: int, *, what: str) -> None:
+    """Refuse a position at or past the calibrated reach, before anything subtracts it.
+
+    Every site that indexes the means calls this, so no entry point (a script, a replay
+    cell, a direct ``compute_features*_from_data`` call) can turn a position past the
+    filled rows into an uncorrected feature under the corrected name. A row that runs past
+    reach is computed only after an explicit, recorded :func:`truncate_to_calibration`.
+
+    Raises
+    ------
+    PositionsUncovered
+        Naming the position, the filled extent, and both remedies.
+    """
+    reach = calibrated_reach(positional_means)
+    if position >= reach:
+        raise PositionsUncovered(
+            f"{what} reads position {position}, and the positional means fill positions "
+            f"0..{reach - 1}; past that the correction subtracts zeros and the feature is "
+            f"uncorrected under the corrected name. Calibrate with run_calibration "
+            f"--required-through {position} (or extend the calibration), or cut the row to "
+            f"the calibrated reach explicitly with truncate_to_calibration and record it"
+        )
 
 # Type aliases
 F32 = NDArray[np.float32]

@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import logging
 import pickle
-import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -66,6 +65,9 @@ from anamnesis.config.experiment import (
     POSITIONAL_MEANS_NAME,
 )
 from anamnesis.provenance import digest_of_shas, file_sha
+# The refusal's class lives in the numeric anchor, which may import configuration only;
+# every pass that refuses an uncovered position raises this one class.
+from anamnesis.extraction.state_extractor import PositionsUncovered  # noqa: F401  (re-export)
 
 F32 = NDArray[np.float32]
 
@@ -436,8 +438,6 @@ def require_positional_means(positional_means: F32 | None, calib_dir: Path) -> F
     return positional_means
 
 
-class PositionsUncovered(ValueError):
-    """A pass would read a position its positional means do not fill."""
 
 
 def require_positions_covered(
@@ -471,59 +471,6 @@ def require_positions_covered(
             f"feature is uncorrected under the corrected name. Calibrate with "
             f"run_calibration --required-through {last_position}, or --reach-from the "
             f"replay manifest of the runs it will correct"
-        )
-
-
-_REACH_BY_TABLE: dict[int, tuple[weakref.ref, int]] = {}
-
-
-def calibrated_reach(positional_means: F32) -> int:
-    """:func:`positions_calibrated` of a means table, computed once per table object.
-
-    The extractors correct one position at a time inside per-step loops; scanning the
-    whole table on every call would cost more than the feature. The table is read off
-    the means alone (no counts), the rule a fit's zeroed rows satisfy. A table mutated
-    in place after its first read keeps its first reach, so callers treat the means as
-    read-only, as they already must.
-    """
-    key = id(positional_means)
-    hit = _REACH_BY_TABLE.get(key)
-    if hit is not None and hit[0]() is positional_means:
-        return hit[1]
-    reach = positions_calibrated(positional_means)
-    try:
-        ref = weakref.ref(positional_means)
-    except TypeError:  # an object that cannot be weakly referenced is not cached
-        return reach
-    if len(_REACH_BY_TABLE) > 64:
-        for stale in [k for k, (r, _) in _REACH_BY_TABLE.items() if r() is None]:
-            del _REACH_BY_TABLE[stale]
-    _REACH_BY_TABLE[key] = (ref, reach)
-    return reach
-
-
-def refuse_uncovered_position(positional_means: F32, position: int, *, what: str) -> None:
-    """The extractor-side form of :func:`require_positions_covered`: refuse one position.
-
-    Every site that indexes the means calls this before it subtracts, so no entry point
-    (a script, a replay cell, a direct ``compute_features*_from_data`` call) can turn a
-    position past the filled rows into an uncorrected feature under the corrected name.
-    A row that runs past reach is computed only after an explicit, recorded
-    :func:`anamnesis.extraction.state_extractor.truncate_to_calibration`.
-
-    Raises
-    ------
-    PositionsUncovered
-        Naming the position, the filled extent, and both remedies.
-    """
-    reach = calibrated_reach(positional_means)
-    if position >= reach:
-        raise PositionsUncovered(
-            f"{what} reads position {position}, and the positional means fill positions "
-            f"0..{reach - 1}; past that the correction subtracts zeros and the feature is "
-            f"uncorrected under the corrected name. Calibrate with run_calibration "
-            f"--required-through {position} (or extend the calibration), or cut the row to "
-            f"the calibrated reach explicitly with truncate_to_calibration and record it"
         )
 
 

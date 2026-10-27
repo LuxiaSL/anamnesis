@@ -23,8 +23,8 @@ from scipy import linalg as la
 from scipy.stats import entropy as scipy_entropy
 
 from anamnesis.config import ExtractionConfig
-from anamnesis.extraction.calibration import refuse_uncovered_position
 from anamnesis.extraction.state_extractor import (
+    refuse_uncovered_position,
     STORED_ATTENTION_AND_DELTAS,
     STORED_CACHE_AND_KEYS,
     STORED_NORMS_AND_OUTPUT_STATS,
