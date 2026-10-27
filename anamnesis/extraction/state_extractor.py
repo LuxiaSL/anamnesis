@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Sequence
 
 import numpy as np
@@ -38,6 +38,7 @@ from scipy import linalg as la
 from scipy.stats import entropy as scipy_entropy
 
 from anamnesis.config import ExtractionConfig
+from anamnesis.extraction.calibration import calibrated_reach, refuse_uncovered_position
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,78 @@ class RawGenerationData:
         if self._hs_array_cache is None:
             self._hs_array_cache = np.stack(self.hidden_states)
         return self._hs_array_cache
+
+
+@dataclass(frozen=True)
+class CalibrationTruncation:
+    """The record of a row cut to its calibration's reach; callers store it with the features.
+
+    ``kept_steps`` generated steps survive, so the last position read is
+    ``prompt_length + kept_steps - 1``, which is below ``reach``. ``dropped_steps`` is 0
+    when the row already fit and nothing was cut.
+    """
+
+    prompt_length: int
+    reach: int
+    original_steps: int
+    kept_steps: int
+
+    @property
+    def dropped_steps(self) -> int:
+        return self.original_steps - self.kept_steps
+
+    def as_dict(self) -> dict[str, int]:
+        return dict(prompt_length=self.prompt_length, reach=self.reach,
+                    original_steps=self.original_steps, kept_steps=self.kept_steps,
+                    dropped_steps=self.dropped_steps)
+
+
+_PER_STEP_LISTS = ("hidden_states", "attentions", "logits")
+_PER_STEP_DICTS = ("pre_rope_keys", "gate_activations", "v_proj_values", "queries", "attn_outputs",
+                   "router_dist", "router_branch_norms", "router_logit_norms")
+
+
+def truncate_to_calibration(data: RawGenerationData) -> tuple[RawGenerationData, CalibrationTruncation]:
+    """Cut a row's generated steps to the positions its positional means fill: the explicit opt-in.
+
+    The extractors refuse a position past :func:`positions_calibrated`. A caller that
+    would rather compute a shorter row than recalibrate calls this, and must keep the
+    returned record with the features, since they then describe the first
+    ``kept_steps`` steps, not the whole generation. Every per-step field is cut to the
+    same length; the input is not modified.
+
+    Raises
+    ------
+    ValueError
+        When the row has no positional means, when the reach leaves fewer than two
+        generated steps (no step-to-step feature survives), or when the row carries
+        attention-residual routing, whose position axis is not the generated steps
+        and is not cut here.
+    """
+    if data.positional_means is None:
+        raise ValueError("truncate_to_calibration needs the positional means the row is corrected by")
+    steps = len(data.hidden_states)
+    reach = calibrated_reach(data.positional_means)
+    keep = min(steps, reach - data.prompt_length)
+    record = CalibrationTruncation(prompt_length=data.prompt_length, reach=reach,
+                                   original_steps=steps, kept_steps=max(keep, 0))
+    if keep >= steps:
+        return data, record
+    if keep < 2:
+        raise ValueError(
+            f"the calibrated reach {reach} leaves {max(keep, 0)} generated step(s) after a "
+            f"{data.prompt_length}-token prompt; recalibrate instead of truncating"
+        )
+    if data.attn_res_routing is not None or data.attn_res_committed is not None:
+        raise ValueError("attention-residual routing is indexed by producing position, not by "
+                         "generated step; recalibrate instead of truncating this row")
+    cut: dict[str, object] = {name: getattr(data, name)[:keep] for name in _PER_STEP_LISTS}
+    cut["chosen_token_ids"] = data.chosen_token_ids[:keep]
+    for name in _PER_STEP_DICTS:
+        value = getattr(data, name)
+        cut[name] = None if value is None else {k: v[:keep] for k, v in value.items()}
+    truncated = replace(data, **cut, _hs_array_cache=None, _mean_attn_cache={})
+    return truncated, record
 
 
 @dataclass
@@ -321,26 +394,31 @@ def _correct_hidden_state(
 ) -> F32:
     """Subtract the positional mean at ``(layer_idx, abs_position)`` from ``h``.
 
-    A position past the table is corrected by its last row. A negative position is
-    corrected by row 0: numpy would otherwise read it from the end of the table,
-    which is the mean of a position the token never occupied. A layer outside the
-    table is refused rather than wrapped the same way, since a negative layer index
-    would subtract the last layer's mean from another layer's state.
+    A position at or past the calibrated reach (:func:`positions_calibrated`, not the
+    table's width) is refused: the rows a fit did not reach are zeros, so subtracting
+    them would return an uncorrected state under the corrected name. A row that runs
+    past reach is cut first, explicitly, with :func:`truncate_to_calibration`. A
+    negative position is corrected by row 0: numpy would otherwise read it from the end
+    of the table, which is the mean of a position the token never occupied. A layer
+    outside the table is refused rather than wrapped the same way, since a negative
+    layer index would subtract the last layer's mean from another layer's state.
 
     Raises
     ------
     IndexError
         When ``layer_idx`` is outside ``[0, positional_means.shape[0])``.
+    PositionsUncovered
+        When ``abs_position`` is at or past the calibrated reach.
     """
     if positional_means is None:
         return h
-    n_layers, max_pos = positional_means.shape[0], positional_means.shape[1]
+    n_layers = positional_means.shape[0]
     if not 0 <= layer_idx < n_layers:
         raise IndexError(
             f"layer index {layer_idx} is outside the positional means' {n_layers} layers"
         )
-    pos = min(max(abs_position, 0), max_pos - 1)
-    return h - positional_means[layer_idx, pos]
+    refuse_uncovered_position(positional_means, abs_position, what="a corrected hidden state")
+    return h - positional_means[layer_idx, max(abs_position, 0)]
 
 
 # ── Residual activation norms + output statistics ──────────────────────────────
@@ -404,9 +482,10 @@ def extract_norms_and_output_stats(
     for l in range(num_layers):
         h = hs_array[:, l + 1, :]  # [T, hidden_dim]
         if data.positional_means is not None:
-            max_pos = data.positional_means.shape[1]
-            pos_idx = np.minimum(positions, max_pos - 1)
-            h = h - data.positional_means[l + 1, pos_idx, :]
+            if positions.size:
+                refuse_uncovered_position(data.positional_means, int(positions[-1]),
+                                          what="the activation-norm block")
+            h = h - data.positional_means[l + 1, positions, :]
         norms = np.linalg.norm(h, axis=1).astype(np.float32)  # [T]
 
         features.append(float(norms.mean()))
@@ -580,10 +659,11 @@ def extract_attention_and_deltas(
         h_l = hs_array[:, l + 1, :]  # [T, hidden_dim] — view, no copy
         h_l1 = hs_array[:, l + 2, :]
         if data.positional_means is not None:
-            max_pos = data.positional_means.shape[1]
-            pos_idx = np.minimum(positions, max_pos - 1)
-            h_l = h_l - data.positional_means[l + 1, pos_idx, :]
-            h_l1 = h_l1 - data.positional_means[l + 2, pos_idx, :]
+            if positions.size:
+                refuse_uncovered_position(data.positional_means, int(positions[-1]),
+                                          what="the residual-delta block")
+            h_l = h_l - data.positional_means[l + 1, positions, :]
+            h_l1 = h_l1 - data.positional_means[l + 2, positions, :]
         delta = h_l1 - h_l  # [T, hidden_dim]
         dn = np.linalg.norm(delta, axis=1).astype(np.float32)  # [T]
 

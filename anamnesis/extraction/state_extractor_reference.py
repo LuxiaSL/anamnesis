@@ -23,6 +23,7 @@ from scipy import linalg as la
 from scipy.stats import entropy as scipy_entropy
 
 from anamnesis.config import ExtractionConfig
+from anamnesis.extraction.calibration import refuse_uncovered_position
 from anamnesis.extraction.state_extractor import (
     STORED_ATTENTION_AND_DELTAS,
     STORED_CACHE_AND_KEYS,
@@ -130,26 +131,30 @@ def _correct_hidden_state(
 ) -> F32:
     """Subtract the positional mean at ``(layer_idx, abs_position)`` from ``h``.
 
-    A position past the table is corrected by its last row. A negative position is
-    corrected by row 0: numpy would otherwise read it from the end of the table,
-    which is the mean of a position the token never occupied. A layer outside the
-    table is refused rather than wrapped the same way, since a negative layer index
-    would subtract the last layer's mean from another layer's state.
+    The same rule as :func:`anamnesis.extraction.state_extractor._correct_hidden_state`:
+    a position at or past the calibrated reach is refused, since the rows a fit did not
+    reach are zeros. A negative position is corrected by row 0: numpy would otherwise
+    read it from the end of the table, which is the mean of a position the token never
+    occupied. A layer outside the table is refused rather than wrapped the same way,
+    since a negative layer index would subtract the last layer's mean from another
+    layer's state.
 
     Raises
     ------
     IndexError
         When ``layer_idx`` is outside ``[0, positional_means.shape[0])``.
+    PositionsUncovered
+        When ``abs_position`` is at or past the calibrated reach.
     """
     if positional_means is None:
         return h
-    n_layers, max_pos = positional_means.shape[0], positional_means.shape[1]
+    n_layers = positional_means.shape[0]
     if not 0 <= layer_idx < n_layers:
         raise IndexError(
             f"layer index {layer_idx} is outside the positional means' {n_layers} layers"
         )
-    pos = min(max(abs_position, 0), max_pos - 1)
-    return h - positional_means[layer_idx, pos]
+    refuse_uncovered_position(positional_means, abs_position, what="a corrected hidden state")
+    return h - positional_means[layer_idx, max(abs_position, 0)]
 
 
 # ── Residual activation norms + output statistics ──────────────────────────────
