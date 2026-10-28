@@ -48,24 +48,28 @@ def _to(x, device):
     return x.to(device) if isinstance(x, torch.Tensor) else x
 
 
-def _example(dtype, steps, start, sampled, device="cpu", seed=411):
+def _example(dtype, steps, start, sampled, device="cpu", seed=411, eff_dim="svd"):
     lane, capture, kwargs, weights = make_example(dtype, steps=steps, start=start,
                                                   sampled_layers=sampled, seed=seed)
+    if device != "cpu" or eff_dim != "svd":
+        lane = _lane_on(lane, device, eff_dim)
     if device != "cpu":
-        lane = _lane_on(lane, device)
         capture = {k: _to(v, device) for k, v in capture.items()}
         weights = {k: v.to(device) for k, v in weights.items()}
     return lane, capture, kwargs, weights
 
 
-def _lane_on(lane, device):
+def _lane_on(lane, device, eff_dim="svd"):
+    """``lane`` rebuilt on ``device``, computing the effective dimension by ``eff_dim``."""
     from anamnesis.extraction.fast.features import GpuFeatureLane
 
+    families = lane.families.model_copy()
+    families._fast_lane_eff_dim = eff_dim
     pca = lane.pca.cpu().numpy() if not isinstance(lane.pca, dict) else {
         k: v.cpu().numpy() for k, v in lane.pca.items()}
     mean = lane.pca_mean.cpu().numpy() if not isinstance(lane.pca_mean, dict) else {
         k: v.cpu().numpy() for k, v in lane.pca_mean.items()}
-    return GpuFeatureLane(lane.config, lane.families, list(lane.names), lane.pm, pca, mean,
+    return GpuFeatureLane(lane.config, families, list(lane.names), lane.pm, pca, mean,
                           device=device, calibration_sha256=lane.calibration_sha256)
 
 
@@ -100,11 +104,13 @@ SHAPES = [(16, 4, (0, 1, 2)), (16, 4, (0, 2)), (70, 6, (1,))]
 SHAPE_IDS = ["all-sampled", "one-unsampled", "long-span"]
 
 
+@pytest.mark.parametrize("eff_dim", ["svd", "norms"])
 @pytest.mark.parametrize("routed", [False, True], ids=["battery", "routed"])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["float32", "bfloat16"])
 @pytest.mark.parametrize("steps,start,sampled", SHAPES, ids=SHAPE_IDS)
-def test_the_restated_reduction_is_external_finish_byte_for_byte(dtype, steps, start, sampled, routed):
-    lane, capture, kwargs, weights = _example(dtype, steps, start, sampled)
+def test_the_restated_reduction_is_external_finish_byte_for_byte(dtype, steps, start, sampled, routed,
+                                                                 eff_dim):
+    lane, capture, kwargs, weights = _example(dtype, steps, start, sampled, eff_dim=eff_dim)
     routing, committed = routing_substrate(8, steps, seed=5) if routed else (None, None)
     call = _call(capture, kwargs, routing, committed)
     restated = _span(GraphedExternalSpan, lane, capture, weights, kwargs)._reduce_eagerly(call)
@@ -132,14 +138,16 @@ def test_a_cache_holds_at_least_one_shape():
 
 
 @cuda
+@pytest.mark.parametrize("eff_dim", ["svd", "norms"])
 @pytest.mark.parametrize("routed", [False, True], ids=["battery", "routed"])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["float32", "bfloat16"])
 @pytest.mark.parametrize("steps,start,sampled", SHAPES, ids=SHAPE_IDS)
-def test_replayed_spans_are_eager_spans_byte_for_byte(dtype, steps, start, sampled, routed):
+def test_replayed_spans_are_eager_spans_byte_for_byte(dtype, steps, start, sampled, routed, eff_dim):
     cache = SpanGraphCache()
     replayed = 0
     for seed in (411, 412, 413, 414):
-        lane_seeded, capture, kwargs, weights = _example(dtype, steps, start, sampled, "cuda", seed)
+        lane_seeded, capture, kwargs, weights = _example(dtype, steps, start, sampled, "cuda", seed,
+                                                         eff_dim)
         if seed == 411:
             lane = lane_seeded
         routing, committed = (routing_substrate(8, steps, seed=seed) if routed else (None, None))
@@ -155,6 +163,9 @@ def test_replayed_spans_are_eager_spans_byte_for_byte(dtype, steps, start, sampl
     assert stats.refused == {} and replayed == 3
     assert (stats.finish_shapes, stats.consume_shapes) == (1, 1)
     assert (stats.finish_replays, stats.consume_replays) == (3, 3)
+    if eff_dim == "norms":  # no decomposition: the finish reduction is one graph
+        (finish,) = cache.finish.values()
+        assert finish.tape.solver_steps == 0 and len(finish.tape.graphs) == 1
 
 
 @cuda
