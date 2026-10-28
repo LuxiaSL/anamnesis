@@ -1,28 +1,31 @@
-"""CUDA-graph replay of :class:`~anamnesis.extraction.fast.external.ExternalSpan`'s reduction.
+"""CUDA-graph replay of :class:`~anamnesis.extraction.fast.external.ExternalSpan`'s reductions.
 
 A short span's reduction launches tens of thousands of small kernels, and on a
 fast device the host's launch cost, not the device's arithmetic, sets its wall
-time. :class:`GraphedExternalSpan` is an ``ExternalSpan`` whose :meth:`finish`
-records the reduction once per span shape as CUDA graphs and replays them for
-every later span of that shape. The kernels are the reducers' own, in their own
-order, on inputs laid out exactly as the caller's: a replayed row is the eager
-row, byte for byte, and carries the eager row's lane id.
+time. :class:`GraphedExternalSpan` is an ``ExternalSpan`` that records its
+reductions once per span shape as CUDA graphs and replays them for every later
+span of that shape: each layer's attention reduction
+(:meth:`ExternalSpan.attention`, a tape per layer, replayed as the forward
+produces that layer's weights) and the ``finish`` reduction. The kernels are the
+reducers' own, in their own order, on inputs laid out exactly as the caller's
+(same strides, same address alignment): a replayed row is the eager row, byte for
+byte, and carries the eager row's lane id.
 
 How a reduction becomes replayable
 ----------------------------------
-The reducers are driven unedited. :func:`_reduce` restates the body of
-``ExternalSpan.finish`` (its per-layer loop, the output statistics, the
-key/value/query/gate families and the routing family) and runs three times for a
-new shape: once eagerly to record what the host reads, once under stream
-capture, and once replayed to compare. Three kinds of operation cannot sit in a
-graph, and each is handled where the dispatcher sees it:
+The reducers are driven unedited. The attention reducer's ``consume`` is run as
+it is; :func:`_reduce` restates the body of ``ExternalSpan.finish`` (its
+per-layer loop, the output statistics, the key/value/query/gate families and the
+routing family). Each runs three times for a new shape: once eagerly to record
+what the host reads, once under stream capture, and once replayed. Four kinds of
+operation cannot sit in a graph, and each is handled where it occurs:
 
 * **Host reads of a device value** (``bool(t)``, ``t.item()``). A read of a
   value computed only from constants (shapes, layer numbers, configuration) is
   the same for every span of the shape; the value recorded in the eager run is
   returned in its place. A read of anything derived from the span's data refuses
   the capture. Which values derive from data is tracked per storage through every
-  operation.
+  operation the dispatcher sees.
 * **Solvers that check their status on the host** (``torch.linalg.eigvalsh``,
   ``torch.linalg.svdvals``). The graph is cut around each call: the solver runs
   eagerly between two graphs on the graph's own input, and its outputs are copied
@@ -30,23 +33,25 @@ graph, and each is handled where the dispatcher sees it:
 * **Host data uploaded to the device** (``torch.tensor(list, device=...)``, a
   Python list used as an index). The data is a constant of the shape; it is staged
   in pinned host memory, and the graph copies it on every replay.
+* **Selections of a data-dependent size.** The spectral high-frequency energy
+  ratio sums the eigenvalues above their median, however many there are; it runs
+  eagerly after its layer's graphs, with ``AttentionReducer.spectral_hfer``, on
+  the graphs' outputs.
 
-The gate's top-k overlap is the one feature computed on the host from the span's
-data; it runs on the host after the device reduction, as in the eager path, from
-the same bytes. Each layer's attention is reduced eagerly as the forward produces
-it (:meth:`ExternalSpan.attention`), and its retained summaries enter the graph as
-inputs. The collector's assembly of the vector runs eagerly after the replay.
+The gate's top-k overlap is computed on the host from the span's data, as in the
+eager path, from the same bytes, while the graphs replay. The collector's
+assembly of the vector runs eagerly after the replay.
 
 Every new shape is verified before it is kept: the replay's vector is compared
 byte for byte with ``ExternalSpan.finish`` on the same inputs, and a shape whose
 replay differs, or whose capture is refused, is reduced eagerly from then on.
-Without CUDA, or for inputs off the lane's device, :meth:`finish` is
-``ExternalSpan.finish``.
+Without CUDA, or for inputs off the lane's device, a graphed span is an
+``ExternalSpan``.
 
 Graphs read the cuFFT plans the eager run created; the plan cache
 (``torch.backends.cuda.cufft_plan_cache``) must not be cleared while a cache of
-graphs is in use. A cache that sees the plan cache shrink drops every graph it
-holds. The classes here are not thread-safe.
+graphs is in use. A cache that sees the plan cache shrink, fill or be resized
+drops every graph it holds. The classes here are not thread-safe.
 """
 
 from __future__ import annotations
@@ -55,8 +60,8 @@ import hashlib
 import json
 import time
 import uuid
-import weakref
 import warnings
+import weakref
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -488,13 +493,16 @@ class _HostConstants(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
-def _record_tape(device: torch.device, pool, data: set[int], warm: Callable[[], Any],
-                 run: Callable[[], Any]) -> tuple[_Tape, Any]:
+def _record_tape(device: torch.device, side: torch.cuda.Stream, pool, data: set[int],
+                 warm: Callable[[], Any], run: Callable[[], Any]) -> tuple[_Tape, Any]:
     """``warm()`` run eagerly and recorded, then ``run()`` (the same reduction on fresh
-    reducers) captured into a tape on the current stream's behalf; returns the tape
-    and what ``run`` returned. The tape has not been replayed."""
+    reducers) captured on ``side`` into a tape that replays on the current stream;
+    returns the tape and what ``run`` returned. The tape has not been replayed.
+
+    The caching allocator reuses a block only on the stream that freed it, so every
+    capture into one pool runs on one ``side`` stream: a layer's graph reuses the
+    scratch memory of the layers captured before it."""
     replay_stream = torch.cuda.current_stream(device)
-    side = torch.cuda.Stream(device)
     side.wait_stream(replay_stream)
     record = _Record()
     with torch.cuda.stream(side):
@@ -666,6 +674,14 @@ class SpanGraphCache:
         self.captures = 0
         self.evictions = 0
         self._fft_plans: dict[int, tuple[int, int]] = {}
+        self._streams: dict[int, torch.cuda.Stream] = {}
+
+    def capture_stream(self, device: torch.device) -> torch.cuda.Stream:
+        """The one stream this cache captures on, per device."""
+        index = device.index if device.index is not None else torch.cuda.current_device()
+        if index not in self._streams:
+            self._streams[index] = torch.cuda.Stream(device)
+        return self._streams[index]
 
     @staticmethod
     def _get(table: OrderedDict, key: tuple):
@@ -861,7 +877,7 @@ class GraphedExternalSpan(ExternalSpan):
             before_bytes = shape.attention.retained_bytes
             before_hfer = len(shape.attention.deferred)
             tape, _ = _record_tape(
-                device, shape.pool, {_storage(shape.replica.view)},
+                device, self.cache.capture_stream(device), shape.pool, {_storage(shape.replica.view)},
                 warm=lambda: _attention_reducer(self, FeatureCollector(device), []).consume(
                     layer, shape.replica.view),
                 run=lambda: shape.attention.consume(layer, shape.replica.view))
@@ -1060,7 +1076,7 @@ class GraphedExternalSpan(ExternalSpan):
         data = {_storage(r.view) for r in replicas if r.extent} | {_storage(chosen)}
         pool = torch.cuda.graph_pool_handle()
         tape, reduction = _record_tape(
-            lane.device, pool, data,
+            lane.device, self.cache.capture_stream(lane.device), pool, data,
             warm=lambda: _reduce(lane, self, static, positional, chosen),
             run=lambda: _reduce(lane, self, static, positional, chosen))
         return FinishGraphs(
