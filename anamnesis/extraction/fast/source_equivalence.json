@@ -35,6 +35,20 @@
       "equivalent_to": "9899ae23be0484ec1c48663c34f228fb349e200ce36b828137bcdde3f9b69f84",
       "authority": "anamnesis #55",
       "evidence": "Old source 2c715e0 against the new, on one CPU, by the same 22-case dump as ops.py's entry: byte-identical on 22 of 22. The gate top-k Jaccard counts each adjacent pair's intersection through a membership mask instead of Python sets; tests/test_gate_topk_equivalence.py and tests/test_fast_ops_equivalence.py hold it equal to the set form on tie-forced surfaces and at every set size. Its host transfer moves into a method unchanged. On one B200 (CUDA), the same dump of an exact archive of 2c715e0 against this tree was byte-identical on 22 of 22 vectors (20,165 coordinates)."
+    },
+    {
+      "file": "features.py",
+      "sha256": "2e5d89b0aff1043307fb2d1d2bde6d2424f8687a0f53a238ffb67dc1e0a4327a",
+      "equivalent_to": "a8737153447b48fe81d1aeb295afa252f751d4e1e7841489fc114ffd0a42bdf0",
+      "authority": "anamnesis #56",
+      "evidence": "Old source f7ad8af against the new, on one CPU, for lanes whose configuration does not set the new eff_dim method (its default, svd): 22 of 22 vectors byte-identical (20,165 coordinates; ExternalSpan at 2 to 129 steps in float32 and bfloat16, with and without the routing family, and a random-weight Llama through replay_span cached and full at 2, 3, 4, 17 and 65 tokens and through replay_batch), each dumped by the same script from an exact archive of f7ad8af and from this tree and compared byte for byte. The default adds nothing to the lane identity or receipt; 21 lane ids (fast lanes cached and full with pooled and per-layer PCA at two schemas, their ExternalSpan ids under two capture identities, full-path lanes built from the 3b and 8b presets, and every vLLM lane id) were computed by both trees and are equal strings. A lane reading an eff_dim norms preset is a different lane with a different id and is not covered by this entry. On one B200 (CUDA), the same dump of an exact archive of f7ad8af against this tree was byte-identical on 22 of 22 vectors (20,165 coordinates)."
+    },
+    {
+      "file": "families.py",
+      "sha256": "b93edab403436bde9349f97107a2529362cff65c3a9cc0c5149c5ce5fb7cf404",
+      "equivalent_to": "10b3ddecdc78242d1f6225bc1065ac553a7aa2ff7dbb5960963d9503eac18db7",
+      "authority": "anamnesis #56",
+      "evidence": "Old source f7ad8af against the new, on one CPU, by the same 22-case dump as features.py's entry: byte-identical on 22 of 22 for the default svd method, which calls eff_dim on the same matrix in the same arithmetic; only the order the coordinates are put in changes, and the vector is assembled by name. The norms method runs only for a lane that reads an eff_dim norms preset, under its own id. On one B200 (CUDA), the same dump of an exact archive of f7ad8af against this tree was byte-identical on 22 of 22 vectors (20,165 coordinates)."
     }
   ]
 }

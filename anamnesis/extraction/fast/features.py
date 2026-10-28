@@ -65,6 +65,15 @@ class GpuFeatureResult:
     metadata: dict
 
 
+EFF_DIM_METHODS = ("svd", "norms")
+"""How a lane computes the effective dimension. ``svd`` is the specification's
+arithmetic, from the singular values. ``norms`` computes the same quantity from two
+Frobenius norms, ``sum(s**2) = |A|_F**2`` and ``sum(s**4) = |A^T A|_F**2``, which
+agrees to rounding rather than to the byte and costs one matrix product instead of a
+decomposition. A lane takes it from its families configuration, which takes it from a
+preset's ``eff_dim``; a ``norms`` lane names it in its identity and its receipts, so its
+id is never a default lane's."""
+
 SOURCE_EQUIVALENCE = Path(__file__).with_name("source_equivalence.json")
 """Measured equivalences between lane source files: an entry names a file's new
 digest, the digest it computes byte-identically to, and the evidence. Append-only;
@@ -169,8 +178,15 @@ class GpuFeatureLane:
         self.layer_split = (
             None if layer_split is None or layer_split.is_single else layer_split
         )
+        eff_dim = getattr(families, "_fast_lane_eff_dim", "svd")
+        if eff_dim not in EFF_DIM_METHODS:
+            raise ValueError(f"eff_dim must be one of {EFF_DIM_METHODS}, got {eff_dim!r}")
+        self.eff_dim = eff_dim
         self.config = extraction
-        self.families = families
+        # The reducers read the method from the lane's own copy, so a later change to the
+        # caller's configuration cannot change what this lane computes under its id.
+        self.families = families.model_copy()
+        self.families._fast_lane_eff_dim = eff_dim
         self.names = tuple(feature_names)
         self.pm = positional_means
         # Coverage is the last filled row, not the table's width: a zero row
@@ -235,6 +251,10 @@ class GpuFeatureLane:
             tf32=torch.backends.cuda.matmul.allow_tf32,
             preferred_blas_library=str(torch.backends.cuda.preferred_blas_library()),
         )
+        if eff_dim != "svd":
+            # The default adds nothing, so every lane built before the setting existed
+            # keeps its id; any other method adds a key no default identity has.
+            identity["eff_dim"] = eff_dim
         self.identity = identity
         self.lane_id = (
             "torch-eager-reduce-v1-"
@@ -733,6 +753,8 @@ class GpuFeatureLane:
         )
         if self.layer_split is not None:
             receipt["layer_split_sha256"] = self.layer_split.digest
+        if self.eff_dim != "svd":
+            receipt["eff_dim"] = self.eff_dim
         return GpuFeatureResult(
             vector, self.names, float(logprob.cpu()), knnlm, receipt
         )

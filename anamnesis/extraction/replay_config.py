@@ -34,4 +34,5 @@ def native_replay_configs(
         trajectory_layers=preset.trajectory_layers,
         contrastive_layers=preset.contrastive_layers,
     )
+    family_config._fast_lane_eff_dim = preset.eff_dim
     return extraction_config, family_config
