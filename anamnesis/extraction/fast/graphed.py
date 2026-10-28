@@ -55,6 +55,7 @@ import hashlib
 import json
 import time
 import uuid
+import weakref
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
@@ -117,6 +118,50 @@ class _DeferredTopk(FamilyReducer):
         if self._layer is None:
             raise GraphCaptureRefused("a gate top-k outside a gate reduction")
         self.deferred_topk.append((name, self._layer))
+
+
+class _DeferredHfer(AttentionReducer):
+    """The attention reducer with the spectral high-frequency energy ratio left to an
+    eager step.
+
+    How many eigenvalues pass the median depends on their values, so the ratio
+    selects a data-dependent number of elements; each call returns a buffer and
+    appends ``(buffer, eigenvalues, median, energy)`` to ``deferred``, and the step
+    that fills the buffer computes the ratio with ``AttentionReducer.spectral_hfer``.
+    """
+
+    def __init__(self, collector: FeatureCollector, deferred: list, **kwargs):
+        super().__init__(collector, **kwargs)
+        self.deferred = deferred
+
+    def spectral_hfer(self, ev: Tensor, median: Tensor, energy: Tensor) -> Tensor:
+        buffer = torch.empty((), dtype=torch.promote_types(ev.dtype, energy.dtype), device=ev.device)
+        self.deferred.append((buffer, ev, median, energy))
+        return buffer
+
+
+def _attention_reducer(span: ExternalSpan, collector: FeatureCollector, deferred: list) -> _DeferredHfer:
+    lane = span.lane
+    return _DeferredHfer(
+        collector,
+        deferred,
+        steps=span.steps,
+        prefix_length=span.start,
+        sampled_layers=lane.config.sampled_layers,
+        spectral_stride=lane.config.spectral_subsample_step,
+        n_windows=lane.families.temporal_n_windows,
+        include_stft=lane.families.enable_stft,
+    )
+
+
+class _HferStep:
+    """Fills a deferred high-frequency energy ratio from its graph's outputs."""
+
+    def __init__(self, buffer: Tensor, ev: Tensor, median: Tensor, energy: Tensor):
+        self.buffer, self.ev, self.median, self.energy = buffer, ev, median, energy
+
+    def __call__(self) -> None:
+        self.buffer.copy_(AttentionReducer.spectral_hfer(self.ev, self.median, self.energy))
 
 
 @dataclass
@@ -311,6 +356,7 @@ class _Tape:
         self.steps: list[Callable[[], None]] = []
         self.graphs: list[torch.cuda.CUDAGraph] = []
         self.keep: list[Any] = []
+        self.solver_steps = 0
 
     def replay(self) -> None:
         for step in self.steps:
@@ -442,6 +488,38 @@ class _HostConstants(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
+def _record_tape(device: torch.device, pool, data: set[int], warm: Callable[[], Any],
+                 run: Callable[[], Any]) -> tuple[_Tape, Any]:
+    """``warm()`` run eagerly and recorded, then ``run()`` (the same reduction on fresh
+    reducers) captured into a tape on the current stream's behalf; returns the tape
+    and what ``run`` returned. The tape has not been replayed."""
+    replay_stream = torch.cuda.current_stream(device)
+    side = torch.cuda.Stream(device)
+    side.wait_stream(replay_stream)
+    record = _Record()
+    with torch.cuda.stream(side):
+        with _Recording(record):
+            warm()
+    torch.cuda.synchronize(device)
+    tape = _Tape(pool, replay_stream)
+    capturing = _Capturing(tape, record, set(data), side, replay_stream)
+    with torch.cuda.stream(side):
+        try:
+            with _HostConstants(device, tape.keep), capturing:
+                capturing.begin()
+                result = run()
+                capturing.end()
+        except BaseException:
+            capturing.abandon()
+            raise
+    if capturing.reads != len(record.host_reads) or capturing.solvers != len(record.solver_outputs):
+        raise GraphCaptureRefused("the capture and the eager run read the host differently")
+    replay_stream.wait_stream(side)
+    torch.cuda.synchronize(device)
+    tape.solver_steps = len(record.solver_outputs)
+    return tape, result
+
+
 # --------------------------------------------------------------------------- inputs
 
 
@@ -506,8 +584,8 @@ def _pool_bytes(pool) -> int:
 
 
 @dataclass
-class ShapeGraphs:
-    """One span shape's recorded reduction and what it costs."""
+class FinishGraphs:
+    """One span shape's recorded ``finish`` reduction and what it costs."""
 
     lane: GpuFeatureLane
     tape: _Tape
@@ -516,19 +594,54 @@ class ShapeGraphs:
     chosen: Tensor
     reduction: _Reduction
     capture_seconds: float
-    graphs: int
-    solver_steps: int
     input_bytes: int
     pool_bytes: int
     replays: int = 0
 
 
 @dataclass
+class _LayerTape:
+    tape: _Tape
+    names: list[str]
+    retained_bytes: int
+
+
+@dataclass
+class ConsumeGraphs:
+    """One span shape's recorded per-layer attention reductions, one tape per layer in
+    one memory pool, replayed in layer order.
+
+    The outputs live in the pool and are rewritten by the next span's replay, so one
+    span at a time holds them (``owner``)."""
+
+    lane: GpuFeatureLane
+    pool: Any
+    replica: _Replica
+    collector: FeatureCollector
+    attention: _DeferredHfer
+    layers: list[_LayerTape] = field(default_factory=list)
+    capture_seconds: float = 0.0
+    pool_bytes: int = 0
+    replays: int = 0
+    owner: Any = None
+
+    @property
+    def input_bytes(self) -> int:
+        return self.replica.base.numel() * self.replica.base.element_size()
+
+    def held_by_another(self, span: object) -> bool:
+        owner = self.owner() if self.owner is not None else None
+        return owner is not None and owner is not span and not owner.finished
+
+
+@dataclass
 class GraphCacheStats:
-    shapes: int
+    finish_shapes: int
+    consume_shapes: int
     refused: dict[str, str]
     captures: int
-    replays: int
+    finish_replays: int
+    consume_replays: int
     evictions: int
     capture_seconds: float
     input_bytes: int
@@ -536,66 +649,91 @@ class GraphCacheStats:
 
 
 class SpanGraphCache:
-    """Recorded reductions keyed by span shape and input layout, least recently used
-    first out, at most ``max_shapes`` held. A shape whose capture was refused or
-    whose replay did not match the eager reduction is remembered and reduced
-    eagerly."""
+    """Recorded reductions keyed by span shape and input layout.
+
+    ``finish`` reductions and per-layer attention reductions are kept apart, each
+    least recently used first out with at most ``max_shapes`` held. A shape whose
+    capture was refused, or whose replay did not match the eager reduction, is
+    remembered and reduced eagerly."""
 
     def __init__(self, max_shapes: int = 8):
         if max_shapes < 1:
             raise ValueError("a graph cache holds at least one shape")
         self.max_shapes = max_shapes
-        self.shapes: OrderedDict[tuple, ShapeGraphs] = OrderedDict()
+        self.finish: OrderedDict[tuple, FinishGraphs] = OrderedDict()
+        self.consume: OrderedDict[tuple, ConsumeGraphs] = OrderedDict()
         self.refused: dict[tuple, str] = {}
         self.captures = 0
         self.evictions = 0
         self._fft_plans: dict[int, tuple[int, int]] = {}
 
-    def get(self, key: tuple) -> ShapeGraphs | None:
-        entry = self.shapes.get(key)
+    @staticmethod
+    def _get(table: OrderedDict, key: tuple):
+        entry = table.get(key)
         if entry is not None:
-            self.shapes.move_to_end(key)
+            table.move_to_end(key)
         return entry
 
-    def put(self, key: tuple, entry: ShapeGraphs) -> None:
-        self.shapes[key] = entry
-        self.shapes.move_to_end(key)
+    def _put(self, table: OrderedDict, key: tuple, entry) -> None:
+        table[key] = entry
+        table.move_to_end(key)
         self.captures += 1
-        while len(self.shapes) > self.max_shapes:
+        while len(table) > self.max_shapes:
             torch.cuda.synchronize()
-            self.shapes.popitem(last=False)
+            table.popitem(last=False)
             self.evictions += 1
 
+    def get_finish(self, key: tuple) -> FinishGraphs | None:
+        return self._get(self.finish, key)
+
+    def put_finish(self, key: tuple, entry: FinishGraphs) -> None:
+        self._put(self.finish, key, entry)
+
+    def get_consume(self, key: tuple) -> ConsumeGraphs | None:
+        return self._get(self.consume, key)
+
+    def put_consume(self, key: tuple, entry: ConsumeGraphs) -> None:
+        self._put(self.consume, key, entry)
+
+    def refuse(self, key: tuple, reason: str) -> None:
+        self.refused[key] = reason
+        self.finish.pop(key, None)
+        self.consume.pop(key, None)
+
     def check_fft_plans(self, device: torch.device) -> None:
-        """Drop every graph if the device's cuFFT plan cache shrank or was resized
-        since it was last seen: a graph may hold a plan the cache has destroyed."""
+        """Drop every graph if the device's cuFFT plan cache shrank, was resized or
+        filled since it was last seen: a graph may hold a plan the cache destroyed."""
         index = device.index if device.index is not None else torch.cuda.current_device()
         plans = torch.backends.cuda.cufft_plan_cache[index]
         now = (plans.size, plans.max_size)
         seen = self._fft_plans.get(index)
         if seen is not None and (now[1] != seen[1] or now[0] < seen[0] or now[0] >= now[1]):
             torch.cuda.synchronize()
-            self.shapes.clear()
-            self.evictions += 1
+            self.evictions += len(self.finish) + len(self.consume)
+            self.finish.clear()
+            self.consume.clear()
         self._fft_plans[index] = now
 
     def clear(self) -> None:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        self.shapes.clear()
+        self.finish.clear()
+        self.consume.clear()
         self.refused.clear()
 
     def stats(self) -> GraphCacheStats:
-        entries = list(self.shapes.values())
+        finish, consume = list(self.finish.values()), list(self.consume.values())
         return GraphCacheStats(
-            shapes=len(entries),
-            refused={repr(key[:4]): reason for key, reason in self.refused.items()},
+            finish_shapes=len(finish),
+            consume_shapes=len(consume),
+            refused={repr(key[:5]): reason for key, reason in self.refused.items()},
             captures=self.captures,
-            replays=sum(e.replays for e in entries),
+            finish_replays=sum(e.replays for e in finish),
+            consume_replays=sum(e.replays for e in consume),
             evictions=self.evictions,
-            capture_seconds=sum(e.capture_seconds for e in entries),
-            input_bytes=sum(e.input_bytes for e in entries),
-            pool_bytes=sum(e.pool_bytes for e in entries),
+            capture_seconds=sum(e.capture_seconds for e in finish + consume),
+            input_bytes=sum(e.input_bytes for e in finish + consume),
+            pool_bytes=sum(e.pool_bytes for e in finish + consume),
         )
 
 
@@ -603,23 +741,166 @@ DEFAULT_CACHE = SpanGraphCache()
 """The cache a :class:`GraphedExternalSpan` uses unless it is given one."""
 
 
+@dataclass
+class _ConsumeState:
+    """What the per-layer attention reduction leaves for ``finish``: the features it
+    put, and the summaries it retained."""
+
+    raw: dict
+    zeroed: list
+    spectral: dict
+    per_head: dict
+
+
+def _bitwise_equal(a: GpuFeatureResult, b: GpuFeatureResult) -> bool:
+    return (a.feature_names == b.feature_names
+            and a.features.tobytes() == b.features.tobytes()
+            and np.float64(a.mean_logprob).tobytes() == np.float64(b.mean_logprob).tobytes())
+
+
+def _differing(a: GpuFeatureResult, b: GpuFeatureResult) -> list[str]:
+    return [n for n, x, y in zip(a.feature_names, a.features, b.features, strict=False)
+            if np.float32(x).tobytes() != np.float32(y).tobytes()]
+
+
 # --------------------------------------------------------------------------- the span
 
 
 class GraphedExternalSpan(ExternalSpan):
-    """An :class:`ExternalSpan` whose :meth:`finish` replays a recorded reduction.
+    """An :class:`ExternalSpan` whose reductions replay recorded CUDA graphs.
 
-    The first span of a shape is reduced by ``ExternalSpan.finish`` and recorded;
-    its replay is compared with that reduction byte for byte before the recording
-    is kept. Later spans of the shape are copied into the recording's input buffers
-    and replayed. The result, names, lane id and receipt are ``ExternalSpan``'s; the
-    receipt adds ``graph_replayed``.
+    Each layer's attention reduction and the ``finish`` reduction are recorded the
+    first time a span shape is seen; that span's own result is ``ExternalSpan``'s
+    eager result, and the recording is kept only if its replay produced the same
+    bytes. Later spans of the shape copy their inputs into the recording's buffers
+    and replay it. Attention must arrive in layer order for its graphs to replay;
+    a span whose attention arrives otherwise, or whose shape was refused, is reduced
+    eagerly. The result, names, lane id and receipt are ``ExternalSpan``'s; the
+    receipt adds ``graph_replayed`` (whether the vector came from replayed graphs)
+    and ``attention_replayed`` (whether its attention reduction did).
     """
 
     def __init__(self, lane: GpuFeatureLane, *, start: int, end: int, num_layers: int,
                  cache: SpanGraphCache | None = None):
         super().__init__(lane, start=start, end=end, num_layers=num_layers)
         self.cache = DEFAULT_CACHE if cache is None else cache
+        self._graphs = lane.device.type == "cuda" and torch.cuda.is_available()
+        self._consume_mode = "pending" if self._graphs else "eager"
+        self._consume_key: tuple | None = None
+        self._consume: ConsumeGraphs | None = None
+        self._consume_began = 0.0
+        self._next_layer = 0
+
+    # ------------------------------------------------------------------ attention
+
+    def attention(self, layer: int, weights: Tensor) -> None:
+        if self.finished:
+            raise ExternalCaptureError("attention after the span was finished")
+        if not 0 <= layer < self.num_layers:
+            raise ExternalCaptureError(f"attention layer {layer} outside 0..{self.num_layers - 1}")
+        w = weights if weights.ndim == 4 else weights.unsqueeze(0)
+        if w.ndim != 4 or w.shape[0] != 1 or w.shape[2] < self.end or w.shape[3] < self.end:
+            raise ExternalCaptureError(f"attention weights {tuple(weights.shape)} do not cover the span")
+        span_weights = w[:, :, self.start:self.end, :self.end].to(self.lane.device)
+        mode = self._consume_mode_for(layer, span_weights)
+        if mode == "replay":
+            self._consume_replay(layer, span_weights)
+            return
+        self.attention_reducer.consume(layer, span_weights)
+        if mode == "record":
+            self._consume_record(layer, span_weights)
+
+    def _consume_mode_for(self, layer: int, span_weights: Tensor) -> str:
+        if self._consume_mode == "eager":
+            return "eager"
+        layout = _layout(span_weights)
+        if self._consume_mode == "pending":
+            if layer != 0 or span_weights.device != self.lane.device:
+                return self._consume_eager()
+            key = (id(self.lane), self.start, self.end, self.num_layers,
+                   torch.cuda.current_stream(self.lane.device).stream_id, layout)
+            self._consume_key = key
+            self.cache.check_fft_plans(self.lane.device)
+            entry = self.cache.get_consume(key)
+            if entry is not None:
+                if entry.held_by_another(self):
+                    return self._consume_eager()
+                entry.owner = weakref.ref(self)
+                self._consume, self._consume_mode = entry, "replay"
+            elif key in self.cache.refused:
+                return self._consume_eager()
+            else:
+                self._consume_mode = "record"
+                self._consume_began = time.perf_counter()
+        elif layer != self._next_layer or layout != self._consume_key[-1]:
+            return self._consume_eager()
+        self._next_layer = layer + 1
+        return self._consume_mode
+
+    def _consume_eager(self) -> str:
+        """The rest of this span's attention reduced eagerly; a recording in progress
+        is dropped (this span's order, not the shape, stopped it)."""
+        if self._consume_mode == "record":
+            self._consume = None
+        self._consume_mode = "eager"
+        return "eager"
+
+    def _consume_record(self, layer: int, span_weights: Tensor) -> None:
+        lane, device = self.lane, self.lane.device
+        try:
+            if layer == 0:
+                replica = _Replica(span_weights)
+                collector = FeatureCollector(device)
+                self._consume = ConsumeGraphs(
+                    lane=lane, pool=torch.cuda.graph_pool_handle(), replica=replica,
+                    collector=collector, attention=_attention_reducer(self, collector, []),
+                    owner=weakref.ref(self))
+            shape = self._consume
+            shape.replica.view.copy_(span_weights)
+            before_names = len(shape.collector._raw)
+            before_bytes = shape.attention.retained_bytes
+            before_hfer = len(shape.attention.deferred)
+            tape, _ = _record_tape(
+                device, shape.pool, {_storage(shape.replica.view)},
+                warm=lambda: _attention_reducer(self, FeatureCollector(device), []).consume(
+                    layer, shape.replica.view),
+                run=lambda: shape.attention.consume(layer, shape.replica.view))
+            for deferred in shape.attention.deferred[before_hfer:]:
+                tape.steps.append(_HferStep(*deferred))
+            tape.replay()
+            shape.layers.append(_LayerTape(
+                tape, list(shape.collector._raw)[before_names:],
+                shape.attention.retained_bytes - before_bytes))
+        except Exception as exc:  # any capture failure leaves this shape's attention eager
+            self.cache.refuse(self._consume_key, f"attention layer {layer}: {type(exc).__name__}: {exc}")
+            warnings.warn(f"span shape c={self.start} t={self.steps}: attention reduced eagerly: {exc}",
+                          RuntimeWarning, stacklevel=3)
+            torch.cuda.synchronize(device)
+            self._consume, self._consume_mode = None, "eager"
+
+    def _consume_replay(self, layer: int, span_weights: Tensor) -> None:
+        shape = self._consume
+        recorded = shape.layers[layer]
+        shape.replica.view.copy_(span_weights)
+        recorded.tape.replay()
+        raw = self.collector._raw
+        for name in recorded.names:
+            if name in raw:
+                raise ExternalCaptureError(f"duplicate GPU feature {name}")
+            raw[name] = shape.collector._raw[name]
+        reducer = self.attention_reducer
+        if layer in reducer.seen:
+            raise ExternalCaptureError(f"attention layer {layer} captured twice in one replay")
+        reducer.seen.add(layer)
+        if layer in shape.attention.spectral:
+            reducer.spectral[layer] = shape.attention.spectral[layer]
+        if layer in shape.attention.per_head:
+            reducer.per_head[layer] = shape.attention.per_head[layer]
+        reducer.retained_bytes += recorded.retained_bytes
+        if layer == self.num_layers - 1:
+            shape.replays += 1
+
+    # ------------------------------------------------------------------ finish
 
     @torch.no_grad()
     def finish(
@@ -641,41 +922,111 @@ class GraphedExternalSpan(ExternalSpan):
                     routing=routing, committed=committed)
         if self.finished:
             raise ExternalCaptureError("a span is finished once")
-        lane = self.lane
-        if lane.device.type != "cuda" or not torch.cuda.is_available():
+        recording = (self._consume if self._consume_mode == "record"
+                     and self._next_layer == self.num_layers else None)
+        if not self._graphs:
             return self._eager(call)
         self._validate(hidden, keys, values, queries, gates, logits, token_ids, routing, committed)
         if self.attention_reducer.seen != set(range(self.num_layers)):
             return self._eager(call)
-        inputs = self._inputs(call)
+        if recording is not None:
+            state = _ConsumeState(dict(recording.collector._raw), list(recording.collector._zeroed),
+                                  dict(recording.attention.spectral), dict(recording.attention.per_head))
+        else:
+            state = self._state()
+        inputs = self._inputs(call, state)
         tensors = inputs.tensors()
-        if any(t.device != lane.device for t in tensors):
+        if any(t.device != self.lane.device for t in tensors):
             return self._eager(call)
         key = self._key(inputs, tensors)
-        self.cache.check_fft_plans(lane.device)
-        entry = self.cache.get(key)
-        if entry is None:
-            if key in self.cache.refused:
-                return self._eager(call)
-            return self._record(key, inputs, tensors, call)
-        return self._replay(entry, inputs, tensors, call)
+        self.cache.check_fft_plans(self.lane.device)
+        entry = self.cache.get_finish(key)
+        if entry is None and key in self.cache.refused:
+            if recording is not None:
+                self.cache.refuse(self._consume_key, "its finish reduction is refused")
+            return self._eager(call)
+        if entry is not None and recording is None:
+            topk = self._topk(entry.reduction, inputs)
+            _copy_into(entry.replicas, tensors)
+            entry.chosen.copy_(self._chosen(token_ids))
+            entry.tape.replay()
+            entry.replays += 1
+            self.finished = True
+            return self._assemble(entry.reduction, topk, call, state, replayed=True)
+        return self._verify(key, entry, recording, state, inputs, tensors, call)
+
+    def _verify(self, key: tuple, entry: FinishGraphs | None, recording: ConsumeGraphs | None,
+                state: _ConsumeState, inputs: _Inputs, tensors: list[Tensor],
+                call: dict) -> GpuFeatureResult:
+        """Record what is new (the finish reduction, this span's attention recording or
+        both), replay it, and keep it only if the replay is the eager reduction's bytes.
+        Returns the eager reduction."""
+        began = time.perf_counter()
+        new = entry is None
+        try:
+            if new:
+                entry = self._capture_finish(inputs, tensors, call["token_ids"])
+            else:
+                _copy_into(entry.replicas, tensors)
+                entry.chosen.copy_(self._chosen(call["token_ids"]))
+            topk = self._topk(entry.reduction, inputs)
+            entry.tape.replay()
+            graphed = self._assemble(entry.reduction, topk, call, state, replayed=True)
+        except Exception as exc:  # any capture failure leaves this shape eager
+            reason = f"finish: {type(exc).__name__}: {exc}"
+            if new:
+                self.cache.refuse(key, reason)
+            if recording is not None:
+                self.cache.refuse(self._consume_key, reason)
+            warnings.warn(f"span shape c={self.start} t={self.steps} reduced eagerly: {exc}",
+                          RuntimeWarning, stacklevel=3)
+            torch.cuda.synchronize(self.lane.device)
+            return self._eager(call)
+        eager = self._eager(call)
+        if new:
+            entry.capture_seconds = time.perf_counter() - began
+        if _bitwise_equal(graphed, eager):
+            if new:
+                self.cache.put_finish(key, entry)
+            if recording is not None:
+                recording.capture_seconds = time.perf_counter() - self._consume_began
+                recording.pool_bytes = _pool_bytes(recording.pool)
+                recording.owner = None
+                self.cache.put_consume(self._consume_key, recording)
+            return eager
+        differing = _differing(eager, graphed)
+        reason = (f"replay differs from the eager reduction at {len(differing)} coordinates, "
+                  f"first {differing[:8]}")
+        if new:
+            self.cache.refuse(key, reason)
+        if recording is not None:
+            self.cache.refuse(self._consume_key, reason)
+        warnings.warn(f"span shape c={self.start} t={self.steps} reduced eagerly: {reason}",
+                      RuntimeWarning, stacklevel=3)
+        return eager
 
     def _eager(self, call: dict) -> GpuFeatureResult:
         result = ExternalSpan.finish(self, **call)
         result.metadata["graph_replayed"] = False
+        result.metadata["attention_replayed"] = self._consume_mode == "replay"
         return result
 
-    def _inputs(self, call: dict) -> _Inputs:
+    def _state(self) -> _ConsumeState:
+        reducer = self.attention_reducer
+        return _ConsumeState(dict(self.collector._raw), list(self.collector._zeroed),
+                             dict(reducer.spectral), dict(reducer.per_head))
+
+    def _inputs(self, call: dict, state: _ConsumeState) -> _Inputs:
         routing, committed = call["routing"], call["committed"]
         return _Inputs(call["hidden"], dict(call["keys"]), dict(call["values"]), dict(call["queries"]),
                        dict(call["gates"]), call["logits"],
                        None if routing is None else list(routing),
                        None if committed is None else list(committed),
-                       dict(self.attention_reducer.spectral), dict(self.attention_reducer.per_head))
+                       dict(state.spectral), dict(state.per_head))
 
     def _key(self, inputs: _Inputs, tensors: list[Tensor]) -> tuple:
         return (
-            id(self.lane), self.start, self.end, self.num_layers,
+            id(self.lane), self.start, self.end, self.num_layers, "finish",
             None if inputs.routing is None else tuple((tag, int(layer)) for tag, layer, _ in inputs.routing),
             None if inputs.committed is None else len(inputs.committed),
             tuple(sorted(inputs.keys)),
@@ -696,40 +1047,9 @@ class GraphedExternalSpan(ExternalSpan):
                     gate_topk_overlap, inputs.gates[layer].to(lane.device).float().float().cpu().numpy()))
                 for name, layer in reduction.deferred_topk]
 
-    def _record(self, key: tuple, inputs: _Inputs, tensors: list[Tensor], call: dict) -> GpuFeatureResult:
+    def _capture_finish(self, inputs: _Inputs, tensors: list[Tensor],
+                        token_ids: Sequence[int]) -> FinishGraphs:
         lane = self.lane
-        began = time.perf_counter()
-        try:
-            entry = self._capture(inputs, tensors, call["token_ids"])
-            topk = self._topk(entry.reduction, inputs)
-            entry.tape.replay()
-            graphed = self._assemble(entry.reduction, topk, call, replayed=True)
-        except Exception as exc:  # any capture failure leaves this shape eager
-            self.cache.refused[key] = f"{type(exc).__name__}: {exc}"
-            warnings.warn(f"span shape c={self.start} t={self.steps} reduced eagerly: {exc}",
-                          RuntimeWarning, stacklevel=3)
-            torch.cuda.synchronize(lane.device)
-            return self._eager(call)
-        eager = self._eager(call)
-        entry.capture_seconds = time.perf_counter() - began
-        same = (graphed.feature_names == eager.feature_names
-                and graphed.features.tobytes() == eager.features.tobytes()
-                and np.float64(graphed.mean_logprob).tobytes() == np.float64(eager.mean_logprob).tobytes())
-        if same:
-            self.cache.put(key, entry)
-        else:
-            differing = [n for n, a, b in zip(eager.feature_names, graphed.features, eager.features)
-                         if np.float32(a).tobytes() != np.float32(b).tobytes()]
-            self.cache.refused[key] = (f"replay differs from the eager reduction at {len(differing)} "
-                                       f"coordinates, first {differing[:8]}")
-            warnings.warn(f"span shape c={self.start} t={self.steps} reduced eagerly: its replay "
-                          f"differs from the eager reduction at {len(differing)} coordinates",
-                          RuntimeWarning, stacklevel=3)
-        return eager
-
-    def _capture(self, inputs: _Inputs, tensors: list[Tensor], token_ids: Sequence[int]) -> ShapeGraphs:
-        lane = self.lane
-        replay_stream = torch.cuda.current_stream(lane.device)
         replicas = [_Replica(t) for t in tensors]
         _copy_into(replicas, tensors)
         static = inputs.rebuilt([r.view for r in replicas])
@@ -737,46 +1057,18 @@ class GraphedExternalSpan(ExternalSpan):
         positional = torch.as_tensor(pm, device=lane.device)
         chosen = torch.empty(self.steps, dtype=torch.long, device=lane.device)
         chosen.copy_(self._chosen(token_ids))
-        side = torch.cuda.Stream(lane.device)
-        side.wait_stream(replay_stream)
-        record = _Record()
-        with torch.cuda.stream(side):
-            with _Recording(record):
-                _reduce(lane, self, static, positional, chosen)
-        torch.cuda.synchronize(lane.device)
-        tape = _Tape(torch.cuda.graph_pool_handle(), replay_stream)
         data = {_storage(r.view) for r in replicas if r.extent} | {_storage(chosen)}
-        capturing = _Capturing(tape, record, data, side, replay_stream)
-        with torch.cuda.stream(side):
-            try:
-                with _HostConstants(lane.device, tape.keep), capturing:
-                    capturing.begin()
-                    reduction = _reduce(lane, self, static, positional, chosen)
-                    capturing.end()
-            except BaseException:
-                capturing.abandon()
-                raise
-        if capturing.reads != len(record.host_reads) or capturing.solvers != len(record.solver_outputs):
-            raise GraphCaptureRefused("the capture and the eager run read the host differently")
-        replay_stream.wait_stream(side)
-        torch.cuda.synchronize(lane.device)
-        return ShapeGraphs(
+        pool = torch.cuda.graph_pool_handle()
+        tape, reduction = _record_tape(
+            lane.device, pool, data,
+            warm=lambda: _reduce(lane, self, static, positional, chosen),
+            run=lambda: _reduce(lane, self, static, positional, chosen))
+        return FinishGraphs(
             lane=lane, tape=tape, replicas=replicas, positional=positional, chosen=chosen,
-            reduction=reduction, capture_seconds=0.0, graphs=len(tape.graphs),
-            solver_steps=len(record.solver_outputs),
+            reduction=reduction, capture_seconds=0.0,
             input_bytes=sum(r.base.numel() * r.base.element_size() for r in replicas),
-            pool_bytes=_pool_bytes(tape.pool),
+            pool_bytes=_pool_bytes(pool),
         )
-
-    def _replay(self, entry: ShapeGraphs, inputs: _Inputs, tensors: list[Tensor],
-                call: dict) -> GpuFeatureResult:
-        topk = self._topk(entry.reduction, inputs)
-        _copy_into(entry.replicas, tensors)
-        entry.chosen.copy_(self._chosen(call["token_ids"]))
-        entry.tape.replay()
-        entry.replays += 1
-        self.finished = True
-        return self._assemble(entry.reduction, topk, call, replayed=True)
 
     def _reduce_eagerly(self, call: dict) -> GpuFeatureResult:
         """The restated reduction run without graphs, assembled as a replay is: what a
@@ -786,26 +1078,27 @@ class GraphedExternalSpan(ExternalSpan):
         self._validate(call["hidden"], call["keys"], call["values"], call["queries"], call["gates"],
                        call["logits"], call["token_ids"], call["routing"], call["committed"])
         lane = self.lane
-        inputs = self._inputs(call)
+        state = self._state()
+        inputs = self._inputs(call, state)
         pm = np.ascontiguousarray(lane.pm[1:self.num_layers + 1, self.start:self.start + self.steps])
         chosen = torch.as_tensor(list(call["token_ids"][self.start + 1:self.end]), device=lane.device,
                                  dtype=torch.long)
         reduction = _reduce(lane, self, inputs, torch.as_tensor(pm, device=lane.device), chosen)
         self.finished = True
-        return self._assemble(reduction, self._topk(reduction, inputs), call, replayed=False)
+        return self._assemble(reduction, self._topk(reduction, inputs), call, state, replayed=False)
 
-    def _assemble(self, reduction: _Reduction, topk: list, call: dict, *,
+    def _assemble(self, reduction: _Reduction, topk: list, call: dict, state: _ConsumeState, *,
                   replayed: bool) -> GpuFeatureResult:
         """The vector, names, mean log-probability and receipt of a reduction, as
-        ``ExternalSpan.finish`` assembles them: the span's eagerly reduced attention
-        features, the reduction's features and the host top-k, in one collector."""
+        ``ExternalSpan.finish`` assembles them: the attention reduction's features,
+        the finish reduction's and the host top-k, in one collector."""
         lane, steps, start, end = self.lane, self.steps, self.start, self.end
         out = FeatureCollector(lane.device)
-        eager_raw, graph_raw = self.collector._raw, reduction.collector._raw
-        if eager_raw.keys() & graph_raw.keys():
-            raise ExternalCaptureError("a feature computed both eagerly and in the graph")
-        out._raw = {**eager_raw, **graph_raw}
-        out._zeroed = list(self.collector._zeroed) + list(reduction.collector._zeroed)
+        graph_raw = reduction.collector._raw
+        if state.raw.keys() & graph_raw.keys():
+            raise ExternalCaptureError("a feature computed by both the attention and finish reductions")
+        out._raw = {**state.raw, **graph_raw}
+        out._zeroed = list(state.zeroed) + list(reduction.collector._zeroed)
         for name, overlap in topk:
             out.put(name, overlap.result())
         vector = out.finish(list(lane.names))
@@ -841,5 +1134,6 @@ class GraphedExternalSpan(ExternalSpan):
             retained_attention_summary_bytes=attention.retained_bytes,
             routing_family=call["routing"] is not None,
             graph_replayed=replayed,
+            attention_replayed=self._consume_mode == "replay",
         )
         return GpuFeatureResult(features, tuple(names), float(reduction.logprob.cpu()), knnlm, receipt)

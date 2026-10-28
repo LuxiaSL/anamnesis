@@ -118,7 +118,9 @@ def test_without_cuda_a_graphed_span_is_the_eager_span():
     eager = _span(ExternalSpan, lane, capture, weights, kwargs).finish(**call)
     _same(graphed, eager)
     assert graphed.metadata["graph_replayed"] is False
-    assert cache.stats().shapes == 0
+    assert graphed.metadata["attention_replayed"] is False
+    stats = cache.stats()
+    assert (stats.finish_shapes, stats.consume_shapes) == (0, 0)
 
 
 def test_a_cache_holds_at_least_one_shape():
@@ -147,7 +149,9 @@ def test_replayed_spans_are_eager_spans_byte_for_byte(dtype, steps, start, sampl
         _same(graphed, eager)
         replayed += graphed.metadata["graph_replayed"]
     stats = cache.stats()
-    assert stats.refused == {} and stats.shapes == 1 and stats.replays == 3 and replayed == 3
+    assert stats.refused == {} and replayed == 3
+    assert (stats.finish_shapes, stats.consume_shapes) == (1, 1)
+    assert (stats.finish_replays, stats.consume_replays) == (3, 3)
 
 
 @cuda
@@ -159,7 +163,45 @@ def test_each_shape_records_its_own_graphs_and_the_oldest_is_dropped():
         graphed = _span(GraphedExternalSpan, lane, capture, weights, kwargs, cache=cache).finish(**call)
         _same(graphed, _span(ExternalSpan, lane, capture, weights, kwargs).finish(**call))
     stats = cache.stats()
-    assert stats.shapes == 1 and stats.captures == 3 and stats.evictions == 2
+    assert (stats.finish_shapes, stats.consume_shapes) == (1, 1)
+    assert stats.captures == 6 and stats.evictions == 4
+
+
+def _recorded(cache, dtype=torch.float32, steps=16):
+    lane, capture, kwargs, weights = _example(dtype, steps, 4, (0, 1, 2), "cuda")
+    call = _call(capture, kwargs)
+    _span(GraphedExternalSpan, lane, capture, weights, kwargs, cache=cache).finish(**call)
+    return lane
+
+
+@cuda
+def test_attention_out_of_layer_order_is_reduced_eagerly_and_identically():
+    cache = SpanGraphCache()
+    lane = _recorded(cache)
+    _, capture, kwargs, weights = _example(torch.float32, 16, 4, (0, 1, 2), "cuda", seed=9)
+    start, end = kwargs["start"], kwargs["end"]
+    span = GraphedExternalSpan(lane, start=start, end=end, num_layers=N_LAYERS, cache=cache)
+    for layer in reversed(range(N_LAYERS)):
+        span.attention(layer, full_weights(weights[layer].cpu(), start, end)[0].cuda())
+    call = _call(capture, kwargs)
+    graphed = span.finish(**call)
+    _same(graphed, _span(ExternalSpan, lane, capture, weights, kwargs).finish(**call))
+    assert graphed.metadata["attention_replayed"] is False
+    assert graphed.metadata["graph_replayed"] is True
+
+
+@cuda
+def test_two_spans_of_one_shape_in_flight_do_not_share_attention_graphs():
+    cache = SpanGraphCache()
+    lane = _recorded(cache)
+    examples = [_example(torch.float32, 16, 4, (0, 1, 2), "cuda", seed=s)[1:] for s in (21, 22)]
+    spans = [_span(GraphedExternalSpan, lane, capture, weights, kwargs, cache=cache)
+             for capture, kwargs, weights in examples]
+    results = [span.finish(**_call(capture, kwargs))
+               for span, (capture, kwargs, weights) in zip(spans, examples)]
+    for result, (capture, kwargs, weights) in zip(results, examples):
+        _same(result, _span(ExternalSpan, lane, capture, weights, kwargs).finish(**_call(capture, kwargs)))
+    assert [r.metadata["attention_replayed"] for r in results] == [True, False]
 
 
 @cuda
