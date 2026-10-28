@@ -307,12 +307,22 @@ def test_an_installed_matrix_product_override_is_refused(monkeypatch):
         assert_clean_readout_process("cpu")
 
 
+@pytest.fixture(autouse=True)
+def _restore_tf32_switches():
+    """The TF32 switches are torch settings behind attribute syntax, not attributes a
+    monkeypatch can delete, so every test here gets them back by value."""
+    matmul, cudnn = torch.backends.cuda.matmul, torch.backends.cudnn
+    saved = (matmul.allow_tf32, cudnn.allow_tf32)
+    yield
+    matmul.allow_tf32, cudnn.allow_tf32 = saved
+
+
 def _cuda_switches(monkeypatch, *, deterministic=True, warn_only=False, tf32=False):
     monkeypatch.setattr(torch, "are_deterministic_algorithms_enabled", lambda: deterministic)
     monkeypatch.setattr(torch, "is_deterministic_algorithms_warn_only_enabled",
                         lambda: warn_only)
-    monkeypatch.setattr(torch.backends.cuda.matmul, "allow_tf32", tf32)
-    monkeypatch.setattr(torch.backends.cudnn, "allow_tf32", False)
+    torch.backends.cuda.matmul.allow_tf32 = tf32
+    torch.backends.cudnn.allow_tf32 = False
 
 
 def test_a_cuda_readout_requires_its_workspace_and_arithmetic(monkeypatch):

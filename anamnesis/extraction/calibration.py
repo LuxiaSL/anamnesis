@@ -65,6 +65,9 @@ from anamnesis.config.experiment import (
     POSITIONAL_MEANS_NAME,
 )
 from anamnesis.provenance import digest_of_shas, file_sha
+# The refusal's class lives in the numeric anchor, which may import configuration only;
+# every pass that refuses an uncovered position raises this one class.
+from anamnesis.extraction.state_extractor import PositionsUncovered  # noqa: F401  (re-export)
 
 F32 = NDArray[np.float32]
 
@@ -435,8 +438,6 @@ def require_positional_means(positional_means: F32 | None, calib_dir: Path) -> F
     return positional_means
 
 
-class PositionsUncovered(ValueError):
-    """A pass would read a position its positional means do not fill."""
 
 
 def require_positions_covered(
