@@ -27,6 +27,16 @@ is float32:
 :func:`stats_from_weights` builds the contract from eager weights, which makes it the
 reference a producer of these statistics is checked against.
 
+**Output and routing reductions.** :meth:`ExternalStatsSpan.finish` also takes, in place
+of the full logits, ``logit_stats [n, 6]``: per step the output entropy, top-1
+probability, top-5 mass, the chosen token's rank and probability, and its log
+probability, as the fast lane's output reduction computes them
+(:func:`logit_stats_from_logits` is their reference); and in place of every routing
+point's weights, :class:`RoutingPointStats`: the weights in full at the lane's sampled
+layers and the final read, and at every other point only the three per-position
+quantities the depth profile reads (:func:`routing_stats_from_routing`). Committed
+blocks are taken as they are.
+
 **What is derived from what.** The entropy and head-agreement features read the two
 entropies; recency, sink, coverage, lookback, the decay fit, the attention-flow regions
 and their operators, the recency trajectory and the spectral graph read the mean rows;
@@ -37,6 +47,11 @@ the mean rows is :meth:`AttentionReducer.consume`'s, restated here in
 reads of the weights, because the fast lane's source bytes are part of its identity;
 a test holds the two to agreement. Smoothness and the per-head key features are the
 attention reducer's own, inherited.
+
+The output arithmetic after the per-step quantities restates
+``GpuFeatureLane._outputs``, and the routing family's assembly restates
+:func:`~anamnesis.extraction.fast.attn_res.attn_res_features` around that module's own
+per-point and summary functions; tests pin the digests of both twins' sources.
 
 The statistics are not the weights, so the vector agrees with
 :class:`ExternalSpan`'s on the same forward to rounding, not to the byte. A row reduced
@@ -50,22 +65,36 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from torch import Tensor
 
 from anamnesis.extraction.fast.attention import AttentionReducer
+from anamnesis.extraction.fast.attn_res import _point_quantities, _slope, _summ
 from anamnesis.extraction.fast.external import (
+    READOUT_SOURCE_SHA256,
     ExternalCaptureError,
     ExternalSpan,
     RoutingPoint,
     external_lane_id,
 )
 from anamnesis.extraction.fast.features import GpuFeatureLane, GpuFeatureResult
-from anamnesis.extraction.fast.ops import decay, entropy, slope, std
+from anamnesis.extraction.fast.ops import (
+    FeatureCollector,
+    decay,
+    entropy,
+    rowcos,
+    slope,
+    std,
+    trajectory_indices,
+)
+from anamnesis.extraction.feature_families.attn_res import EPS, QNAMES, SUMM, committed_pairs
 
 STATS_SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 """This module's source digest, part of every row's lane id."""
@@ -134,6 +163,161 @@ def stats_from_weights(weights: Sequence[Tensor], start: int, end: int,
     for name in CONTRACT[2:]:
         stats[name] = torch.stack([at_sampled[layer][name] for layer in sampled], dim=1)
     return stats
+
+
+LOGIT_STATS = ("entropy", "top1_prob", "top5_mass", "chosen_rank", "chosen_prob", "logprob")
+"""The columns of ``logit_stats``, in order."""
+
+
+def logit_stats_from_logits(logits: Tensor, chosen: Tensor) -> Tensor:
+    """``logit_stats [steps, 6]`` (float64) from ``logits [steps, vocabulary]`` and the
+    chosen next tokens, as the fast lane's output reduction computes each step: in
+    float64 after subtracting the row maximum, sixteen rows at a time, the first five
+    columns rounded to float32 where the reduction rounds them."""
+    rows = []
+    for first in range(0, len(logits), 16):
+        x = logits[first : first + 16].float().double()
+        x = x - x.max(dim=1, keepdim=True).values
+        exp = x.exp()
+        z = exp.sum(dim=1)
+        logz = z.log()
+        cid = chosen[first : first + 16, None]
+        xc = x.gather(1, cid).squeeze(1)
+        rows.append(torch.stack([
+            (logz - (x * exp).sum(dim=1) / z).float().double(),
+            (exp.max(dim=1).values / z).float().double(),
+            (exp.topk(5, dim=1).values.sum(dim=1) / z).float().double(),
+            (x > xc[:, None]).sum(dim=1).float().double(),
+            (exp.gather(1, cid).squeeze(1) / z).float().double(),
+            xc - logz,
+        ], dim=1))
+    return torch.cat(rows)
+
+
+def _outputs_from_stats(out: FeatureCollector, lane: GpuFeatureLane, stats: Tensor) -> Tensor:
+    """The output family from ``logit_stats``. Twin of ``GpuFeatureLane._outputs`` after
+    its per-step quantities; returns the mean log probability."""
+    ent, top, topfive, rank, chosen_prob = (
+        stats[:, i].float().contiguous() for i in range(5))
+    logprob = stats[:, 5].double().contiguous()
+    n = len(stats)
+    surprise = -chosen_prob.clamp_min(1e-10).log()
+    for name, values in (("logit_entropy", ent), ("top1_prob", top)):
+        out.moments(name, values)
+        for i, t in enumerate(trajectory_indices(n, lane.config.trajectory_points)):
+            out.put(f"{name}_traj{i}", values[t])
+    out.put("top5_mass_mean", topfive.mean())
+    for name, values in (("chosen_rank", rank), ("surprise", surprise)):
+        out.put("mean_" + name, values.mean())
+        out.put("std_" + name, std(values))
+    for i, t in enumerate(trajectory_indices(n, lane.config.trajectory_points)):
+        out.put(f"surprise_traj{i}", surprise[t])
+    window = lane.config.surprise_window
+    if n >= window:
+        values = surprise.unfold(0, window, 1)
+        running_mean = values.double().mean(dim=1)
+        running_std = std(values, dim=1).float()
+        threshold = (
+            running_mean
+            + lane.config.surprise_threshold_sigma * running_std.double().clamp_min(1e-6)
+        )
+        out.put("surprise_boundary_count", (surprise[window - 1 :].double() > threshold).sum())
+    else:
+        out.put("surprise_boundary_count", 0.0)
+    return logprob.mean()
+
+
+@dataclass(frozen=True)
+class RoutingPointStats:
+    """One routing point, in the routing order: its weights ``[steps, sources]`` in full,
+    or only ``quantities [steps, 3]`` (entropy over ``ln max(sources, 2)``, anchor weight,
+    partial weight, after renormalising), which is all the depth profile reads."""
+
+    tag: str
+    layer: int
+    weights: Tensor | None = None
+    quantities: Tensor | None = None
+
+
+def routing_stats_from_routing(routing: Sequence[RoutingPoint],
+                               sampled_layers: Sequence[int]) -> list[RoutingPointStats]:
+    """The routing reductions: full weights at the sampled layers and the final read,
+    the three depth quantities everywhere else, each as the routing family computes it."""
+    sampled = {int(layer) for layer in sampled_layers}
+    points = []
+    for tag, layer, w in routing:
+        if tag == "final" or int(layer) in sampled:
+            points.append(RoutingPointStats(tag, int(layer), weights=w))
+        else:
+            q = _point_quantities(w)
+            points.append(RoutingPointStats(tag, int(layer), quantities=torch.stack(
+                [q["entropy"], q["anchor_w"], q["partial_w"]], dim=1)))
+    return points
+
+
+def _routing_from_stats(points: Sequence[RoutingPointStats], committed: Sequence[Tensor],
+                        sampled_layers: Sequence[int], device) -> tuple[list[str], Tensor]:
+    """The routing family from routing reductions. Twin of ``attn_res_features``, with
+    its per-point quantities and summaries computed by that module's own functions."""
+    values: list[Tensor] = []
+    names: list[str] = []
+    by_layer: dict[int, list[Tensor]] = {}
+    stats: list[tuple[int, Tensor, Tensor, Tensor]] = []
+    final_vec: Tensor | None = None
+    for point in points:
+        if point.weights is not None:
+            q = _point_quantities(point.weights.to(device))
+            vec = torch.cat([_summ(q[qn]) for qn in QNAMES])
+            if point.tag == "final":
+                final_vec = vec
+                continue
+            by_layer.setdefault(int(point.layer), []).append(vec)
+            stats.append((int(point.layer), q["entropy"].mean(), q["anchor_w"].mean(),
+                          q["partial_w"].mean()))
+        else:
+            q = point.quantities.to(device).double()
+            stats.append((int(point.layer), *(q[:, i].contiguous().mean() for i in range(3))))
+
+    zeros18 = torch.zeros(len(QNAMES) * 3, dtype=torch.float64, device=device)
+    for layer in sampled_layers:
+        vecs = by_layer.get(int(layer))
+        v = torch.stack(vecs).mean(0) if vecs else zeros18
+        values.append(v)
+        names += [f"attnres_L{layer}_{qn}_{sm}" for qn in QNAMES for sm in SUMM]
+
+    zero = torch.zeros((), dtype=torch.float64, device=device)
+    if len(stats) >= 2:
+        lay = torch.tensor([s[0] for s in stats], dtype=torch.float64, device=device)
+        cols = [torch.stack([s[i] for s in stats]) for i in (1, 2, 3)]
+        flat = bool(lay.std(correction=0) <= EPS)
+        values.append(torch.stack([zero if flat else _slope(lay, c) for c in cols] + [cols[0].std(correction=0)]))
+    else:
+        values.append(torch.stack([zero, zero, zero, zero]))
+    names += [f"attnres_depthslope_{cn}" for cn in ("entropy", "anchor_w", "partial_w")]
+    names.append("attnres_xpoint_entropy_std")
+
+    values.append(final_vec[0::3] if final_vec is not None
+                  else torch.zeros(len(QNAMES), dtype=torch.float64, device=device))
+    names += [f"attnres_final_{qn}_mean" for qn in QNAMES]
+
+    n_pairs = committed_pairs(len(committed))
+    cos_means = [zero] * n_pairs
+    overall = [zero, zero]
+    if len(committed) >= 2:
+        cos_all = []
+        for b in range(len(committed) - 1):
+            a, c = committed[b].double(), committed[b + 1].double()
+            if a.ndim == 2 and a.shape == c.shape and a.shape[0] > 0:
+                cos = (a * c).sum(1) / (a.norm(dim=1) * c.norm(dim=1) + EPS)
+                cos_means[b] = cos.mean()
+                cos_all.append(cos)
+        if cos_all:
+            allc = torch.cat(cos_all)
+            overall = [allc.mean(), allc.std(correction=0)]
+    values.append(torch.stack(cos_means + overall))
+    names += [f"attnres_committed_cos_b{b}b{b + 1}_mean" for b in range(n_pairs)]
+    names += ["attnres_committed_cos_overall_mean", "attnres_committed_cos_overall_std"]
+    return names, torch.nan_to_num(torch.cat(values).float())
 
 
 class StatsAttentionReducer(AttentionReducer):
@@ -403,23 +587,155 @@ class ExternalStatsSpan(ExternalSpan):
 
     def finish(self, *, hidden: Tensor, keys: Mapping[int, Tensor],
                values: Mapping[int, Tensor], queries: Mapping[int, Tensor],
-               gates: Mapping[int, Tensor], logits: Tensor, token_ids: Sequence[int],
-               capture_identity: Mapping[str, Any],
+               gates: Mapping[int, Tensor], logits: Tensor | None = None,
+               token_ids: Sequence[int], capture_identity: Mapping[str, Any],
                routing: Sequence[RoutingPoint] | None = None,
-               committed: Sequence[Tensor] | None = None) -> GpuFeatureResult:
-        """:meth:`ExternalSpan.finish`, receipted as a statistics row: its lane id is
-        :func:`stats_lane_id`, and the receipt names the capture kind and keeps the
-        external lane id the weights would have had beside it."""
-        result = super().finish(
-            hidden=hidden, keys=keys, values=values, queries=queries, gates=gates,
-            logits=logits, token_ids=token_ids, capture_identity=capture_identity,
-            routing=routing, committed=committed)
-        receipt = result.metadata
-        receipt.update(
-            external_lane_id=receipt["lane_id"],
-            lane_id=stats_lane_id(self.lane, capture_identity),
-            capture_kind=CAPTURE_KIND,
+               committed: Sequence[Tensor] | None = None,
+               logit_stats: Tensor | None = None,
+               routing_stats: Sequence[RoutingPointStats] | None = None) -> GpuFeatureResult:
+        """:meth:`ExternalSpan.finish`, with the logits or their ``logit_stats``, the
+        routing points or their ``routing_stats``, receipted as a statistics row.
+
+        The block-output, key, value, query and gate reduction restates
+        :meth:`ExternalSpan.finish`'s. The receipt's lane id is :func:`stats_lane_id`;
+        it names the capture kind, which reductions arrived, and keeps beside it the
+        external lane id the weights would have had.
+
+        Raises
+        ------
+        ExternalCaptureError
+            As :meth:`ExternalSpan.finish` does, and when both or neither of the logits
+            and ``logit_stats`` are given, both routing forms are given, or a reduction
+            is mis-shaped or nonfinite.
+        """
+        if self.finished:
+            raise ExternalCaptureError("a span is finished once")
+        self.finished = True
+        lane, steps, start, end = self.lane, self.steps, self.start, self.end
+        if (logits is None) == (logit_stats is None):
+            raise ExternalCaptureError("give the logits or logit_stats, one of the two")
+        if routing is not None and routing_stats is not None:
+            raise ExternalCaptureError("give the routing points or routing_stats, not both")
+        if logit_stats is not None:
+            if (not isinstance(logit_stats, Tensor) or tuple(logit_stats.shape) != (steps, 6)
+                    or logit_stats.dtype not in (torch.float32, torch.float64)
+                    or not bool(torch.isfinite(logit_stats).all())):
+                raise ExternalCaptureError(
+                    f"logit_stats must be finite float32 or float64 [{steps}, 6]")
+        routed = routing if routing is not None else routing_stats
+        if routing_stats is not None:
+            for point in routing_stats:
+                if not isinstance(point, RoutingPointStats) or (
+                        (point.weights is None) == (point.quantities is None)):
+                    raise ExternalCaptureError("routing_stats holds a point with neither or both forms")
+                x = point.weights if point.weights is not None else point.quantities
+                if x.ndim != 2 or x.shape[0] != steps or (
+                        point.quantities is not None and x.shape[1] != 3) or not bool(
+                        torch.isfinite(x).all()):
+                    raise ExternalCaptureError(
+                        f"routing_stats point {point.tag} L{point.layer} has shape {tuple(x.shape)}")
+                if point.quantities is not None and (
+                        point.tag == "final" or point.layer in lane.config.sampled_layers):
+                    raise ExternalCaptureError(
+                        f"routing point {point.tag} L{point.layer} needs its full weights")
+        # ExternalSpan's validation of everything else; a reduction stands in for the
+        # tensor it replaces, so only what this span actually holds is checked there.
+        self._validate(hidden, keys, values, queries, gates,
+                       logits if logits is not None else torch.zeros(steps, 5), token_ids,
+                       routed, committed)
+        if self.attention_reducer.seen != set(range(self.num_layers)):
+            missing = sorted(set(range(self.num_layers)) - self.attention_reducer.seen)
+            raise ExternalCaptureError(f"attention layers {missing} were not reduced")
+        out, attention, reducer = self.collector, self.attention_reducer, self.reducer
+        # Twin of ExternalSpan.finish from here to the routing family.
+        pm = np.ascontiguousarray(lane.pm[1:self.num_layers + 1, start:start + steps])
+        positional = torch.as_tensor(pm, device=lane.device)
+        previous = None
+        for layer in range(self.num_layers):
+            h = hidden[layer].to(lane.device).float()
+            corrected = h - positional[layer]
+            norms = corrected.norm(dim=-1).float()
+            out.put(f"activation_norm_mean_L{layer}", norms.mean())
+            out.put(f"activation_norm_std_L{layer}", std(norms))
+            for i, t in enumerate(trajectory_indices(steps, lane.config.trajectory_points)):
+                out.put(f"activation_norm_traj{i}_L{layer}", norms[t])
+            if previous is not None:
+                delta = corrected - previous
+                dn = delta.norm(dim=-1).float()
+                dc = rowcos(delta.double(), previous.double()).float()
+                out.put(f"delta_norm_mean_L{layer - 1}", dn.mean())
+                out.put(f"delta_norm_std_L{layer - 1}", std(dn))
+                out.put(f"delta_cosine_mean_L{layer - 1}", dc.mean())
+            previous = corrected
+            if layer in lane.config.sampled_layers:
+                attention.smoothness(layer, corrected)
+            if layer in lane.families.trajectory_layers:
+                reducer.residual_trajectory(layer, corrected, h[0].norm())
+            if layer in lane.config.pca_layers:
+                components = lane.pca[layer] if isinstance(lane.pca, dict) else lane.pca
+                mean = lane.pca_mean[layer] if isinstance(lane.pca_mean, dict) else lane.pca_mean
+                indices = trajectory_indices(steps, lane.config.pca_temporal_samples)
+                projections = (corrected[indices].double() - mean) @ components[
+                    : lane.config.pca_components
+                ].T
+                for ti, projection in enumerate(projections):
+                    for ci, value in enumerate(projection):
+                        out.put(f"pca_L{layer}_t{ti}_c{ci}", value)
+        if logit_stats is not None:
+            logprob = _outputs_from_stats(out, lane, logit_stats.to(lane.device))
+        else:
+            chosen = torch.as_tensor(list(token_ids[start + 1:end]), device=lane.device,
+                                     dtype=torch.long)
+            logprob = lane._outputs(out, logits.to(lane.device), chosen)
+        for layer in lane.config.sampled_layers:
+            k = keys[layer].to(lane.device).float()
+            reducer.key(layer, k)
+            attention.head_features(layer, k)
+            reducer.value(layer, values[layer].to(lane.device).float())
+            reducer.query(layer, queries[layer].to(lane.device).float())
+            reducer.gate(layer, gates[layer].to(lane.device).float())
+        reducer.finish()
+        vector = out.finish(list(lane.names))
+        names = list(lane.names)
+        if routed is not None:
+            points = (routing_stats if routing_stats is not None else
+                      [RoutingPointStats(tag, int(layer), weights=w) for tag, layer, w in routing])
+            routed_names, routed_values = _routing_from_stats(
+                points, [c.to(lane.device) for c in committed or []],
+                lane.config.sampled_layers, lane.device)
+            vector = torch.cat([vector, routed_values.to(vector.dtype)])
+            names += routed_names
+        features = vector.cpu().numpy()
+        if not np.isfinite(features).all():
+            raise ExternalCaptureError("the reduction produced a nonfinite feature")
+        knnlm = (hidden[-1][steps - 1].float().cpu().numpy().copy()
+                 if lane.config.enable_knnlm_baseline else None)
+        receipt = dict(
+            lane_id=stats_lane_id(lane, capture_identity),
+            external_lane_id=external_lane_id(lane, capture_identity),
+            fast_lane_id=lane.lane_id,
+            lane_source_sha256=dict(lane.source_sha256),
+            readout_source_sha256=dict(READOUT_SOURCE_SHA256),
             stats_source_sha256=STATS_SOURCE_SHA256,
+            capture=dict(capture_identity),
+            capture_kind=CAPTURE_KIND,
+            reductions=dict(attention="stats",
+                            logits="stats" if logit_stats is not None else "full",
+                            routing=("stats" if routing_stats is not None else
+                                     "full" if routing is not None else "none")),
+            replay_id=str(uuid.uuid4()),
             replay_path="external-stats",
+            span_start=start,
+            span_end=end,
+            input_tokens_sha256=hashlib.sha256(
+                np.asarray(list(token_ids[:end]), dtype="<i8").tobytes()).hexdigest(),
+            feature_schema_sha256=hashlib.sha256(json.dumps(names).encode()).hexdigest(),
+            calibration_sha256=lane.calibration_sha256,
+            channel="probe-free",
+            certified=False,
+            batch_size=1,
+            attention_layers_reduced=len(attention.seen),
+            retained_attention_summary_bytes=attention.retained_bytes,
+            routing_family=routed is not None,
         )
-        return result
+        return GpuFeatureResult(features, tuple(names), float(logprob.cpu()), knnlm, receipt)

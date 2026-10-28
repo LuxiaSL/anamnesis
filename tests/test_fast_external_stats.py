@@ -22,6 +22,9 @@ from anamnesis.extraction.fast.external_stats import (
     CONTRACT,
     LANE_PREFIX,
     ExternalStatsSpan,
+    RoutingPointStats,
+    logit_stats_from_logits,
+    routing_stats_from_routing,
     stats_from_weights,
     stats_lane_id,
 )
@@ -175,3 +178,130 @@ def test_the_twin_was_written_against_this_attention_reducer():
 
     digest = hashlib.sha256(Path(attention.__file__).read_bytes()).hexdigest()
     assert digest == "57b7607c5be249080cf3fe395fc1182d5bf0b1904183f34d03e6b2d7691f6a8b"
+
+
+TWINS = {
+    # the output reduction after its per-step quantities
+    "features.py": "a8737153447b48fe81d1aeb295afa252f751d4e1e7841489fc114ffd0a42bdf0",
+    # the routing family's assembly
+    "attn_res.py": "2dc0fa45320ffc8d67c5f90ffa8a872ef093c9c8fc4bbb36f3638e033865f546",
+    # the block-output, key, value, query and gate reduction
+    "external.py": "a707670ad44a6b51ee2344974bd5242b4a5341eaec767fb329f79f96cc9c50c0",
+}
+
+
+@pytest.mark.parametrize("name", list(TWINS))
+def test_the_restatements_were_written_against_these_sources(name):
+    """The module restates parts of these files; a change to one fails here, so its twin
+    is re-read with it and the agreement tests say whether they still agree."""
+    import hashlib
+    from pathlib import Path
+
+    from anamnesis.extraction.fast import external
+
+    path = Path(external.__file__).with_name(name)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == TWINS[name]
+
+
+def kotodama_routing(routing, committed, steps, seed):
+    """The routing as kotodama hands it over: transposed views of ``[sources, S]``
+    tensors, and committed blocks as row slices of ``[S, width]``."""
+    g = torch.Generator().manual_seed(seed)
+    pad = 5
+    views = []
+    for tag, layer, w in routing:
+        full = torch.rand(w.shape[1], steps + 2 * pad, generator=g, dtype=w.dtype)
+        full[:, pad:pad + steps] = w.T
+        views.append((tag, layer, full[:, pad:pad + steps].T))
+    blocks = []
+    for c in committed:
+        full = torch.randn(steps + 2 * pad, c.shape[1], generator=g, dtype=c.dtype)
+        full[pad:pad + steps] = c
+        blocks.append(full[pad:pad + steps])
+    return views, blocks
+
+
+def reduced(dtype, steps, start, sampled, *, layout):
+    lane, capture, kwargs, weights = make_example(dtype, steps=steps, start=start,
+                                                  sampled_layers=sampled)
+    span = dict(start=kwargs["start"], end=kwargs["end"])
+    full = forward_weights(weights, dtype=torch.float32, **span)
+    routing, committed = routing_substrate(8, steps=steps, seed=steps + 1)
+    if layout == "kotodama":
+        routing, committed = kotodama_routing(routing, committed, steps, seed=steps)
+    alone = weights_reduction(lane, capture, full, routing=routing, committed=committed, **span)
+    s = ExternalStatsSpan(lane, num_layers=N_LAYERS, **span)
+    s.attention_stats(**stats_from_weights(full, span["start"], span["end"],
+                                           lane.config.sampled_layers))
+    token_ids = [0] * span["end"]
+    token_ids[span["start"] + 1:] = capture["chosen"].tolist()
+    stats = s.finish(hidden=capture["hidden"], keys=capture["keys"], values=capture["values"],
+                     queries=capture["queries"], gates=capture["gates"], logits=None,
+                     logit_stats=logit_stats_from_logits(capture["logits"], capture["chosen"]),
+                     token_ids=token_ids, capture_identity=IDENTITY, committed=committed,
+                     routing_stats=routing_stats_from_routing(routing, lane.config.sampled_layers))
+    return stats, alone
+
+
+OUTPUT_STEMS = ("logit_", "top1_", "top5_", "mean_chosen", "std_chosen", "mean_surprise",
+                "std_surprise", "surprise_")
+
+
+@pytest.mark.parametrize("layout", ["contiguous", "kotodama"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["float32", "bfloat16"])
+@pytest.mark.parametrize("steps,start,sampled", [(1, 4, (0, 1, 2)), (3, 4, (0, 2)),
+                                                 (16, 4, (0, 2)), (40, 6, (1,))],
+                         ids=["steps1", "steps3", "steps16", "steps40"])
+def test_output_and_routing_reductions_give_their_families_byte_for_byte(
+        dtype, steps, start, sampled, layout):
+    stats, alone = reduced(dtype, steps, start, sampled, layout=layout)
+    assert stats.feature_names == alone.feature_names
+    assert stats.mean_logprob == alone.mean_logprob
+    names = np.asarray(alone.feature_names)
+    exact = np.array([n.startswith(OUTPUT_STEMS + ("attnres_",)) for n in names])
+    assert exact.sum() > 40
+    assert stats.features[exact].tobytes() == alone.features[exact].tobytes(), list(
+        names[exact][stats.features[exact] != alone.features[exact]])
+    np.testing.assert_allclose(stats.features, alone.features, **TOLERANCE)
+    assert stats.metadata["reductions"] == dict(attention="stats", logits="stats",
+                                                routing="stats")
+
+
+def test_the_routing_reductions_keep_full_weights_only_where_they_are_read():
+    routing, _ = routing_substrate(8, steps=12, seed=3)
+    points = routing_stats_from_routing(routing, [0, 2])
+    for (tag, layer, w), point in zip(routing, points, strict=True):
+        full = tag == "final" or layer in (0, 2)
+        assert (point.weights is not None) == full
+        assert point.quantities is None or point.quantities.shape == (12, 3)
+
+
+def test_malformed_reductions_are_refused():
+    lane, capture, kwargs, weights = make_example(torch.float32)
+    span = dict(start=kwargs["start"], end=kwargs["end"])
+    full = forward_weights(weights, dtype=torch.float32, **span)
+    routing, committed = routing_substrate(8, steps=16, seed=1)
+    good = dict(hidden=capture["hidden"], keys=capture["keys"], values=capture["values"],
+                queries=capture["queries"], gates=capture["gates"],
+                token_ids=[0] * span["end"], capture_identity=IDENTITY, committed=committed)
+    logit_stats = logit_stats_from_logits(capture["logits"], capture["chosen"])
+    points = routing_stats_from_routing(routing, lane.config.sampled_layers)
+
+    def attempt(match, **change):
+        s = ExternalStatsSpan(lane, num_layers=N_LAYERS, **span)
+        s.attention_stats(**stats_from_weights(full, span["start"], span["end"],
+                                               lane.config.sampled_layers))
+        args = {**good, "logit_stats": logit_stats, "routing_stats": points, **change}
+        with pytest.raises(ExternalCaptureError, match=match):
+            s.finish(**args)
+
+    attempt("one of the two", logits=capture["logits"])
+    attempt("logit_stats must", logit_stats=logit_stats[:, :5])
+    attempt("logit_stats must", logit_stats=logit_stats.half())
+    attempt("not both", routing=routing)
+    sampled_point = next(p for p in points if p.weights is not None and p.tag != "final")
+    reduced_wrongly = [p if p is not sampled_point else RoutingPointStats(
+        p.tag, p.layer, quantities=torch.zeros(16, 3, dtype=torch.float64)) for p in points]
+    attempt("needs its full weights", routing_stats=reduced_wrongly)
+    attempt("neither or both", routing_stats=[RoutingPointStats("layer", 3)])
+    attempt("come together", committed=None)
