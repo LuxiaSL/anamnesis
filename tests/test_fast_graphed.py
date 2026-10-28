@@ -5,9 +5,12 @@ reduction ``ExternalSpan.finish`` runs so that it can be recorded as CUDA graphs
 On any device the restatement, run eagerly and assembled the way a replay is, is
 held to ``ExternalSpan.finish`` on the same captures: both substrate dtypes, three
 span shapes, with and without the routing family. Without CUDA a graphed span is
-the eager span. With CUDA, several spans of one shape are replayed against fresh
-eager reductions of the same inputs, a new shape records its own graphs, and a
-reduction that reads the span's data on the host is refused and reduced eagerly.
+the eager span. With CUDA, several spans of one shape (attention and finish both
+replayed) are held to fresh eager reductions of the same inputs; each shape records
+its own graphs; attention out of layer order, or a second span of one shape in
+flight, is reduced eagerly and still identically; and a host read of the span's
+data refuses a capture while a host read of constants is answered from the eager
+run.
 """
 
 from __future__ import annotations
