@@ -138,6 +138,15 @@ class ModelPreset(BaseModel):
     trajectory_layers: tuple[int, ...] = Field(description="Layers residual trajectories are traced at")
     contrastive_layers: tuple[int, ...] = Field(description="Layers the contrastive projection reads")
     early_layer_cutoff: int = Field(ge=0, description="At or below this a layer counts as early")
+    eff_dim: Literal["svd", "norms"] = Field(
+        default="svd",
+        description=(
+            "How the fast lane computes the effective dimension: 'svd' from the singular "
+            "values, as the numeric anchor does; 'norms' from two Frobenius norms, which "
+            "agrees to rounding and costs a matrix product instead of a decomposition. A "
+            "lane reading a 'norms' preset has its own lane id"
+        ),
+    )
     late_layer_cutoff: int = Field(ge=0, description="At or above this a layer counts as late")
 
     temperature: float = Field(gt=0.0, description="The checkpoint's native decode temperature")

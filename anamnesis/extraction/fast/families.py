@@ -33,6 +33,22 @@ def eff_dim(x: Tensor) -> Tensor:
     )
 
 
+def norms_eff_dims(matrices: Tensor) -> Tensor:
+    """:func:`eff_dim` of each ``[m, n]`` matrix in ``matrices[..., m, n]`` from two
+    Frobenius norms: the sum of squared singular values is ``|A|_F**2`` and the sum of
+    their fourth powers is the squared Frobenius norm of the smaller Gram matrix. The
+    guards are :func:`eff_dim`'s. It agrees with :func:`eff_dim` to rounding."""
+    m, n = matrices.shape[-2:]
+    total = matrices.square().sum(dim=(-2, -1))
+    gram = matrices.mT @ matrices if n <= m else matrices @ matrices.mT
+    fourth = gram.square().sum(dim=(-2, -1))
+    return torch.where(
+        total > 1e-12,
+        total.square() / fourth.clamp_min(1e-30) / min(m, n),
+        total.new_zeros(()),
+    )
+
+
 def novelty(x: Tensor) -> Tensor:
     running = (
         x.cumsum(dim=0)
@@ -107,6 +123,8 @@ class FamilyReducer:
         self.gate_tie_exception_d2h_bytes = 0
         self.gate_family_present = False
         self.gate_topk: dict[str, Future] = {}
+        self.eff_dim_method = getattr(families, "_fast_lane_eff_dim", "svd")
+        self.held_eff_dims: list[tuple[str, Tensor]] = []
 
     def operators(self, prefix: str, x: Tensor) -> None:
         self.out.operators(
@@ -133,7 +151,7 @@ class FamilyReducer:
         # value/query geometry use a float64 centroid instead.
         center = matrix32.mean(dim=0, keepdim=True).double()
         self.out.put(f"kv_key_spread_L{layer}", (1 - rowcos(x, center)).mean())
-        self.out.put(f"kv_key_eff_dim_L{layer}", eff_dim(x))
+        self.effective_dimension(f"kv_key_eff_dim_L{layer}", x)
         self.out.put(f"kv_key_drift_L{layer}", half_drift(x))
         nov = novelty(x).float()
         self.out.put(f"kv_key_novelty_mean_L{layer}", nov.mean())
@@ -183,7 +201,6 @@ class FamilyReducer:
         )
         vals = {
             "spread": sp,
-            "eff_dim": eff_dim(x),
             "drift_halfcentroid": half_drift(x),
             "novelty_mean": nov.mean(),
             "novelty_std": std(nov),
@@ -193,6 +210,7 @@ class FamilyReducer:
         }
         for name, value in vals.items():
             self.out.put(f"value_L{layer}_{name}", value)
+        self.effective_dimension(f"value_L{layer}_eff_dim", x)
         self.operators(f"value_L{layer}_novelty", nov)
         self.operators(f"value_L{layer}_drift", dr)
 
@@ -218,7 +236,6 @@ class FamilyReducer:
         self.query_spreads.append(sp)
         vals = {
             "q_spread": sp,
-            "q_eff_dim": eff_dim(q),
             "q_drift_halfcentroid": half_drift(q),
             "q_novelty_mean": nov.mean(),
             "q_novelty_std": std(nov),
@@ -229,6 +246,7 @@ class FamilyReducer:
         }
         for name, value in vals.items():
             self.out.put(f"qk_L{layer}_{name}", value)
+        self.effective_dimension(f"qk_L{layer}_q_eff_dim", q)
         self.operators(f"qk_L{layer}_q_novelty", nov)
         self.operators(f"qk_L{layer}_qk_self_align", self_align)
 
@@ -301,7 +319,24 @@ class FamilyReducer:
         self.operators(prefix + "_direction_change", angles)
         self.out.zero_since(before, raw_first_norm < 1e-6)
 
+    def effective_dimension(self, name: str, x: Tensor) -> None:
+        """The feature ``name``, ``x``'s effective dimension, by the lane's method: from
+        the singular values now, or held for :meth:`finish`, which computes every held
+        matrix of one shape with one batched product."""
+        if self.eff_dim_method == "svd":
+            self.out.put(name, eff_dim(x))
+        else:
+            self.held_eff_dims.append((name, x))
+
     def finish(self) -> None:
+        groups: dict[tuple, list[tuple[str, Tensor]]] = {}
+        for name, x in self.held_eff_dims:
+            groups.setdefault((tuple(x.shape), x.dtype, x.device), []).append((name, x))
+        self.held_eff_dims.clear()
+        for held in groups.values():
+            values = norms_eff_dims(torch.stack([x for _, x in held]))
+            for (name, _), value in zip(held, values, strict=True):
+                self.out.put(name, value)
         for name, overlap in self.gate_topk.items():
             self.out.put(name, overlap.result())
         self.gate_topk.clear()

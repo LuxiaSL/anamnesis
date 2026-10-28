@@ -27,7 +27,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from anamnesis.config.models import ModelConfig, ModelPreset, resolve_preset
 from anamnesis.config.paths import resolve_prompts_path, run_outputs_dir
@@ -214,6 +214,12 @@ class FeaturePipelineConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    _fast_lane_eff_dim: Literal["svd", "norms"] = PrivateAttr(default="svd")
+    """How the fast lane computes the effective dimension: a preset's ``eff_dim``,
+    carried from :func:`~anamnesis.extraction.replay_config.native_replay_configs` to
+    the lane, which names it in its id. Private, so it is in no dump: the numeric
+    anchor always computes it from the singular values."""
 
     include_core_blocks: bool = Field(
         default=True,
