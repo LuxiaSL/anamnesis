@@ -123,7 +123,7 @@ class AttentionReducer:
         matrix = matrix / matrix.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         graph = (matrix @ matrix.T).clamp_min(0)
         graph = (graph + graph.T) * 0.5
-        graph.fill_diagonal_(0)
+        graph.diagonal().zero_()
         degrees = graph.sum(dim=-1)
         lap = (
             torch.diag(degrees)
@@ -143,7 +143,6 @@ class AttentionReducer:
         # torch.median selects the lower middle element; NumPy averages the two.
         mid = len(ev) // 2
         median = ev[mid] if len(ev) % 2 else (ev[mid - 1] + ev[mid]) * 0.5
-        hfer = ev[ev > median].sum() / energy.clamp_min(1e-30)
         p = ev / energy.clamp_min(1e-30) + 1e-12
         p = p / p.sum()
         spec = (
@@ -152,10 +151,7 @@ class AttentionReducer:
             else ev.new_zeros(())
         )
         self.out.put(f"spectral_fiedler_L{layer}", fiedler)
-        self.out.put(
-            f"spectral_hfer_L{layer}",
-            torch.where(energy > 1e-12, hfer, hfer.new_zeros(())),
-        )
+        self.out.put(f"spectral_hfer_L{layer}", self.spectral_hfer(ev, median, energy))
         self.out.put(
             f"spectral_spectral_entropy_L{layer}",
             torch.where(energy > 1e-12, spec, spec.new_zeros(())),
@@ -234,6 +230,14 @@ class AttentionReducer:
         self.retained_bytes += sum(
             v.numel() * v.element_size() for v in (per_ent, per_sink)
         )
+
+    @staticmethod
+    def spectral_hfer(ev: Tensor, median: Tensor, energy: Tensor) -> Tensor:
+        """The share of the Laplacian's energy above its median eigenvalue, zero for
+        a graph without energy. How many eigenvalues pass the median depends on their
+        values, so a reduction vectorised over several spans evaluates this per span."""
+        hfer = ev[ev > median].sum() / energy.clamp_min(1e-30)
+        return torch.where(energy > 1e-12, hfer, hfer.new_zeros(()))
 
     def smoothness(self, layer: int, corrected_hidden: Tensor) -> None:
         steps, lap = self.spectral.pop(layer)
