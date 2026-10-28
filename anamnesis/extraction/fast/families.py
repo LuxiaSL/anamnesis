@@ -68,7 +68,9 @@ def gate_topk_overlap(host: np.ndarray) -> float:
     The SiLU is ``a * (1 / (1 + exp(-clip(a, -88, 88))))`` in float64, applied through
     the same ufuncs in the same operand order, in place rather than through
     temporaries; the top-k comes from NumPy's ``argsort``, whose tie order is part of
-    the feature.
+    the feature. Each row's top-k holds distinct columns, so the union of two
+    rows' sets is twice the set size less their intersection, and every adjacent pair's
+    intersection is counted at once through a membership mask.
     """
     activated = host.astype(np.float64)
     scale = np.clip(activated, -88, 88)
@@ -80,10 +82,13 @@ def gate_topk_overlap(host: np.ndarray) -> float:
     del scale
     k = min(100, activated.shape[1] // 10)
     top = np.argsort(np.abs(activated, out=activated), axis=1)[:, -k:]
-    overlaps = []
-    for a, b in zip(top[:-1], top[1:], strict=True):
-        sa, sb = set(a), set(b)
-        overlaps.append(len(sa & sb) / len(sa | sb) if sa | sb else 0.0)
+    del activated
+    member = np.zeros(host.shape, dtype=bool)
+    np.put_along_axis(member, top, True, axis=1)
+    shared = np.count_nonzero(member[:-1] & member[1:], axis=1)
+    union = 2 * top.shape[1] - shared
+    overlaps = np.zeros(len(shared), dtype=np.float64)
+    np.divide(shared, union, out=overlaps, where=union > 0)
     return float(np.mean(overlaps))
 
 
@@ -247,18 +252,23 @@ class FamilyReducer:
         self.out.moments(prefix + "_drift", dr)
         self.gate_means[layer] = g.mean(dim=0).float()
         self.gate_sparsity[layer] = sp.mean()
-        # Named CPU exception: NumPy's unstable argsort tie ordering is part of
-        # the historical top-k Jaccard. bf16 gate ties are common. CUDA topk or
-        # a newly chosen stable sort would change the feature definition.
-        # Transfer only this sampled gate surface and reproduce its exact SiLU and
-        # argsort on the host, concurrently with the other layers and the GPU
-        # reductions; finish() collects it. All other gate reductions stay here.
-        host = pre_silu.float().cpu().numpy()
-        self.gate_tie_exception_d2h_bytes += host.nbytes
-        self.gate_topk[prefix + "_topk_overlap_mean"] = _topk_pool().submit(
-            gate_topk_overlap, host)
+        self.gate_topk_on_host(prefix + "_topk_overlap_mean", pre_silu)
         self.operators(prefix + "_sparsity", sp)
         self.operators(prefix + "_drift", dr)
+
+    def gate_topk_on_host(self, name: str, pre_silu: Tensor) -> None:
+        """Start the gate's top-k Jaccard on the host; :meth:`finish` collects it.
+
+        Named CPU exception: NumPy's unstable argsort tie ordering is part of the
+        historical top-k Jaccard. bf16 gate ties are common. CUDA topk or a newly
+        chosen stable sort would change the feature definition. Only this sampled
+        gate surface is transferred, and its exact SiLU and argsort run on the host
+        concurrently with the other layers and the device reductions. All other gate
+        reductions stay on the device.
+        """
+        host = pre_silu.float().cpu().numpy()
+        self.gate_tie_exception_d2h_bytes += host.nbytes
+        self.gate_topk[name] = _topk_pool().submit(gate_topk_overlap, host)
 
     def residual_trajectory(
         self, layer: int, corrected: Tensor, raw_first_norm: Tensor
@@ -267,7 +277,7 @@ class FamilyReducer:
             _trajectory_feature_names,
         )
 
-        before = set(self.out.values)
+        before = self.out.mark()
         prefix = f"res_traj_L{layer}"
         if len(corrected) < 3:
             for name in _trajectory_feature_names(
@@ -289,11 +299,7 @@ class FamilyReducer:
         )
         self.operators(prefix + "_velocity_norm", vn)
         self.operators(prefix + "_direction_change", angles)
-        for name in set(self.out.values) - before:
-            value = self.out.values[name]
-            self.out.values[name] = torch.where(
-                raw_first_norm < 1e-6, value.new_zeros(()), value
-            )
+        self.out.zero_since(before, raw_first_norm < 1e-6)
 
     def finish(self) -> None:
         for name, overlap in self.gate_topk.items():
