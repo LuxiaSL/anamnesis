@@ -1,11 +1,10 @@
-"""The CPU path refuses a position its positional means do not fill (RULING §57.1/§60).
+"""The CPU path refuses a position its positional means do not fill.
 
-A calibration's means fill the positions its fit reached; past them the rows are
-zeros, and the old correction clamped to the table's width and subtracted those
-zeros, so a row longer than the calibration came out uncorrected under the
-corrected feature names. Every means-indexing site now refuses the first uncovered
-position, and :func:`truncate_to_calibration` is the one, recorded way to compute a
-row that runs past reach.
+A calibration's means fill the positions its fit reached; past them the table
+holds zeros, and correcting by a zero row would leave a feature uncorrected under
+its corrected name. Every means-indexing site refuses the first uncovered
+position, and :func:`truncate_to_calibration` is the one, recorded way to compute
+a row that runs past reach.
 """
 
 from __future__ import annotations
