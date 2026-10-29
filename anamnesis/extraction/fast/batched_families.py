@@ -82,7 +82,8 @@ from anamnesis.extraction.fast.invariant_ops import (
 from anamnesis.extraction.fast.ops import trajectory_indices
 from anamnesis.extraction.feature_families.attn_res import EPS, QNAMES, SUMM, committed_pairs
 
-TOPK_WORKERS = min(32, os.cpu_count() or 1)
+TOPK_WORKERS = min(32, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity")
+                   else os.cpu_count() or 1)
 """Threads of the pool that computes the gate's top-k Jaccard on the host, one task per
 (row, sampled layer). NumPy releases the GIL in its ufuncs and sorts."""
 
