@@ -39,6 +39,13 @@ gains it on both paths or the schema check fails:
   reductions recorded once per span shape as CUDA graphs and replayed, so a short
   span stops paying a host launch per kernel. A replayed row is the eager row,
   byte for byte, under the same lane id.
+* :mod:`~anamnesis.extraction.fast.external_stats` — the reduction of a capture
+  that hands over attention statistics, logit statistics and routing reductions
+  instead of weights and logits (a fused decode kernel's output). Its rows are
+  their own lane.
+* :mod:`~anamnesis.extraction.fast.engine_reducer` — a decode engine's signed
+  rows into signatures through the statistics reduction, one lane per capped step
+  count, with the engine's identity in every row's lane id.
 
 This module imports none of them: addressing the layout arithmetic should not
 pull in torch.
