@@ -211,7 +211,7 @@ def test_a_row_has_the_same_bytes_alone_and_beside_rows_of_other_step_counts(dev
     for size in (2, 8, 24):
         for t, target in enumerate(targets):
             n = target[0].positions
-            same_bucket = [m for m in pool if bucket_width(m) == bucket_width(n)]
+            same_bucket = [m for m in pool if bucket_width(m, "pow2") == bucket_width(n, "pow2")]
             for choices in (same_bucket, pool):  # mates in its bucket, then from every bucket
                 mates = [signed_row(int(rng.choice(choices)), int(rng.integers(1, MAX_START + 1)),
                                     size * 1000 + t * 50 + m, hidden) for m in range(size - 1)]
@@ -220,7 +220,7 @@ def test_a_row_has_the_same_bytes_alone_and_beside_rows_of_other_step_counts(dev
                 got = reduce(device, hidden, batch)[place]
                 assert got.features.tobytes() == alone[t].features.tobytes(), (size, n)
                 assert got.lane_id == alone[t].lane_id
-                assert got.meta["receipt"]["bucket_width"] == bucket_width(n)
+                assert got.meta["receipt"]["bucket_width"] == bucket_width(n, "pow2")
 
 
 @pytest.mark.parametrize("device,hidden", DEVICES)
@@ -362,8 +362,9 @@ def _launches(monkeypatch) -> list[tuple]:
     return calls
 
 
+@pytest.mark.parametrize("rule", ["pow2", "tail256"])
 @pytest.mark.parametrize("target", [3, 13, 16, 61, 64], ids=lambda n: f"steps{n}")
-def test_a_rows_kernels_do_not_depend_on_its_bucketmates(monkeypatch, target):
+def test_a_rows_kernels_do_not_depend_on_its_bucketmates(monkeypatch, target, rule):
     """A row's reductions run at widths, with masks and through branches fixed by its own
     count and its bucket: a GPU kernel's bytes may follow its width, so batchmates of other
     step counts must not change any width a row is reduced at, nor which reductions run.
@@ -371,10 +372,14 @@ def test_a_rows_kernels_do_not_depend_on_its_bucketmates(monkeypatch, target):
     longest and shortest counts of its bucket."""
     calls = _launches(monkeypatch)
     row = signed_row(target, 4, 31, 8)
-    reduce("cpu", 8, [row])
+    reduce("cpu", 8, [row], buckets=rule)
     alone = list(calls)
-    width = bucket_width(target)
-    for mate in sorted({max(BUCKET_FLOOR, width // 2 + 1), width} - {target}):
+    width = bucket_width(target, rule)
+    # Mates at the shortest and longest counts of the row's bucket (tail256's one bucket spans
+    # every count the fixtures build, so its mates are the floor and the longest pooled count).
+    bucket = ({BUCKET_FLOOR, max(BUCKETED)} if rule == "tail256"
+              else {max(BUCKET_FLOOR, width // 2 + 1), width})
+    for mate in sorted(bucket - {target}):
         calls.clear()
-        reduce("cpu", 8, [row, signed_row(mate, 2, 32, 8)])
+        reduce("cpu", 8, [row, signed_row(mate, 2, 32, 8)], buckets=rule)
         assert calls == alone, (target, mate)
