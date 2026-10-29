@@ -49,7 +49,8 @@ Homepage = "https://github.com/LuxiaSL/anamnesis"
 Repository = "https://github.com/LuxiaSL/anamnesis"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# The suite runs across processes by default (pytest-xdist); `-n 0` runs it serially.
+dev = ["pytest>=8", "pytest-xdist>=3.5"]
 # The intrinsic-dimension estimators the gauntlet's geometry section calls are
 # third-party. They are an extra because that section is one of eleven and says
 # so when they are absent, rather than the package refusing to import.
@@ -102,3 +103,4 @@ packages = ["anamnesis"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-n auto"
