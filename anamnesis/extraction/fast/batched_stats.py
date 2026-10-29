@@ -40,6 +40,7 @@ import hashlib
 import json
 import math
 import uuid
+import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -94,6 +95,25 @@ HYBRID_LANE_PREFIX = "engine-stats-b1-"
 
 WORKING_BYTES = 1 << 30
 """The float64 working set one chunk of layers may take; chunking does not change a byte."""
+
+
+_DEVICE_POSITIONAL: dict[tuple[int, str], tuple[weakref.ref, Tensor]] = {}
+
+
+def device_positional_means(pm: np.ndarray, device: torch.device | str) -> Tensor:
+    """A lane's positional means as one tensor on ``device``, uploaded once and kept for as long
+    as the host table lives. Lanes that share one table (one per capped step count) share the
+    device copy. Each row's slice is then gathered on the device: a copy, so its bytes are the
+    host table's."""
+    key = (id(pm), str(torch.device(device)))
+    hit = _DEVICE_POSITIONAL.get(key)
+    if hit is not None and hit[0]() is pm:
+        return hit[1]
+    for stale in [k for k, (ref, _) in _DEVICE_POSITIONAL.items() if ref() is None]:
+        del _DEVICE_POSITIONAL[stale]
+    table = torch.as_tensor(np.ascontiguousarray(pm), device=device)
+    _DEVICE_POSITIONAL[key] = (weakref.ref(pm), table)
+    return table
 
 
 def row_backend(device: torch.device | str) -> str:
@@ -299,13 +319,14 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
     cols = _Columns()
     per_layer = max(1, batch * steps * width * 8 * 4)
     chunk = max(1, min(layers, WORKING_BYTES // per_layer))
+    table = device_positional_means(pm, device)
+    positions = torch.as_tensor([[int(s) + t for t in range(steps)] for s in starts],
+                                dtype=torch.long, device=device)  # [B, steps]
     previous: Tensor | None = None
     for first in range(0, layers, chunk):
         last = min(layers, first + chunk)
         h = hidden[:, :, first:last].to(device).float()
-        positional = torch.as_tensor(np.stack([
-            np.ascontiguousarray(pm[1 + first:1 + last, int(s):int(s) + steps].transpose(1, 0, 2))
-            for s in starts]), device=device)
+        positional = table[1 + first:1 + last][:, positions].permute(1, 2, 0, 3)  # [B, steps, chunk, width]
         corrected = h - positional  # [B, steps, chunk, width]
         if corrected.dtype not in invariant_ops.SUPPORTED_DTYPES:
             raise ExternalCaptureError(f"block outputs corrected to {corrected.dtype}")

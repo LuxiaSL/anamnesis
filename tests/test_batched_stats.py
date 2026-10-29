@@ -378,3 +378,20 @@ def test_the_invariance_check_bites_on_torch_reductions(monkeypatch, steps):
     _torch_reductions(monkeypatch)
     lane = lanes("cuda", 1536)(steps)
     assert moved_rows(lane, steps, 1536) > 0
+
+
+def test_the_device_gather_is_the_host_slice_byte_for_byte():
+    """Each row's positional means, gathered from the device copy of the lane's table, are
+    the host table's own slice: the gather copies, it does not compute."""
+    from anamnesis.extraction.fast.batched_stats import device_positional_means
+
+    rng = np.random.default_rng(0)
+    pm = rng.standard_normal((9, 40, 6)).astype(np.float32)
+    starts, steps, first, last = [3, 11, 0, 20], 7, 2, 6
+    table = device_positional_means(pm, "cpu")
+    positions = torch.as_tensor([[s + t for t in range(steps)] for s in starts])
+    gathered = table[1 + first:1 + last][:, positions].permute(1, 2, 0, 3)
+    host = np.stack([np.ascontiguousarray(pm[1 + first:1 + last, s:s + steps].transpose(1, 0, 2))
+                     for s in starts])
+    assert gathered.contiguous().numpy().tobytes() == host.tobytes()
+    assert device_positional_means(pm, "cpu") is table   # one upload per host table
