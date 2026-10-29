@@ -680,14 +680,14 @@ def attention_inputs(steps: int, seeds, shapes: dict[str, int], device: str,
 
 
 def tsumugi_like_lane(device: str, layers: int, sampled: int):
-    """What the attention family reads of a lane, with tsumugi's battery: ``layers`` layers,
-    ``sampled`` of them spread over the depth."""
+    """What the attention family reads of a lane, with tsumugi's battery: the toy lane's
+    settings, ``layers`` layers and ``sampled`` of them spread over the depth."""
     from types import SimpleNamespace
 
     picked = sorted({round(i * (layers - 1) / (sampled - 1)) for i in range(sampled)})
-    return SimpleNamespace(config=ExtractionConfig(sampled_layers=picked),
-                           families=FeaturePipelineConfig(enable_attention_flow=True),
-                           device=torch.device(device))
+    toy = lanes("cpu", 8)(8)
+    return SimpleNamespace(config=toy.config.model_copy(update=dict(sampled_layers=picked)),
+                           families=toy.families, device=torch.device(device))
 
 
 def attention_values(lane, inputs, starts, rows: slice) -> torch.Tensor:
