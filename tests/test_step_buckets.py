@@ -387,3 +387,27 @@ def test_a_rows_kernels_do_not_depend_on_its_bucketmates(monkeypatch, target, ru
         calls.clear()
         reduce("cpu", 8, [row, signed_row(mate, 2, 32, 8)], buckets=rule)
         assert calls == alone, (target, mate)
+
+
+def test_a_group_reduced_in_chunks_has_the_same_bytes(monkeypatch):
+    """``max_group_rows`` splits a bucket's group into chunks; batchmate invariance means each
+    row keeps its bytes and its lane id, and no chunk holds more rows than the cap."""
+    made = [signed_row(n, 1 + n % MAX_START, 700 + n, 8) for n in (9, 11, 13, 16, 2, 5, 7, 1)]
+    whole = reduce("cpu", 8, made)
+    sizes: list[int] = []
+    original = engine_reducer._reduce_uniform
+
+    def counted(lane, rows, *a, **kw):
+        sizes.append(len(rows))
+        return original(lane, rows, *a, **kw)
+
+    monkeypatch.setattr(engine_reducer, "_reduce_uniform", counted)
+    reducer = EngineReducer(lane_for=lanes("cpu", 8), batched=True, buckets="pow2",
+                            expected_weights=ENGINE["weights"], max_group_rows=2)
+    chunked = reducer.reduce([r for r, _ in made], token_ids=[i for _, i in made], engine=ENGINE)
+    assert max(sizes) <= 2 and len(sizes) > 2
+    for w, c in zip(whole, chunked, strict=True):
+        assert c.features.tobytes() == w.features.tobytes()
+        assert c.lane_id == w.lane_id
+    with pytest.raises(ValueError, match="max_group_rows"):
+        EngineReducer(lane_for=lanes("cpu", 8), max_group_rows=0)

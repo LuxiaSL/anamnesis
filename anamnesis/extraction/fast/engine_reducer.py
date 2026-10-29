@@ -415,7 +415,8 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                               token_ids: Sequence[Sequence[int]],
                               engine: Mapping[str, Any],
                               bucket_rule: str = BUCKET_RULE,
-                              width: int | None = None) -> list[Any]:
+                              width: int | None = None,
+                              max_group_rows: int | None = None) -> list[Any]:
     """Signed rows of one lane, every family batched across the rows of one step-count
     bucket (:func:`attention_features`, :func:`block_output_features`, :func:`kvqg_features`,
     :func:`outputs_features`, :func:`routing_features`) and assembled by
@@ -423,7 +424,15 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
     ``bucket_rule`` (or all at ``width``, when given) and padded to it; rows whose surfaces differ in shape (past their steps)
     or routing plan reduce in separate batches. Returns, per row in order, its
     ``GpuFeatureResult`` or the :class:`ExternalCaptureError` that refused it; a refused
-    row is left out of the batch, which changes no other row's bytes."""
+    row is left out of the batch, which changes no other row's bytes.
+
+    ``max_group_rows`` caps the rows reduced together: a larger group reduces in chunks of
+    at most that many rows, in order. The reduction is batchmate-invariant, so a chunk's rows
+    have the bytes they have in the whole group, and the cap is not part of the lane. It
+    bounds the memory a batch takes (the stacked surfaces, padded to the bucket's width) at
+    the cost of more launches."""
+    if max_group_rows is not None and int(max_group_rows) < 1:
+        raise ValueError(f"max_group_rows must be at least 1, not {max_group_rows}")
     if bucket_rule not in BUCKET_RULES:
         raise ValueError(f"bucket rule must be one of {BUCKET_RULES}, not {bucket_rule!r}")
     results: list[Any] = [None] * len(rows)
@@ -437,11 +446,14 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
     for i in sorted(spans):
         padded_to = width if width is not None else bucket_width(int(rows[i].positions), bucket_rule)
         groups.setdefault((padded_to, _shape_key(rows[i], padded_to)), []).append(i)
-    for (padded_to, _), members in groups.items():
-        reduced = _reduce_uniform(lane, [rows[i] for i in members],
-                                  [spans[i] for i in members], engine, padded_to, bucket_rule)
-        for i, result in zip(members, reduced, strict=True):
-            results[i] = result
+    for (padded_to, _), group in groups.items():
+        step = len(group) if max_group_rows is None else int(max_group_rows)
+        for lo in range(0, len(group), step):
+            members = group[lo:lo + step]
+            reduced = _reduce_uniform(lane, [rows[i] for i in members],
+                                      [spans[i] for i in members], engine, padded_to, bucket_rule)
+            for i, result in zip(members, reduced, strict=True):
+                results[i] = result
     return results
 
 
@@ -459,7 +471,9 @@ class EngineReducer:
     bucket rule ``buckets`` (default
     :data:`~anamnesis.extraction.fast.batched_stats.BUCKET_RULE`). Its rows carry the hybrid
     lane id (:func:`~anamnesis.extraction.fast.batched_stats.hybrid_lane_id`) and the reducer
-    identity names the batched module's digests and the bucket rule. The default is the
+    identity names the batched module's digests and the bucket rule. ``max_group_rows``
+    caps the rows reduced together, bounding a batch's memory; it changes no row's bytes, so
+    it is not part of the lane. The default is the
     batched reduction; ``batched=False`` reduces row by row under the per-row statistics
     lane id.
     """
@@ -468,7 +482,7 @@ class EngineReducer:
                  device: str = "cuda",
                  lane_for: Callable[[int], GpuFeatureLane] | None = None,
                  expected_weights: str | None = None, batched: bool = True,
-                 buckets: str = BUCKET_RULE) -> None:
+                 buckets: str = BUCKET_RULE, max_group_rows: int | None = None) -> None:
         if (lane_for is None) == (preset is None):
             raise ValueError("give a preset (with calib_dir) or lane_for, one of the two")
         if buckets not in BUCKET_RULES:
@@ -476,6 +490,9 @@ class EngineReducer:
         self._lanes: dict[int, GpuFeatureLane] = {}
         self.batched = bool(batched)
         self.buckets = buckets
+        if max_group_rows is not None and int(max_group_rows) < 1:
+            raise ValueError(f"max_group_rows must be at least 1, not {max_group_rows}")
+        self.max_group_rows = None if max_group_rows is None else int(max_group_rows)
         if lane_for is not None:
             self._lane_for = lane_for
             self.expected_weights = expected_weights
@@ -571,7 +588,8 @@ class EngineReducer:
         for width, members in groups.items():
             reduced = reduce_signed_rows_hybrid(
                 self.lane(width), [rows[i] for i in members],
-                [token_ids[i] for i in members], engine, self.buckets, width)
+                [token_ids[i] for i in members], engine, self.buckets, width,
+                max_group_rows=self.max_group_rows)
             for i, result in zip(members, reduced, strict=True):
                 results[i] = result
         for i, result in enumerate(results):
