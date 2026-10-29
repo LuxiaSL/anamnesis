@@ -2,29 +2,34 @@
 
 **A signature is a lossy compression of the causal history of a forward pass over a span of text.**
 
-Anamnesis is an instrument for collecting, analyzing, and intervening on these signatures:
-extracting internal-state features from transformer forward passes (attention flow, gate
-dynamics, key geometry, residual trajectories), classifying *how* a span was processed
-orthogonally to *what* it says, replaying banked generations bitwise-deterministically, and
-building gated steering vectors from the same substrate the readouts measure.
+Anamnesis is an instrument for collecting, analyzing, and intervening on these signatures.
+It does four things:
+
+- It extracts internal-state features from transformer forward passes: attention flow, gate
+  dynamics, key geometry and residual trajectories.
+- It classifies *how* a span was processed, orthogonally to *what* it says.
+- It replays banked generations bitwise-deterministically.
+- It builds gated steering vectors from the same substrate that the readouts measure.
 
 The instrument is the whole of it: extraction, the replay gateway, the eleven standing
-analyses, the steering side and the judging channel, with a test suite and four gates over
-them. [`CONTRIBUTING.md`](CONTRIBUTING.md) states how code and claims arrive, the
-documentation rule both are held to, and the gates a change passes.
+analyses, the steering side and the judging channel. A test suite and four gates run over all
+of them. [`CONTRIBUTING.md`](CONTRIBUTING.md) states how code and claims arrive, the
+documentation rule that holds both, and the gates that a change passes.
 
 ## The question it was built for
 
-The shipped protocol asks a model to write about a topic in one of five *processing
-modes* — linear, analogical, socratic, contrastive, dialectical — each a system prompt such
-as *"Develop your exploration through a sequence of questions and provisional answers"*,
-and all five under one format constraint: flowing paragraphs, no lists, no headers. Four of
-the five produce prose a reader struggles to tell apart. A run asks whether the signatures
-of those forward passes separate the modes anyway, and whether what separates them is the
-computation rather than the words, the length or the topic — which is what the length
-baseline, the semantic section and the prompt-swap test exist to rule out. The prompts are
-rows in [`anamnesis/modes/mode_sets.json`](anamnesis/modes/mode_sets.json); a researcher's
-own modes are a file of the same shape named by `ANAMNESIS_MODE_SETS`.
+In the shipped protocol, a model writes about a topic in one of five *processing modes*:
+linear, analogical, socratic, contrastive or dialectical. Each mode is a system prompt, such
+as *"Develop your exploration through a sequence of questions and provisional answers"*. All
+five share one format constraint: flowing paragraphs, no lists, no headers. Four of the five
+produce prose that a reader struggles to tell apart.
+
+A run tests whether the signatures of those forward passes separate the modes anyway. It also
+tests whether the computation is what separates them, rather than the words, the length or the
+topic. The length baseline, the semantic section and the prompt-swap test exist to rule those
+three out. The prompts are rows in
+[`anamnesis/modes/mode_sets.json`](anamnesis/modes/mode_sets.json). A researcher's own modes
+go in a file of the same shape, and `ANAMNESIS_MODE_SETS` names that file.
 
 ## Start here
 
@@ -65,13 +70,15 @@ its elapsed time as it finishes, so the pass is legible while it runs — but a 
 sits for ten minutes on one line is working, not hung.
 
 All eleven sections run. The command then **exits 3, not 0**, and that is the instrument
-working. Two sections measure against something the `dev` install does not bring: the
-intrinsic-dimension section needs the `geometry` extra's estimators, and the semantic section
-measures content by sentence embeddings, which the `semantic` extra provides. Without them each
-section states what it lacks, three scorecard rows read `INSUFFICIENT_DATA` naming the reading
-they miss, and the pass refuses rather than reporting itself complete. Install
-`".[dev,geometry,semantic]"` for a full pass — the embedding model downloads on first use — or
-`--skip` those sections to make the narrowing explicit.
+working. Two sections measure against something that the `dev` install does not bring. The
+intrinsic-dimension section needs the estimators in the `geometry` extra. The semantic section
+measures content by sentence embeddings, which the `semantic` extra provides. Without those
+extras, each of the two sections states what it lacks. Three scorecard rows read
+`INSUFFICIENT_DATA`, and each names the reading that it is missing. The pass then ends in a
+refusal rather than a report that it is complete.
+
+For a full pass, install `".[dev,geometry,semantic]"`; the embedding model downloads on first
+use. Or `--skip` those sections, to make the narrowing explicit.
 Nothing is silently zero and nothing absent is scored — which is the single habit worth
 taking from this repository.
 

@@ -126,7 +126,7 @@ A pull request merges when these pass. Each is a command you can run.
 | gate | what it checks | command |
 |---|---|---|
 | tests | the suite | `pytest tests/` |
-| G3 documentation | the two rules above | `python -m tools.check_timelessness --root anamnesis tools tests` and `python -m tools.check_referents --root anamnesis tools tests` |
+| G3 documentation | the two rules above, and the public voice | `python -m tools.check_timelessness --root anamnesis tools tests`, `python -m tools.check_referents --root anamnesis tools tests` and `python -m tools.check_legibility` |
 | G4 import closure | every module reachable from a command or a test; no orphans | `python -m tools.check_import_closure --package anamnesis --roots anamnesis/scripts tests` |
 | G1 data compatibility | banked artifacts in, identical features out | `python -m tools.g1_hash_manifest` — see its own help; needs banked data |
 | G2 test retention | a change that shrinks the suite shrinks the code by at least as many lines | `python -m tools.check_test_retention --base main` |

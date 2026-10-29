@@ -15,18 +15,18 @@
       "words": 2294
     },
     "README.md": {
-      "dep_len": 2.3121,
+      "dep_len": 2.2503,
       "rates": {
         "denominal": 0.0,
-        "inanimate": 8.0645,
-        "long": 9.0726,
-        "orc": 1.0081,
-        "orc_all": 17.1371,
-        "orc_reduced": 16.129,
-        "stacked": 5.0403
+        "inanimate": 4.8828,
+        "long": 3.9062,
+        "orc": 3.9062,
+        "orc_all": 13.6719,
+        "orc_reduced": 9.7656,
+        "stacked": 3.9062
       },
-      "sentences": 46,
-      "words": 992
+      "sentences": 62,
+      "words": 1024
     },
     "anamnesis/__init__.py": {
       "dep_len": 2.305,
@@ -71,18 +71,18 @@
       "words": 434
     },
     "anamnesis/modes/__init__.py": {
-      "dep_len": 2.3704,
+      "dep_len": 2.3766,
       "rates": {
         "denominal": 0.0,
         "inanimate": 0.0,
-        "long": 8.2988,
-        "orc": 0.0,
-        "orc_all": 29.0456,
-        "orc_reduced": 29.0456,
+        "long": 0.0,
+        "orc": 19.685,
+        "orc_all": 19.685,
+        "orc_reduced": 0.0,
         "stacked": 0.0
       },
-      "sentences": 11,
-      "words": 241
+      "sentences": 21,
+      "words": 254
     },
     "anamnesis/scripts/__init__.py": {
       "dep_len": 2.4873,
@@ -127,18 +127,18 @@
       "words": 3636
     },
     "docs/VLLM_LANE.md": {
-      "dep_len": 2.4712,
+      "dep_len": 2.4611,
       "rates": {
-        "denominal": 1.077,
-        "inanimate": 3.5003,
-        "long": 12.3856,
-        "orc": 0.0,
-        "orc_all": 7.0005,
-        "orc_reduced": 7.0005,
-        "stacked": 2.154
+        "denominal": 1.0707,
+        "inanimate": 3.4797,
+        "long": 12.045,
+        "orc": 0.2677,
+        "orc_all": 7.227,
+        "orc_reduced": 6.9593,
+        "stacked": 2.1413
       },
-      "sentences": 155,
-      "words": 3714
+      "sentences": 159,
+      "words": 3736
     }
   },
   "parser": "en_core_web_trf",
