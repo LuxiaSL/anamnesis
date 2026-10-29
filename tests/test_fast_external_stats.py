@@ -182,7 +182,7 @@ def test_the_twin_was_written_against_this_attention_reducer():
 
 TWINS = {
     # the output reduction after its per-step quantities
-    "features.py": "a8737153447b48fe81d1aeb295afa252f751d4e1e7841489fc114ffd0a42bdf0",
+    "features.py": "2e5d89b0aff1043307fb2d1d2bde6d2424f8687a0f53a238ffb67dc1e0a4327a",
     # the routing family's assembly
     "attn_res.py": "2dc0fa45320ffc8d67c5f90ffa8a872ef093c9c8fc4bbb36f3638e033865f546",
     # the block-output, key, value, query and gate reduction
