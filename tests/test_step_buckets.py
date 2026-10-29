@@ -320,9 +320,9 @@ def _pad_to_the_longest(monkeypatch) -> None:
     """Each batch is padded to its longest row, not to the bucket's canonical width."""
     original = engine_reducer._reduce_uniform
 
-    def padded(lane, rows, spans, engine, width=None, bucket_rule="pow2"):
+    def padded(lane, rows, spans, engine, width=None, bucket_rule="pow2", lens=None):
         return original(lane, rows, spans, engine, max(int(r.positions) for r in rows),
-                        bucket_rule)
+                        bucket_rule, lens)
     monkeypatch.setattr(engine_reducer, "_reduce_uniform", padded)
 
 
