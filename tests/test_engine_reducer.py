@@ -101,7 +101,7 @@ def signed_example(steps=16, start=4, sampled=(0, 1, 2), seed=0):
 
 
 def reducer_for(lane, **kwargs):
-    return EngineReducer(lane_for=lambda steps: lane, **kwargs)
+    return EngineReducer(lane_for=lambda steps: lane, **{"batched": False, **kwargs})
 
 
 @pytest.mark.parametrize("steps,start,sampled", [(1, 4, (0, 1, 2)), (3, 4, (0, 2)),
@@ -185,3 +185,12 @@ def test_the_engine_protocol_accepts_it():
         pytest.skip("this kotodama has no SignatureReducer")
     lane, _, _, _, _ = signed_example()
     assert isinstance(reducer_for(lane), protocol)
+
+
+def test_the_default_reduction_is_batched():
+    lane, row, token_ids, _, _ = signed_example()
+    default = EngineReducer(lane_for=lambda steps: lane).reduce([row], token_ids=[token_ids], engine=ENGINE)[0]
+    batched = EngineReducer(lane_for=lambda steps: lane, batched=True).reduce(
+        [row], token_ids=[token_ids], engine=ENGINE)[0]
+    assert default.lane_id == batched.lane_id
+    assert default.features.tobytes() == batched.features.tobytes()

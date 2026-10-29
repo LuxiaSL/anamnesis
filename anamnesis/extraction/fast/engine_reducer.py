@@ -31,7 +31,7 @@ the final read's. ``surfaces`` maps names to tensors over the ``kept`` positions
 two engines, or two pin tables, never share an id. :attr:`EngineReducer.reducer_identity`
 names this module's and the statistics reducer's source digests.
 
-**Batched.** By default a batch is reduced row by row. With ``batched=True`` the rows are
+**Batched.** By default (``batched=True``) the rows of a batch are
 grouped by step count (and, within it, by surface shapes and routing plan), and each
 group's families, attention included, are reduced together, batchmate-invariant
 (:mod:`anamnesis.extraction.fast.batched_attention`,
@@ -409,13 +409,14 @@ class EngineReducer:
     together (:func:`reduce_signed_rows_hybrid`), batchmate-invariant. Its rows carry the
     hybrid lane id
     (:func:`~anamnesis.extraction.fast.batched_stats.hybrid_lane_id`) and the reducer
-    identity names the batched module's digests. The default is the per-row reduction.
+    identity names the batched module's digests. The default is the batched reduction;
+    ``batched=False`` reduces row by row under the per-row statistics lane id.
     """
 
     def __init__(self, *, preset: str | None = None, calib_dir: str | Path | None = None,
                  device: str = "cuda",
                  lane_for: Callable[[int], GpuFeatureLane] | None = None,
-                 expected_weights: str | None = None, batched: bool = False) -> None:
+                 expected_weights: str | None = None, batched: bool = True) -> None:
         if (lane_for is None) == (preset is None):
             raise ValueError("give a preset (with calib_dir) or lane_for, one of the two")
         self._lanes: dict[int, GpuFeatureLane] = {}
