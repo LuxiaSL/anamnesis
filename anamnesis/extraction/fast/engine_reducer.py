@@ -31,9 +31,13 @@ the final read's. ``surfaces`` maps names to tensors over the ``kept`` positions
 two engines, or two pin tables, never share an id. :attr:`EngineReducer.reducer_identity`
 names this module's and the statistics reducer's source digests.
 
-**Refusals.** A batch is reduced row by row; the first row that cannot be reduced raises
-:class:`ExternalCaptureError` naming its index, so a caller can retry the others one at a
-time. A row is refused when its span is incomplete, its step count disagrees with its
+**Batched.** By default a batch is reduced row by row. With ``batched=True`` the rows are
+grouped by step count and each group's block-output family is reduced together, batchmate-
+invariant (:mod:`anamnesis.extraction.fast.batched_stats`); those rows carry the hybrid
+lane id, never the per-row one.
+
+**Refusals.** The first row that cannot be reduced raises :class:`ExternalCaptureError`
+naming its index, so a caller can retry the others one at a time. A row is refused when its span is incomplete, its step count disagrees with its
 token ids, its weights digest is not the one the reducer was built for, or a surface is
 missing or mis-shaped.
 """
@@ -48,8 +52,15 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from torch import Tensor
+import torch
 
+from anamnesis.extraction.fast.batched_stats import (
+    BATCHED_FAMILIES,
+    BATCHED_SOURCE_SHA256,
+    INVARIANT_OPS_SOURCE_SHA256,
+    HybridStatsSpan,
+    block_output_features,
+)
 from anamnesis.extraction.fast.external import ExternalCaptureError, RoutingPoint
 from anamnesis.extraction.fast.external_stats import (
     STATS_SOURCE_SHA256,
@@ -99,16 +110,10 @@ def routing_points(row: Any) -> list[RoutingPoint]:
     return points
 
 
-def reduce_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int],
-                      engine: Mapping[str, Any]):
-    """One signed row through :class:`ExternalStatsSpan`; returns its ``GpuFeatureResult``.
-
-    Raises
-    ------
-    ExternalCaptureError
-        When the span is incomplete, the step count disagrees with the token ids, or a
-        surface is missing or mis-shaped (the span's own checks).
-    """
+def _begin_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int],
+                      span_type: type[ExternalStatsSpan] = ExternalStatsSpan):
+    """A signed row's checks, its span and its attention statistics reduced; returns
+    ``(span, token ids)``."""
     seq = [int(t) for t in token_ids]
     start, positions = int(row.start), int(row.positions)
     if int(row.kept) != positions:
@@ -121,9 +126,8 @@ def reduce_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int],
     missing = [name for name in SURFACES if name not in s]
     if missing:
         raise ExternalCaptureError(f"the signed row lacks surfaces {missing}")
-    sampled = list(lane.config.sampled_layers)
     depth = s["depth"]
-    span = ExternalStatsSpan(lane, start=start, end=len(seq), num_layers=int(depth.shape[1]))
+    span = span_type(lane, start=start, end=len(seq), num_layers=int(depth.shape[1]))
     scalars = s["head_scalars"]
     span.attention_stats(head_entropy=s["head_entropy"].float(),
                          mean_entropy=s["mean_entropy"].float(),
@@ -131,13 +135,83 @@ def reduce_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int],
                          head_recency_mass=scalars[:, :, 1].float(),
                          head_sink=scalars[:, :, 2].float(),
                          mean_rows=s["mean_rows"].float())
+    return span, seq
+
+
+def _finish_arguments(lane: GpuFeatureLane, row: Any, seq: list[int],
+                      engine: Mapping[str, Any]) -> dict[str, Any]:
+    """The keyword arguments a signed row's span is finished with."""
+    s = row.surfaces
+    sampled = list(lane.config.sampled_layers)
     per_layer = {name: {layer: s[name][:, j] for j, layer in enumerate(sampled)}
                  for name in ("k", "v", "q", "gate")}
-    return span.finish(hidden=depth.permute(1, 0, 2).contiguous(), keys=per_layer["k"],
-                       values=per_layer["v"], queries=per_layer["q"], gates=per_layer["gate"],
-                       token_ids=seq, capture_identity=dict(engine),
-                       logit_stats=s["logit_stats"], committed=list(s["committed"]),
-                       routing_stats=routing_stats_from_routing(routing_points(row), sampled))
+    return dict(hidden=s["depth"].permute(1, 0, 2).contiguous(), keys=per_layer["k"],
+                values=per_layer["v"], queries=per_layer["q"], gates=per_layer["gate"],
+                token_ids=seq, capture_identity=dict(engine),
+                logit_stats=s["logit_stats"], committed=list(s["committed"]),
+                routing_stats=routing_stats_from_routing(routing_points(row), sampled))
+
+
+def reduce_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int],
+                      engine: Mapping[str, Any]):
+    """One signed row through :class:`ExternalStatsSpan`; returns its ``GpuFeatureResult``.
+
+    Raises
+    ------
+    ExternalCaptureError
+        When the span is incomplete, the step count disagrees with the token ids, or a
+        surface is missing or mis-shaped (the span's own checks).
+    """
+    span, seq = _begin_signed_row(lane, row, token_ids)
+    return span.finish(**_finish_arguments(lane, row, seq, engine))
+
+
+def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
+                              token_ids: Sequence[Sequence[int]],
+                              engine: Mapping[str, Any]) -> list[Any]:
+    """Signed rows of one step count through :class:`HybridStatsSpan`: the block-output
+    family batched across the rows by :func:`block_output_features`, every other family
+    per row. Returns, per row in order, its ``GpuFeatureResult`` or the
+    :class:`ExternalCaptureError` that refused it; a refused row is left out of the batch,
+    which changes no other row's bytes."""
+    results: list[Any] = [None] * len(rows)
+    begun: dict[int, tuple[HybridStatsSpan, list[int]]] = {}
+    for i, (row, seq) in enumerate(zip(rows, token_ids, strict=True)):
+        try:
+            begun[i] = _begin_signed_row(lane, row, seq, HybridStatsSpan)
+        except ExternalCaptureError as err:
+            results[i] = err
+    shapes = {i: tuple(rows[i].surfaces["depth"].shape) for i in begun}
+    reference = next(iter(shapes.values()), None)
+    for i, shape in shapes.items():
+        if len(shape) != 3 or shape != reference:
+            results[i] = ExternalCaptureError(
+                f"depth {list(shape)} is not the batch's {list(reference)}")
+            begun.pop(i)
+    if begun:
+        order = sorted(begun)
+        sampled = list(lane.config.sampled_layers)
+        laplacians = {}
+        for layer in sampled:
+            popped = [begun[i][0].attention_reducer.spectral.pop(layer) for i in order]
+            laplacians[layer] = (popped[0][0], torch.stack([lap for _, lap in popped]))
+        try:
+            blocks = block_output_features(
+                lane, torch.stack([rows[i].surfaces["depth"].to(lane.device) for i in order]),
+                [int(rows[i].start) for i in order], laplacians)
+        except ExternalCaptureError as err:
+            for i in order:
+                results[i] = err
+            return results
+        for b, i in enumerate(order):
+            span, seq = begun[i]
+            try:
+                results[i] = span.finish(**_finish_arguments(lane, rows[i], seq, engine),
+                                         block_outputs=(blocks.names, blocks.row(b)),
+                                         batch_size=len(order))
+            except ExternalCaptureError as err:
+                results[i] = err
+    return results
 
 
 class EngineReducer:
@@ -148,15 +222,23 @@ class EngineReducer:
     lanes, from ``lane_for(steps) -> GpuFeatureLane``. ``expected_weights`` is the weights
     digest every row must carry; built from a preset it defaults to the preset's
     ``checkpoint_sha256`` (none declared: rows are not checked).
+
+    ``batched`` selects the hybrid reduction: rows of one step count reduce their
+    block-output family together through
+    :func:`~anamnesis.extraction.fast.batched_stats.block_output_features`, batchmate-
+    invariant, and every other family per row. Its rows carry the hybrid lane id
+    (:func:`~anamnesis.extraction.fast.batched_stats.hybrid_lane_id`) and the reducer
+    identity names the batched module's digests. The default is the per-row reduction.
     """
 
     def __init__(self, *, preset: str | None = None, calib_dir: str | Path | None = None,
                  device: str = "cuda",
                  lane_for: Callable[[int], GpuFeatureLane] | None = None,
-                 expected_weights: str | None = None) -> None:
+                 expected_weights: str | None = None, batched: bool = False) -> None:
         if (lane_for is None) == (preset is None):
             raise ValueError("give a preset (with calib_dir) or lane_for, one of the two")
         self._lanes: dict[int, GpuFeatureLane] = {}
+        self.batched = bool(batched)
         if lane_for is not None:
             self._lane_for = lane_for
             self.expected_weights = expected_weights
@@ -166,11 +248,15 @@ class EngineReducer:
                 raise ValueError("a preset needs its calib_dir")
             self._build_from_preset(preset, Path(calib_dir), device)
             self.expected_weights = expected_weights or self._preset.checkpoint_sha256
+        identity = dict(engine_reducer_source_sha256=ENGINE_REDUCER_SOURCE_SHA256,
+                        stats_source_sha256=STATS_SOURCE_SHA256)
+        if self.batched:
+            identity.update(batched_families=list(BATCHED_FAMILIES),
+                            batched_source_sha256=BATCHED_SOURCE_SHA256,
+                            invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256)
         self.reducer_identity = (
             "anamnesis.extraction.fast.engine_reducer:EngineReducer@"
-            + hashlib.sha256(json.dumps(dict(
-                engine_reducer_source_sha256=ENGINE_REDUCER_SOURCE_SHA256,
-                stats_source_sha256=STATS_SOURCE_SHA256), sort_keys=True).encode()).hexdigest())
+            + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest())
 
     def _build_from_preset(self, preset: str, calib_dir: Path, device: str) -> None:
         from anamnesis.config import resolve_preset
@@ -206,6 +292,9 @@ class EngineReducer:
                engine: Mapping[str, Any]) -> list[EngineReducedRow]:
         """One :class:`EngineReducedRow` per signed row, in order.
 
+        With ``batched``, the rows are grouped by step count and each group's block-output
+        family is reduced together; a row's bytes do not depend on its group.
+
         Raises
         ------
         ExternalCaptureError
@@ -214,16 +303,36 @@ class EngineReducer:
         if len(rows) != len(token_ids):
             raise ExternalCaptureError(
                 f"{len(rows)} rows but {len(token_ids)} token id lists")
+        results: list[Any] = [None] * len(rows)
+        groups: dict[int, list[int]] = {}
+        for i, row in enumerate(rows):
+            if self.expected_weights and getattr(row, "weights", "") != self.expected_weights:
+                results[i] = ExternalCaptureError(
+                    f"weights digest {getattr(row, 'weights', '') or '(none)'} is not the "
+                    f"reducer's {self.expected_weights}")
+                if not self.batched:
+                    break
+                continue
+            if not self.batched:
+                try:
+                    results[i] = reduce_signed_row(self.lane(int(row.positions)), row,
+                                                   token_ids[i], engine)
+                except ExternalCaptureError as err:
+                    results[i] = err
+                    break
+                continue
+            groups.setdefault(int(row.positions), []).append(i)
+        for steps, members in groups.items():
+            reduced = reduce_signed_rows_hybrid(
+                self.lane(steps), [rows[i] for i in members],
+                [token_ids[i] for i in members], engine)
+            for i, result in zip(members, reduced, strict=True):
+                results[i] = result
+        for i, result in enumerate(results):
+            if isinstance(result, ExternalCaptureError):
+                raise ExternalCaptureError(f"row {i}: {result}") from result
         out = []
-        for i, (row, seq) in enumerate(zip(rows, token_ids, strict=True)):
-            try:
-                if self.expected_weights and getattr(row, "weights", "") != self.expected_weights:
-                    raise ExternalCaptureError(
-                        f"weights digest {getattr(row, 'weights', '') or '(none)'} is not the "
-                        f"reducer's {self.expected_weights}")
-                result = reduce_signed_row(self.lane(int(row.positions)), row, seq, engine)
-            except ExternalCaptureError as err:
-                raise ExternalCaptureError(f"row {i}: {err}") from err
+        for row, result in zip(rows, results, strict=True):
             receipt = dict(result.metadata or {})
             out.append(EngineReducedRow(
                 features=np.asarray(result.features, dtype=np.float32),
