@@ -958,6 +958,11 @@ def load_model(
 
     Returns:
         LoadedModel with everything wired up.
+
+    Raises:
+        anamnesis.extraction.weights_binding.WeightsMismatchError: When ``config``
+            was built from a row that binds its weights (``checkpoint_sha256``) and
+            the loaded (and, with an adapter, merged) weights digest otherwise.
     """
     if sampled_layers is None:
         sampled_layers = default_sampled_layers(config)
@@ -980,6 +985,15 @@ def load_model(
         model = PeftModel.from_pretrained(model, adapter_path)
         model = model.merge_and_unload()
         model.eval()
+
+    if config.checkpoint_sha256 is not None:
+        # The row binds its weights: the merged weights are what computes, so they are
+        # what is checked, before any hook is registered.
+        from anamnesis.extraction.weights_binding import check_weights_digest
+        from anamnesis.extraction.weights_digest import weights_digest
+
+        check_weights_digest(weights_digest(model), config.checkpoint_sha256,
+                             preset_name=config.preset_name or config.model_id)
 
     softmax_choice = resolve_deepseek_v2_softmax(
         model, deepseek_v2_softmax or os.environ.get(DEEPSEEK_V2_SOFTMAX_ENV) or None)

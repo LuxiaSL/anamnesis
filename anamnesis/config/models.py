@@ -62,7 +62,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, get_args
 
 from pydantic import (
     BaseModel,
@@ -92,6 +92,20 @@ MODELS_FILE: Path = Path(__file__).resolve().parent / "models.json"
 
 MODELS_ENV = "ANAMNESIS_MODELS"
 """Environment variable naming further registry files, separated like ``PATH``."""
+
+LineageKind = Literal["sft", "dpo", "lora", "pretrain-step", "family"]
+"""How a row's weights descend from its ``parent`` row's.
+
+``sft`` and ``dpo`` are post-training rounds on the parent's weights, ``lora`` an adapter
+on them, ``pretrain-step`` a later step of the parent's pretraining run, and ``family``
+a member traced from the parent's weights by any other recorded route. A new kind is a
+new member of this literal; nothing else in the package enumerates them."""
+
+LINEAGE_KINDS: tuple[str, ...] = get_args(LineageKind)
+"""Every :data:`LineageKind`, in declaration order."""
+
+SHA256_HEX = r"^[0-9a-f]{64}$"
+"""A sha256 digest as lowercase hex, the form every digest field in a row takes."""
 
 
 class ModelRegistryError(RuntimeError):
@@ -189,6 +203,43 @@ class ModelPreset(BaseModel):
         ),
     )
 
+    checkpoint_sha256: str | None = Field(
+        default=None,
+        pattern=SHA256_HEX,
+        description=(
+            "The weights this row binds: the weights-v1 digest of the loaded model "
+            "(anamnesis.extraction.weights_digest), for a merged adapter the merged "
+            "weights'. When set, building a lane from this row refuses a model whose "
+            "weights digest otherwise. None binds nothing"
+        ),
+    )
+    adapter_sha256: str | None = Field(
+        default=None,
+        pattern=SHA256_HEX,
+        description=(
+            "The sha256 of the adapter file merged into checkpoint_sha256's weights, "
+            "carried as provenance; requires checkpoint_sha256"
+        ),
+    )
+    parent: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The registry key of the row whose weights this row's descend from, by the "
+            "route lineage names. A lineage contrast admits two rows' lanes together only "
+            "when parent links trace them to one another"
+        ),
+    )
+    parent_checkpoint_sha256: str | None = Field(
+        default=None,
+        pattern=SHA256_HEX,
+        description="The parent row's checkpoint_sha256, recorded with the link",
+    )
+    lineage: LineageKind | None = Field(
+        default=None,
+        description="How this row's weights descend from parent's; one of LINEAGE_KINDS",
+    )
+
     @field_validator("sampled_layers", "pca_layers", "trajectory_layers", "contrastive_layers")
     @classmethod
     def _strictly_increasing(cls, layers: tuple[int, ...], info: Any) -> tuple[int, ...]:
@@ -264,7 +315,47 @@ class ModelPreset(BaseModel):
                     f"{self.name}: attention_layer_types omits sampled layers {missing}; "
                     "an interleaved architecture must declare the kind of every sampled layer"
                 )
+        self._check_binding()
         return self
+
+    def _check_binding(self) -> None:
+        """The weights and lineage fields agree with one another."""
+        if self.adapter_sha256 is not None and self.checkpoint_sha256 is None:
+            raise ValueError(
+                f"{self.name}: adapter_sha256 is set without checkpoint_sha256; a row binds "
+                "the merged weights' digest and records the adapter's beside it"
+            )
+        link = {"parent": self.parent, "parent_checkpoint_sha256": self.parent_checkpoint_sha256,
+                "lineage": self.lineage}
+        given = sorted(k for k, v in link.items() if v is not None)
+        if given and len(given) != len(link):
+            missing = sorted(set(link) - set(given))
+            raise ValueError(
+                f"{self.name}: a lineage link names parent, parent_checkpoint_sha256 and "
+                f"lineage together; {', '.join(given)} given without {', '.join(missing)}"
+            )
+        if not given:
+            return
+        if self.parent == self.name:
+            raise ValueError(f"{self.name}: a row is not its own parent")
+        if self.checkpoint_sha256 is None:
+            raise ValueError(
+                f"{self.name}: a row with a parent binds its own weights; set "
+                "checkpoint_sha256"
+            )
+        if self.checkpoint_sha256 == self.parent_checkpoint_sha256:
+            raise ValueError(
+                f"{self.name}: checkpoint_sha256 equals its parent's; a lineage link joins "
+                "two different sets of weights, and a row written with extends inherits "
+                "its base's digest unless it gives its own"
+            )
+        if self.lineage == "lora" and self.adapter_sha256 is None:
+            raise ValueError(f"{self.name}: a lora row records its adapter's adapter_sha256")
+
+    @property
+    def binds_weights(self) -> bool:
+        """Whether a lane built from this row checks the loaded weights' digest."""
+        return self.checkpoint_sha256 is not None
 
     @property
     def kv_group_size(self) -> int:
@@ -375,6 +466,19 @@ class ModelRegistry(BaseModel):
             f"read from: {', '.join(str(path) for path in self.sources)}; "
             f"add a row and name its file in {MODELS_ENV}"
         )
+
+    def ancestry(self, preset: str) -> tuple[str, ...]:
+        """``preset``'s registry key followed by each recorded parent's, root last.
+
+        Raises
+        ------
+        UnknownPresetError
+            When ``preset`` is not in the registry.
+        """
+        chain = [self.resolve(preset).name]
+        while (parent := self.presets[chain[-1]].parent) is not None:
+            chain.append(parent)
+        return tuple(chain)
 
     def layer_counts_by_run_prefix(self) -> dict[str, int]:
         """Every run-name prefix this registry answers for, and its layer count.
@@ -552,6 +656,7 @@ def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
                 f"run prefix {alias!r} is claimed by both {held!r} and {target!r}; "
                 "a run directory's prefix has to resolve to one model's depth"
             )
+    _check_parent_links(presets)
     for prefix in depths:
         if prefix in prefix_owner:
             raise ModelRegistryError(
@@ -563,6 +668,52 @@ def _merge(files: list[tuple[Path, ModelRegistryFile]]) -> ModelRegistry:
         presets=presets, aliases=aliases, run_depths=depths, sources=tuple(p for p, _ in files),
         lineage=lineage,
     )
+
+
+def _check_parent_links(presets: dict[str, ModelPreset]) -> None:
+    """Every recorded parent link resolves, agrees with its parent row, and ends.
+
+    A child row names a parent key and the parent's digest. The parent row must exist
+    in the merged registry, must bind exactly that digest, and must not descend from the
+    child. The child carries its own calibration location: a different checkpoint is a
+    different model to calibrate, and a contrast that reads both under one calibration
+    declares that itself.
+
+    Raises
+    ------
+    ModelRegistryError
+        Naming the first link that does not hold.
+    """
+    for key, row in presets.items():
+        if row.parent is None:
+            continue
+        parent = presets.get(row.parent)
+        if parent is None:
+            raise ModelRegistryError(
+                f"preset {key!r} names parent {row.parent!r}, which no registry file "
+                f"defines; presets: {', '.join(sorted(presets))}"
+            )
+        if parent.checkpoint_sha256 != row.parent_checkpoint_sha256:
+            raise ModelRegistryError(
+                f"preset {key!r} records parent {row.parent!r} at checkpoint "
+                f"{row.parent_checkpoint_sha256}, and that row binds "
+                f"{parent.checkpoint_sha256}; the link names the weights the parent row binds"
+            )
+        if (row.calibration_root, row.calibration_dir) == (
+                parent.calibration_root, parent.calibration_dir):
+            raise ModelRegistryError(
+                f"preset {key!r} shares its calibration directory with its parent "
+                f"{row.parent!r}; a different checkpoint has its own calibration"
+            )
+        seen = [key]
+        cursor: str | None = row.parent
+        while cursor is not None:
+            if cursor in seen:
+                raise ModelRegistryError(
+                    f"parent links form a cycle: {' -> '.join([*seen, cursor])}"
+                )
+            seen.append(cursor)
+            cursor = presets[cursor].parent
 
 
 _CACHE: dict[tuple[tuple[str, int, int], ...], ModelRegistry] = {}
@@ -654,6 +805,10 @@ class ModelConfig(BaseModel):
         default=None, description="The preset this was built from, carried as provenance"
     )
 
+    _checkpoint_sha256: str | None = PrivateAttr(default=None)
+    """The weights digest the preset binds, set by :meth:`from_preset`; the loader
+    refuses a model whose weights digest otherwise. Private, so it is in no dump."""
+
     @field_validator("attn_implementation")
     @classmethod
     def _returns_attention_weights(cls, implementation: str) -> str:
@@ -707,4 +862,11 @@ class ModelConfig(BaseModel):
             "preset_name": row.name,
         }
         fields.update(overrides)
-        return cls(**fields)
+        config = cls(**fields)
+        config._checkpoint_sha256 = row.checkpoint_sha256
+        return config
+
+    @property
+    def checkpoint_sha256(self) -> str | None:
+        """The weights digest the preset this was built from binds, or None."""
+        return self._checkpoint_sha256
