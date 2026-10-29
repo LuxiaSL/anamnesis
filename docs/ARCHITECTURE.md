@@ -7,10 +7,14 @@ of them to read first.
 
 ## What a signature is
 
+<!-- legibility: flourish — the definition of a signature, worded once and quoted verbatim on every page that states it -->
+
 **A signature is a lossy compression of the causal history of a forward pass over a span
 of text** — what the computation did, not what the text said. `anamnesis/__init__.py`
 states it in one line, and the whole instrument follows from the choice of *span of text*
 over *generation*.
+
+<!-- /legibility -->
 
 A decoder forward is a deterministic function of its input tokens. So if you know the
 token sequence a generation realized, you can recover the states that produced it by

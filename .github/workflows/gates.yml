@@ -80,6 +80,39 @@ jobs:
           path: receipts/
           if-no-files-found: warn
 
+  # G3's public-voice check parses every public page with spaCy's transformer model,
+  # pinned to the versions its reference statistics were built with. That parser and
+  # its weights are most of a gigabyte that nothing else here needs, so the check is a
+  # job of its own rather than a step in the matrix above. Its tests run in the matrix,
+  # with a stand-in for the parser; this job is where the real measurement happens.
+  legibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tools/legibility_requirements.txt
+
+      - name: Install the parser
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r tools/legibility_requirements.txt
+
+      - name: G3 public voice
+        run: |
+          mkdir -p receipts
+          python -m tools.check_legibility --json receipts/g3-legibility.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate-receipts-legibility
+          path: receipts/
+          if-no-files-found: warn
+
   # A built wheel, installed somewhere the checkout cannot be imported from. Everything
   # above runs against the source tree, where `pythonpath = ["."]` makes imports work
   # whether or not the package declares them correctly. This job is the only place the

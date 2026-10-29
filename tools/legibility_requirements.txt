@@ -1,0 +1,20 @@
+# The parser G3's public-voice check (tools/check_legibility.py) measures with.
+#
+# Every version is pinned to the one the statistics in tools/legibility_reference.json
+# were parsed with. A different parser draws different arcs and tags, and every ratio
+# would then compare two instruments rather than two texts. Raising a pin means
+# re-measuring the baseline with the new parser in the same change.
+#
+# The CPU build of torch: the check parses a few thousand words, and the CUDA build
+# would download several gigabytes of vendor libraries a runner cannot use.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0+cpu
+spacy==3.8.7
+thinc==8.3.11
+spacy-curated-transformers==0.3.1
+curated-transformers==0.1.1
+curated-tokenizers==0.0.10
+# spaCy's command-line module imports click directly, and current releases of typer,
+# which spaCy depends on, no longer install it.
+click==8.5.0
+en-core-web-trf @ https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl
