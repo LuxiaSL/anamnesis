@@ -50,6 +50,7 @@ from anamnesis.extraction.fast.batched_stats import (
     _Columns,
     _operator_names,
     _temporal_rows,
+    canonical_size,
     per_row_index,
     take_steps,
     uniform_counts,
@@ -268,7 +269,10 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
             sizes = [(q if i < 3 else c - 3 * q) if c >= 4 else c
                      for q, c in zip(quarters, counts.host, strict=True)]
             size_dev = torch.where(n >= 4, quarter if i < 3 else n - 3 * quarter, n)
-            series = window_steps(rec, quarter * i, max(1, max(sizes)))
+            canonical = canonical_size(("quarter", i == 3), t,
+                                       lambda c: (c // 4 if i < 3 else c - 3 * (c // 4))
+                                       if c >= 4 else c)
+            series = window_steps(rec, quarter * i, canonical)
             out[f"cache_recency_traj{i}"] = row_mean(
                 series, lengths=counts.derive(sizes, size_dev).lengths(series))
 

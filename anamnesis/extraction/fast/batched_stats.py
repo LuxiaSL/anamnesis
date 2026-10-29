@@ -210,29 +210,37 @@ def batched_receipt(device: torch.device | str, bucket_rule: str = BUCKET_RULE) 
 
 class Counts:
     """Each row's length along one axis of a padded batch: ``host`` (a tuple of ints, one per
-    row) and ``dev`` (the same, a long tensor on the batch's device).
+    row), ``dev`` (the same, a long tensor on the batch's device), ``width`` (the axis's
+    canonical width, when known) and ``padded`` (the rows belong to a step-count bucket).
 
     A batch of rows padded to one canonical width keeps each row's real values at the front
     of the padded axis. A reduction over that axis passes :meth:`lengths`, so the padded
     positions are masked to exact zeros at fixed positions; every per-row offset (a window,
     a half, a trajectory point) is gathered to the front of its own buffer first, so a row's
     values sit at the positions, and in the tiles, they occupy in an unpadded row of its own
-    length. Derived counts (:meth:`minus`, :meth:`repeat`, :meth:`derive`) are computed on
-    the device, never copied to it."""
+    length. For ``padded`` counts every reduction is masked and every gathered buffer has a
+    canonical width (the largest any count up to ``width`` needs), so the kernels a row's
+    values pass through are a function of its own count and its bucket, never of its
+    batchmates. Derived counts (:meth:`minus`, :meth:`repeat`, :meth:`derive`) are computed
+    on the device, never copied to it."""
 
-    __slots__ = ("host", "dev", "_lo", "_hi", "_cache")
+    __slots__ = ("host", "dev", "width", "padded", "_lo", "_hi", "_cache")
 
-    def __init__(self, host: Sequence[int], dev: Tensor) -> None:
+    def __init__(self, host: Sequence[int], dev: Tensor, width: int | None = None,
+                 padded: bool = False) -> None:
         self.host = tuple(int(c) for c in host)
         self.dev = dev
+        self.width = None if width is None else int(width)
+        self.padded = bool(padded)
         self._lo = min(self.host) if self.host else 0
         self._hi = max(self.host) if self.host else 0
         self._cache: dict[Any, Any] = {}
 
     @classmethod
-    def of(cls, host: Sequence[int], device: torch.device | str) -> "Counts":
+    def of(cls, host: Sequence[int], device: torch.device | str, width: int | None = None,
+           padded: bool = False) -> "Counts":
         host = tuple(int(c) for c in host)
-        return cls(host, torch.as_tensor(host, dtype=torch.long, device=device))
+        return cls(host, torch.as_tensor(host, dtype=torch.long, device=device), width, padded)
 
     @property
     def lo(self) -> int:
@@ -243,18 +251,19 @@ class Counts:
         return self._hi
 
     def uniform(self, width: int) -> bool:
-        """Whether every row fills ``width``."""
-        return self._lo == self._hi == int(width)
+        """Whether every row fills ``width`` and the rows are not a padded bucket."""
+        return not self.padded and self._lo == self._hi == int(width)
 
-    def derive(self, host: Sequence[int], dev: Tensor) -> "Counts":
-        return Counts(host, dev)
+    def derive(self, host: Sequence[int], dev: Tensor, width: int | None = None) -> "Counts":
+        return Counts(host, dev, width, self.padded)
 
     def minus(self, k: int) -> "Counts":
         """Each count less ``k``, at least zero."""
         key = ("minus", int(k))
         if key not in self._cache:
+            width = None if self.width is None else max(0, self.width - k)
             self._cache[key] = Counts([max(0, c - k) for c in self.host],
-                                      (self.dev - k).clamp_min(0))
+                                      (self.dev - k).clamp_min(0), width, self.padded)
         return self._cache[key]
 
     def repeat(self, r: int) -> "Counts":
@@ -262,7 +271,7 @@ class Counts:
         key = ("repeat", int(r))
         if key not in self._cache:
             self._cache[key] = Counts([c for c in self.host for _ in range(r)],
-                                      self.dev.repeat_interleave(r))
+                                      self.dev.repeat_interleave(r), self.width, self.padded)
         return self._cache[key]
 
     def memo(self, key: Any, build) -> Any:
@@ -273,7 +282,7 @@ class Counts:
 
     def lengths(self, x: Tensor) -> Tensor | None:
         """The ``lengths`` argument of a primitive reducing ``x``'s last dimension, whose
-        first dimension is the rows; ``None`` when every row fills it."""
+        first dimension is the rows; ``None`` when every row fills it outside a bucket."""
         if self.uniform(x.shape[-1]):
             return None
         if x.shape[0] != len(self.host):
@@ -287,6 +296,19 @@ class Counts:
             cols = torch.arange(width, device=self.dev.device)
             self._cache[key] = cols[None, :] < self.dev[:, None]
         return self._cache[key]
+
+
+_CANONICAL: dict[tuple[Any, int], int] = {}
+
+
+def canonical_size(key: Any, width: int, size_of) -> int:
+    """The largest ``size_of(n)`` over every count ``0 <= n <= width``: the width of a
+    gathered buffer that holds any row of a bucket, whatever its batchmates."""
+    hit = _CANONICAL.get((key, int(width)))
+    if hit is None:
+        hit = max(1, max(int(size_of(n)) for n in range(int(width) + 1)))
+        _CANONICAL[(key, int(width))] = hit
+    return hit
 
 
 def uniform_counts(rows: int, width: int, device: torch.device | str) -> Counts:
@@ -314,17 +336,21 @@ def window_steps(x: Tensor, start: Tensor, width: int, dim: int = 1) -> Tensor:
 
 def per_row_index(counts: Counts, key: Any, picks) -> tuple[Tensor | list[int], Counts]:
     """Each row's positions ``picks(n)`` for its count ``n``: one list when every row has the
-    same count, else ``[rows, m]`` (padded with the last position); and how many each row has."""
+    same count outside a bucket, else ``[rows, m]`` (padded with the last position, ``m`` the
+    canonical width for padded counts); and how many each row has."""
     def build():
         lists = [list(picks(n)) for n in counts.host]
         sizes = [len(p) for p in lists]
         device = counts.dev.device
-        if len(set(counts.host)) <= 1:
-            return lists[0] if lists else [], Counts.of(sizes, device)
-        width = max(sizes)
+        if not counts.padded and len(set(counts.host)) <= 1:
+            return lists[0] if lists else [], Counts.of(sizes, device, len(lists[0]) if lists else 0)
+        if counts.padded and counts.width is not None:
+            width = canonical_size(("index", key), counts.width, lambda n: len(list(picks(n))))
+        else:
+            width = max(1, max(sizes))
         padded = [p + [p[-1] if p else 0] * (width - len(p)) for p in lists]
         return (torch.as_tensor(padded, dtype=torch.long, device=device).reshape(len(lists), width),
-                Counts.of(sizes, device))
+                Counts.of(sizes, device, width, counts.padded))
     return counts.memo(("index", key), build)
 
 
@@ -398,7 +424,10 @@ def _windowed_rows(x: Tensor, n_windows: int, counts: Counts) -> Tensor:
         last = i == n_windows - 1
         sizes = [c - i * w if last else w for c, w in zip(counts.host, widths, strict=True)]
         size_dev = n - i * width if last else width
-        segment = window_steps(x, width * i, max(1, max(sizes)))
+        canonical = canonical_size(("window", n_windows, last), x.shape[1],
+                                   lambda c: c - (n_windows - 1) * (c // n_windows) if last
+                                   else c // n_windows)
+        segment = window_steps(x, width * i, canonical)
         seg_counts = counts.derive(sizes, size_dev)
         lengths = seg_counts.lengths(segment)
         pieces.extend((row_mean(segment, lengths=lengths), row_std(segment, lengths=lengths),
@@ -836,6 +865,7 @@ __all__ = (
     "batched_receipt",
     "block_output_features",
     "bucket_width",
+    "canonical_size",
     "eigvalsh_path",
     "finish_rows",
     "hybrid_lane_id",

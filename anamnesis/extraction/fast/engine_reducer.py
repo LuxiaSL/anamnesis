@@ -371,7 +371,8 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
     first = rows[keep[0]]
     starts = [spans[b].start for b in keep]
     steps = int(stacked["depth"].shape[1])
-    counts = Counts.of([int(rows[b].positions) for b in keep], lane.device)
+    padded = width is not None and bucket_rule != "exact-steps" and steps >= BUCKET_FLOOR
+    counts = Counts.of([int(rows[b].positions) for b in keep], lane.device, steps, padded)
     committed = [_pad_stack([rows[b].surfaces["committed"][c] for b in keep], width, lane.device)
                  for c in range(len(first.surfaces["committed"]))]
     try:

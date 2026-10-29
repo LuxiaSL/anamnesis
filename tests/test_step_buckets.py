@@ -341,3 +341,36 @@ def test_the_exact_step_check_bites_on_ignored_masks(monkeypatch):
     bucketed = reduce("cpu", 8, made)
     for b, e in zip(bucketed, exact, strict=True):
         assert b.features.tobytes() != e.features.tobytes()
+
+
+def _launches(monkeypatch) -> list[tuple]:
+    """Every primitive call from here on, as (operation, width, masked by lengths, masked by
+    a boolean mask, dtype)."""
+    from anamnesis.extraction.fast import invariant_ops
+
+    calls: list[tuple] = []
+    original = invariant_ops._reduce
+
+    def recorded(op, x, y, lengths, mask, backend):
+        calls.append((op, x.shape[-1], lengths is not None, mask is not None, str(x.dtype)))
+        return original(op, x, y, lengths, mask, backend)
+    monkeypatch.setattr(invariant_ops, "_reduce", recorded)
+    return calls
+
+
+@pytest.mark.parametrize("target", [13, 16, 61, 64], ids=lambda n: f"steps{n}")
+def test_a_rows_kernels_do_not_depend_on_its_bucketmates(monkeypatch, target):
+    """A row's reductions run at widths, and with masks, fixed by its own count and its
+    bucket: a GPU kernel's bytes may follow its width, so batchmates of other step counts
+    must not change any width a row is reduced at. Checked as the sequence of primitive
+    calls for the row alone and for the row beside the longest and shortest counts of its
+    bucket."""
+    calls = _launches(monkeypatch)
+    row = signed_row(target, 4, 31, 8)
+    reduce("cpu", 8, [row])
+    alone = list(calls)
+    width = bucket_width(target)
+    for mate in sorted({max(BUCKET_FLOOR, width // 2 + 1), width} - {target}):
+        calls.clear()
+        reduce("cpu", 8, [row, signed_row(mate, 2, 32, 8)])
+        assert calls == alone, (target, mate)

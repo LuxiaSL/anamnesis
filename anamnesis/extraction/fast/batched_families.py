@@ -185,7 +185,7 @@ def _halves(x: Tensor, counts: Counts) -> tuple[Tensor, Counts, Tensor, Counts]:
     mid = counts.dev // 2
     first = counts.derive([n // 2 for n in counts.host], mid)
     second = counts.derive([n - n // 2 for n in counts.host], counts.dev - mid)
-    return x, first, window_steps(x, mid, max(1, second.hi)), second
+    return x, first, window_steps(x, mid, max(1, steps - steps // 2)), second
 
 
 def _half_drift(x: Tensor, counts: Counts) -> Tensor:
