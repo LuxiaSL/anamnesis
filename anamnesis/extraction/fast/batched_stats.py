@@ -114,8 +114,49 @@ def eigvalsh_path(device: torch.device | str) -> str:
 EFF_DIM = "norms"
 """How a hybrid row computes every effective dimension: from Frobenius norms."""
 
-BUCKET_RULE = "exact-steps"
-"""Rows are batched only with rows of the same step count; nothing is padded."""
+BUCKET_FLOOR = 2
+"""Rows of fewer steps than this have a feature schema of their own (a one-step span lacks
+names the others carry), so they are batched only with rows of their exact step count."""
+
+SMALLEST_BUCKET = 8
+"""The canonical width of every rule's first bucket: rows of ``BUCKET_FLOOR`` to eight steps
+share it."""
+
+BUCKET_RULES = ("exact-steps", "pow2", "pow4", "tail256")
+"""The step-count bucket rules (:func:`bucket_width`), for a row of ``n >= BUCKET_FLOOR`` steps:
+
+* ``exact-steps``: rows are batched only with rows of the same step count; nothing is padded.
+* ``pow2``: the smallest power of two at or above ``n``, at least :data:`SMALLEST_BUCKET`.
+* ``pow4``: the smallest ``8 * 4**i`` at or above ``n`` (8, 32, 128, 512, ...).
+* ``tail256``: 256 steps (the signing decoder's tail) up to 256, and the smallest power of two
+  above that.
+
+Below :data:`BUCKET_FLOOR` every rule is ``exact-steps``."""
+
+BUCKET_RULE = "pow2"
+"""The default bucket rule. It pads a row to at most twice its steps, so small batches and small
+devices stay cheap. A serving fleet that reduces full 128-row batches is fastest under
+``tail256``, and passes it explicitly; every signer of one lane must name the same rule."""
+
+
+def bucket_width(steps: int, rule: str = BUCKET_RULE) -> int:
+    """The canonical step width a row of ``steps`` steps is padded to under ``rule``."""
+    steps = int(steps)
+    if rule not in BUCKET_RULES:
+        raise ValueError(f"bucket rule must be one of {BUCKET_RULES}, not {rule!r}")
+    if steps < 1:
+        raise ValueError(f"a row needs at least one step, not {steps}")
+    if rule == "exact-steps" or steps < BUCKET_FLOOR:
+        return steps
+    pow2 = max(SMALLEST_BUCKET, 1 << (steps - 1).bit_length())
+    if rule == "pow2":
+        return pow2
+    if rule == "tail256":
+        return max(256, pow2)
+    width = SMALLEST_BUCKET
+    while width < steps:
+        width *= 4
+    return width
 
 HYBRID_LANE_PREFIX = "engine-stats-b1-"
 """Every hybrid row's lane id starts with this; no per-row statistics id does."""
@@ -149,22 +190,181 @@ def row_backend(device: torch.device | str) -> str:
     return "triton" if device.type == "cuda" and invariant_ops.HAVE_TRITON else "torch"
 
 
-def hybrid_lane_id(lane: GpuFeatureLane, capture_identity: Mapping[str, Any]) -> str:
-    """The lane id of a row whose families were reduced batched."""
+def hybrid_lane_id(lane: GpuFeatureLane, capture_identity: Mapping[str, Any],
+                   bucket_rule: str = BUCKET_RULE) -> str:
+    """The lane id of a row whose families were reduced batched under ``bucket_rule``."""
     return HYBRID_LANE_PREFIX + hashlib.sha256(json.dumps(
-        dict(stats_lane_id=stats_lane_id(lane, capture_identity), **batched_receipt(lane.device)),
+        dict(stats_lane_id=stats_lane_id(lane, capture_identity),
+             **batched_receipt(lane.device, bucket_rule)),
         sort_keys=True, default=str).encode()).hexdigest()
 
 
-def batched_receipt(device: torch.device | str) -> dict[str, Any]:
-    """What a hybrid row's receipt records of its batched reduction on ``device``, and its
-    lane id folds in."""
+def batched_receipt(device: torch.device | str, bucket_rule: str = BUCKET_RULE) -> dict[str, Any]:
+    """What a hybrid row's receipt records of its batched reduction on ``device`` under
+    ``bucket_rule``, and its lane id folds in."""
+    if bucket_rule not in BUCKET_RULES:
+        raise ValueError(f"bucket rule must be one of {BUCKET_RULES}, not {bucket_rule!r}")
     return dict(families=list(BATCHED_FAMILIES), source_sha256=BATCHED_SOURCE_SHA256,
                 families_source_sha256=FAMILIES_SOURCE_SHA256,
                 attention_source_sha256=ATTENTION_SOURCE_SHA256,
                 invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256,
-                bucket_rule=BUCKET_RULE, row_backend=row_backend(device), eff_dim=EFF_DIM,
+                bucket_rule=bucket_rule, bucket_floor=BUCKET_FLOOR,
+                smallest_bucket=SMALLEST_BUCKET,
+                row_backend=row_backend(device), eff_dim=EFF_DIM,
                 topk_ties=TOPK_TIES, eigvalsh=eigvalsh_path(device), per_row=list(PER_ROW_EXCEPTIONS))
+
+
+class Counts:
+    """Each row's length along one axis of a padded batch: ``host`` (a tuple of ints, one per
+    row), ``dev`` (the same, a long tensor on the batch's device), ``width`` (the axis's
+    canonical width, when known) and ``padded`` (the rows belong to a step-count bucket).
+
+    A batch of rows padded to one canonical width keeps each row's real values at the front
+    of the padded axis. A reduction over that axis passes :meth:`lengths`, so the padded
+    positions are masked to exact zeros at fixed positions; every per-row offset (a window,
+    a half, a trajectory point) is gathered to the front of its own buffer first, so a row's
+    values sit at the positions, and in the tiles, they occupy in an unpadded row of its own
+    length. For ``padded`` counts every reduction is masked and every gathered buffer has a
+    canonical width (the largest any count up to ``width`` needs), so the kernels a row's
+    values pass through are a function of its own count and its bucket, never of its
+    batchmates. Derived counts (:meth:`minus`, :meth:`repeat`, :meth:`derive`) are computed
+    on the device, never copied to it."""
+
+    __slots__ = ("host", "dev", "width", "padded", "_lo", "_hi", "_cache")
+
+    def __init__(self, host: Sequence[int], dev: Tensor, width: int | None = None,
+                 padded: bool = False) -> None:
+        self.host = tuple(int(c) for c in host)
+        self.dev = dev
+        self.width = None if width is None else int(width)
+        self.padded = bool(padded)
+        self._lo = min(self.host) if self.host else 0
+        self._hi = max(self.host) if self.host else 0
+        self._cache: dict[Any, Any] = {}
+
+    @classmethod
+    def of(cls, host: Sequence[int], device: torch.device | str, width: int | None = None,
+           padded: bool = False) -> "Counts":
+        host = tuple(int(c) for c in host)
+        return cls(host, torch.as_tensor(host, dtype=torch.long, device=device), width, padded)
+
+    @property
+    def lo(self) -> int:
+        return self._lo
+
+    @property
+    def hi(self) -> int:
+        return self._hi
+
+    @property
+    def reach(self) -> int:
+        """The largest count the rows' reduction provides for: the canonical width for padded
+        counts that know it (so a bucket's branches are its own, never its batchmates'), else
+        the largest count."""
+        return self.width if self.padded and self.width is not None else self._hi
+
+    def uniform(self, width: int) -> bool:
+        """Whether every row fills ``width`` and the rows are not a padded bucket."""
+        return not self.padded and self._lo == self._hi == int(width)
+
+    def derive(self, host: Sequence[int], dev: Tensor, width: int | None = None) -> "Counts":
+        return Counts(host, dev, width, self.padded)
+
+    def minus(self, k: int) -> "Counts":
+        """Each count less ``k``, at least zero."""
+        key = ("minus", int(k))
+        if key not in self._cache:
+            width = None if self.width is None else max(0, self.width - k)
+            self._cache[key] = Counts([max(0, c - k) for c in self.host],
+                                      (self.dev - k).clamp_min(0), width, self.padded)
+        return self._cache[key]
+
+    def repeat(self, r: int) -> "Counts":
+        """Each count repeated ``r`` times in place (rows ``[B]`` to ``[B * r]``, row-major)."""
+        key = ("repeat", int(r))
+        if key not in self._cache:
+            self._cache[key] = Counts([c for c in self.host for _ in range(r)],
+                                      self.dev.repeat_interleave(r), self.width, self.padded)
+        return self._cache[key]
+
+    def memo(self, key: Any, build) -> Any:
+        """A value derived from these counts, built once."""
+        if key not in self._cache:
+            self._cache[key] = build()
+        return self._cache[key]
+
+    def lengths(self, x: Tensor) -> Tensor | None:
+        """The ``lengths`` argument of a primitive reducing ``x``'s last dimension, whose
+        first dimension is the rows; ``None`` when every row fills it outside a bucket."""
+        if self.uniform(x.shape[-1]):
+            return None
+        if x.shape[0] != len(self.host):
+            raise ValueError(f"{len(self.host)} counts for a batch of {x.shape[0]} rows")
+        return self.dev.view(-1, *([1] * (x.ndim - 2))).expand(x.shape[:-1])
+
+    def mask(self, width: int) -> Tensor:
+        """``[rows, width]``: which positions of each row are real."""
+        key = ("mask", int(width))
+        if key not in self._cache:
+            cols = torch.arange(width, device=self.dev.device)
+            self._cache[key] = cols[None, :] < self.dev[:, None]
+        return self._cache[key]
+
+
+_CANONICAL: dict[tuple[Any, int], int] = {}
+
+
+def canonical_size(key: Any, width: int, size_of) -> int:
+    """The largest ``size_of(n)`` over every count ``0 <= n <= width``: the width of a
+    gathered buffer that holds any row of a bucket, whatever its batchmates."""
+    hit = _CANONICAL.get((key, int(width)))
+    if hit is None:
+        hit = max(1, max(int(size_of(n)) for n in range(int(width) + 1)))
+        _CANONICAL[(key, int(width))] = hit
+    return hit
+
+
+def uniform_counts(rows: int, width: int, device: torch.device | str) -> Counts:
+    """Counts of ``rows`` rows that each fill ``width``."""
+    return Counts([width] * rows, torch.full((rows,), int(width), dtype=torch.long, device=device))
+
+
+def take_steps(x: Tensor, index: Tensor | Sequence[int], dim: int = 1) -> Tensor:
+    """``x`` indexed along ``dim`` by ``index``: one list for every row (a plain index), or a
+    long tensor ``[rows, m]`` of each row's own positions (a gather, clamped into range)."""
+    if not isinstance(index, Tensor):
+        return x[(slice(None),) * dim + (list(index),)]
+    idx = index.clamp(0, x.shape[dim] - 1)
+    moved = x.movedim(dim, 1)
+    view = idx.view(idx.shape[0], idx.shape[1], *([1] * (moved.ndim - 2)))
+    out = moved.gather(1, view.expand(moved.shape[0], idx.shape[1], *moved.shape[2:]))
+    return out.movedim(1, dim)
+
+
+def window_steps(x: Tensor, start: Tensor, width: int, dim: int = 1) -> Tensor:
+    """Each row's ``width`` positions along ``dim`` from its own ``start [rows]``, at the front."""
+    index = start[:, None] + torch.arange(width, device=start.device)[None, :]
+    return take_steps(x, index, dim)
+
+
+def per_row_index(counts: Counts, key: Any, picks) -> tuple[Tensor | list[int], Counts]:
+    """Each row's positions ``picks(n)`` for its count ``n``: one list when every row has the
+    same count outside a bucket, else ``[rows, m]`` (padded with the last position, ``m`` the
+    canonical width for padded counts); and how many each row has."""
+    def build():
+        lists = [list(picks(n)) for n in counts.host]
+        sizes = [len(p) for p in lists]
+        device = counts.dev.device
+        if not counts.padded and len(set(counts.host)) <= 1:
+            return lists[0] if lists else [], Counts.of(sizes, device, len(lists[0]) if lists else 0)
+        if counts.padded and counts.width is not None:
+            width = canonical_size(("index", key), counts.width, lambda n: len(list(picks(n))))
+        else:
+            width = max(1, max(sizes))
+        padded = [p + [p[-1] if p else 0] * (width - len(p)) for p in lists]
+        return (torch.as_tensor(padded, dtype=torch.long, device=device).reshape(len(lists), width),
+                Counts.of(sizes, device, width, counts.padded))
+    return counts.memo(("index", key), build)
 
 
 @dataclass(frozen=True)
@@ -189,20 +389,115 @@ def _dft_basis(device: torch.device) -> tuple[Tensor, Tensor]:
     return angle.cos().to(device), angle.sin().to(device)
 
 
-def _slope_rows(y: Tensor) -> Tensor:
-    """``ops.slope`` of each row of ``y [B, m]`` with every point kept."""
+@lru_cache(maxsize=None)
+def _abscissa_table(width: int, device: torch.device) -> tuple[Tensor, Tensor, Tensor]:
+    """``ops._unit_abscissa(m)`` for every ``m < width``: the centred abscissa ``[width,
+    width]`` (row ``m`` holds the ``m`` terms, then zeros), the clamped counts and the clamped
+    squared sums ``[width]``; row ``m`` is the unpadded constants' bytes."""
+    xc = torch.zeros(width, width, dtype=torch.float64, device=device)
+    count = torch.ones(width, dtype=torch.float64, device=device)
+    denominator = torch.ones(width, dtype=torch.float64, device=device)
+    for m in range(2, width):
+        _, c, x, d = _unit_abscissa(m, device)
+        xc[m, :m] = x
+        count[m] = c
+        denominator[m] = d
+    return xc, count, denominator
+
+
+def _slope_rows(y: Tensor, counts: Counts | None = None) -> Tensor:
+    """``ops.slope`` of each row of ``y [B, m]`` with every point kept; with ``counts``, of
+    each row's first ``counts`` points (zero below two)."""
     m = y.shape[-1]
-    if m < 2:
+    if counts is None or counts.uniform(m):
+        if m < 2:
+            return y.new_zeros(y.shape[:-1])
+        w, count, xc, denominator = _unit_abscissa(m, y.device)
+        ym = row_sum(y * w) / count
+        return row_sum(xc * (y - ym[..., None]) * w) / denominator
+    if counts.reach < 2:
         return y.new_zeros(y.shape[:-1])
-    w, count, xc, denominator = _unit_abscissa(m, y.device)
-    ym = row_sum(y * w) / count
-    return row_sum(xc * (y - ym[..., None]) * w) / denominator
+    table, count_t, den_t = _abscissa_table(1 << m.bit_length(), y.device)
+    n = counts.dev
+    xc = table[n][:, :m]
+    lengths = counts.lengths(y)
+    ym = row_sum(y, lengths=lengths) / count_t[n]
+    value = row_sum(xc * (y - ym[..., None]), lengths=lengths) / den_t[n]
+    return torch.where(n < 2, value.new_zeros(()), value)
 
 
-def _temporal_rows(x: Tensor, n_windows: int, include_stft: bool) -> Tensor:
-    """``ops.temporal`` of each row of ``x [B, m]``: ``[B, 3 * n_windows (+ 5)]`` float32."""
+def _windowed_rows(x: Tensor, n_windows: int, counts: Counts) -> Tensor:
+    """The windowed operators of each row's first ``counts`` values: ``[B, 3 * n_windows]``,
+    each window gathered to the front of its own buffer; zero for a row below four."""
+    n = counts.dev
+    width = n // n_windows
+    widths = [c // n_windows for c in counts.host]
+    pieces = []
+    for i in range(n_windows):
+        last = i == n_windows - 1
+        sizes = [c - i * w if last else w for c, w in zip(counts.host, widths, strict=True)]
+        size_dev = n - i * width if last else width
+        canonical = canonical_size(("window", n_windows, last), x.shape[1],
+                                   lambda c: c - (n_windows - 1) * (c // n_windows) if last
+                                   else c // n_windows)
+        segment = window_steps(x, width * i, canonical)
+        seg_counts = counts.derive(sizes, size_dev, canonical)
+        lengths = seg_counts.lengths(segment)
+        pieces.extend((row_mean(segment, lengths=lengths), row_std(segment, lengths=lengths),
+                       _slope_rows(segment, seg_counts)))
+    windowed = torch.stack(pieces, dim=1)
+    return torch.where((n < 4)[:, None], windowed.new_zeros(()), windowed)
+
+
+def _spectrum_rows(x: Tensor) -> Tensor:
+    """The short-time spectrum of each row of ``x [B, m]`` over all ``m`` values, frames
+    ``[B, F, 64]`` reduced by a direct DFT; returns the power per bin ``[B, 33, F]`` and the
+    STFT constants."""
+    n = x.shape[1]
+    if n < 64:
+        x = torch.nn.functional.pad(x, (0, 64 - n))
+    extended = torch.nn.functional.pad(x, (32, 32 + (-x.shape[1]) % 32))
+    window, window_sum, freq, bands = _stft_constants(x.device)
+    frames = (extended.unfold(1, 64, 32) * window).unsqueeze(2)  # [B, F, 1, 64]
+    cos_basis, sin_basis = _dft_basis(x.device)
+    shape = (x.shape[0], frames.shape[1], 33, 64)
+    re = row_dot(frames.expand(shape), cos_basis.expand(shape)) / window_sum
+    im = row_dot(frames.expand(shape), sin_basis.expand(shape)) / window_sum
+    return (re.square() + im.square()).transpose(1, 2).contiguous(), freq, bands
+
+
+def _spectral_summary(power: Tensor, freq: Tensor, bands) -> Tensor:
+    total = row_sum(power)
+    p = power / total.clamp_min(1e-30)[:, None]
+    centroid = row_sum(p * freq)
+    bandwidth = row_sum(p * (freq - centroid[:, None]).square()).sqrt()
+    band_mass = [row_sum(p[:, int(b[0]) : int(b[-1]) + 1].contiguous()) for b in bands]
+    spectral = torch.stack((centroid, bandwidth, *band_mass), dim=1)
+    return torch.where((total < 1e-12)[:, None], spectral.new_zeros(()), spectral)
+
+
+def _temporal_rows(x: Tensor, n_windows: int, include_stft: bool,
+                   counts: Counts | None = None) -> Tensor:
+    """``ops.temporal`` of each row of ``x [B, m]``: ``[B, 3 * n_windows (+ 5)]`` float32.
+
+    With ``counts``, of each row's first ``counts`` values: every window is gathered to the
+    front of its own buffer, the spectrum's values past a row's count are exact zeros (as the
+    unpadded row's zero padding is) and its frame mean runs over the row's own frames, and
+    the placeholders (windows below four values, the spectrum below eight) are per row."""
     x = x.float().double()
     batch, n = x.shape
+    if counts is not None and not counts.uniform(n):
+        windowed = _windowed_rows(x, n_windows, counts)
+        if not include_stft:
+            return windowed.float()
+        live = counts.dev
+        x = torch.where(counts.mask(n), x, x.new_zeros(()))
+        power, freq, bands = _spectrum_rows(x)
+        frames = (live.clamp_min(64) + 31) // 32 + 1
+        power = row_mean(power, lengths=frames[:, None].expand(power.shape[:2]))  # [B, 33]
+        spectral = _spectral_summary(power, freq, bands)
+        spectral = torch.where((live < 8)[:, None], spectral.new_zeros(()), spectral)
+        return torch.cat((windowed, spectral), dim=1).float()
     if n < 4:
         windowed = x.new_zeros(batch, 3 * n_windows)
     else:
@@ -220,23 +515,8 @@ def _temporal_rows(x: Tensor, n_windows: int, include_stft: bool) -> Tensor:
     if n < 8:
         spectral = x.new_zeros(batch, 5)
     else:
-        if n < 64:
-            x = torch.nn.functional.pad(x, (0, 64 - n))
-        extended = torch.nn.functional.pad(x, (32, 32 + (-x.shape[1]) % 32))
-        window, window_sum, freq, bands = _stft_constants(x.device)
-        frames = (extended.unfold(1, 64, 32) * window).unsqueeze(2)  # [B, F, 1, 64]
-        cos_basis, sin_basis = _dft_basis(x.device)
-        shape = (batch, frames.shape[1], 33, 64)
-        re = row_dot(frames.expand(shape), cos_basis.expand(shape)) / window_sum
-        im = row_dot(frames.expand(shape), sin_basis.expand(shape)) / window_sum
-        power = row_mean((re.square() + im.square()).transpose(1, 2).contiguous())  # [B, 33]
-        total = row_sum(power)
-        p = power / total.clamp_min(1e-30)[:, None]
-        centroid = row_sum(p * freq)
-        bandwidth = row_sum(p * (freq - centroid[:, None]).square()).sqrt()
-        band_mass = [row_sum(p[:, int(b[0]) : int(b[-1]) + 1].contiguous()) for b in bands]
-        spectral = torch.stack((centroid, bandwidth, *band_mass), dim=1)
-        spectral = torch.where((total < 1e-12)[:, None], spectral.new_zeros(()), spectral)
+        power, freq, bands = _spectrum_rows(x)
+        spectral = _spectral_summary(row_mean(power), freq, bands)  # [B, 33] power
     return torch.cat((windowed, spectral), dim=1).float()
 
 
@@ -281,12 +561,13 @@ class _Columns:
 
 
 def _residual_trajectory(cols: _Columns, layer: int, corrected: Tensor, raw_first_norm: Tensor,
-                         n_windows: int, include_stft: bool) -> None:
-    """``FamilyReducer.residual_trajectory`` for ``corrected [B, steps, hidden]``."""
+                         n_windows: int, include_stft: bool, counts: Counts) -> None:
+    """``FamilyReducer.residual_trajectory`` for ``corrected [B, steps, hidden]``, each row
+    over its first ``counts`` steps."""
     from anamnesis.extraction.feature_families.residual_stream import _trajectory_feature_names
 
     batch, steps = corrected.shape[:2]
-    if steps < 3:
+    if counts.reach < 3:
         names = _trajectory_feature_names(layer, n_windows, include_stft)
         cols.block(names, corrected.new_zeros(batch, len(names), dtype=torch.float64))
         return
@@ -296,31 +577,56 @@ def _residual_trajectory(cols: _Columns, layer: int, corrected: Tensor, raw_firs
     vn = row_norm(vel)
     angles = _cos(vel[:, :-1].float(), vel[:, 1:].float()).clamp(-1, 1).acos()
     accel = row_norm(vel[:, 1:] - vel[:, :-1])
+    one, two = counts.minus(1), counts.minus(2)
+    l1, l2 = one.lengths(vn), two.lengths(angles)
+    last = x[:, -1] if counts.uniform(steps) else take_steps(x, (counts.dev - 1)[:, None])[:, 0]
     names = [prefix + "_velocity_norm_mean", prefix + "_velocity_norm_std",
              prefix + "_direction_change_mean", prefix + "_direction_change_std",
              prefix + "_directness",
              prefix + "_acceleration_norm_mean", prefix + "_acceleration_norm_std"]
-    values = [row_mean(vn), row_std(vn), row_mean(angles), row_std(angles),
-              row_norm(x[:, -1] - x[:, 0]) / row_sum(vn).clamp_min(1e-12),
-              row_mean(accel), row_std(accel)]
+    values = [row_mean(vn, lengths=l1), row_std(vn, lengths=l1), row_mean(angles, lengths=l2),
+              row_std(angles, lengths=l2),
+              row_norm(last - x[:, 0]) / row_sum(vn, lengths=l1).clamp_min(1e-12),
+              row_mean(accel, lengths=l2), row_std(accel, lengths=l2)]
     names += _operator_names(prefix + "_velocity_norm", n_windows, include_stft)
     names += _operator_names(prefix + "_direction_change", n_windows, include_stft)
     block = torch.cat([torch.stack(values, dim=1),
-                       _temporal_rows(vn, n_windows, include_stft).double(),
-                       _temporal_rows(angles, n_windows, include_stft).double()], dim=1)
+                       _temporal_rows(vn, n_windows, include_stft, one).double(),
+                       _temporal_rows(angles, n_windows, include_stft, two).double()], dim=1)
     block = torch.where((raw_first_norm < 1e-6)[:, None], block.new_zeros(()), block)
+    if counts.lo < 3:  # rows below three steps take the placeholder
+        block = torch.where((counts.dev < 3)[:, None], block.new_zeros(()), block)
     cols.block(names, block)
 
 
+def spectral_smoothness(x: Tensor, index: Tensor | Sequence[int], k: Counts, lap: Tensor) -> Tensor:
+    """The smoothness of each row's step norms over its spectral graph: ``x [B, steps, width]``,
+    the spectral steps ``index`` (one list, or ``[B, K]``), how many each row has, and its
+    normalised Laplacian ``lap [B, K, K]``, zero-padded past the row's own size."""
+    signal = row_norm(take_steps(x, index).double())  # [B, K]
+    if not k.uniform(signal.shape[1]):
+        signal = torch.where(k.mask(signal.shape[1]), signal, signal.new_zeros(()))
+    shape = lap.shape
+    lap_t = lap.transpose(1, 2).contiguous()
+    lap_signal = row_dot(lap_t, signal[:, None, :].expand(shape).contiguous(),
+                         lengths=k.lengths(lap_t))
+    lengths = k.lengths(signal)
+    return (row_dot(lap_signal, signal, lengths=lengths)
+            / row_sumsq(signal, lengths=lengths).clamp_min(1e-12))
+
+
 def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence[int],
-                          laplacians: Mapping[int, tuple[Sequence[int], Tensor]]) -> BlockOutputs:
-    """The block-output family of ``B`` rows of one step count.
+                          laplacians: Mapping[int, tuple],
+                          counts: Counts | None = None) -> BlockOutputs:
+    """The block-output family of ``B`` rows.
 
     ``hidden [B, steps, layers, width]`` is each row's block outputs in the engine's layout
     (the signed row's ``depth``); ``starts[b]`` is row ``b``'s prompt length, which selects
-    its positional means; ``laplacians[layer]`` is, at each sampled layer, the spectral
-    steps (the same for every row of one step count) and ``[B, k, k]``, each row's
-    normalised Laplacian as its attention reduction left it.
+    its positional means; ``counts`` is each row's own step count (default: every row fills
+    ``steps``), the rest of its steps being padding; ``laplacians[layer]`` is, at each sampled
+    layer, the spectral steps (one list, or each row's ``[B, K]``), ``[B, K, K]``, each row's
+    normalised Laplacian as its attention reduction left it, and how many spectral steps each
+    row has; the counts may be left out when every row has the same spectral steps.
 
     Raises
     ------
@@ -333,9 +639,13 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
     batch, steps, layers, width = hidden.shape
     if len(starts) != batch:
         raise ExternalCaptureError(f"{batch} rows but {len(starts)} starts")
+    device = lane.device
+    counts = counts if counts is not None else uniform_counts(batch, steps, device)
+    if len(counts.host) != batch or counts.hi > steps or counts.lo < 1:
+        raise ExternalCaptureError(f"step counts {counts.host} for {batch} rows of {steps} steps")
     pm = lane.pm
     if pm.ndim != 3 or pm.shape[0] < layers + 1 or pm.shape[2] != width or any(
-            pm.shape[1] < int(s) + steps for s in starts):
+            pm.shape[1] < int(s) + n for s, n in zip(starts, counts.host, strict=True)):
         raise ExternalCaptureError("the lane's positional means do not cover this capture")
     if not hidden.is_floating_point():
         raise ExternalCaptureError("hidden must be floating point")
@@ -345,17 +655,21 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
     if missing:
         raise ExternalCaptureError(f"no spectral Laplacian for sampled layers {missing}")
     n_windows, include_stft = families.temporal_n_windows, families.enable_stft
-    device = lane.device
-    traj = trajectory_indices(steps, config.trajectory_points)
-    pca_index = trajectory_indices(steps, config.pca_temporal_samples)
+    traj, _ = per_row_index(counts, ("traj", config.trajectory_points),
+                            lambda n: trajectory_indices(n, config.trajectory_points))
+    pca_index, _ = per_row_index(counts, ("traj", config.pca_temporal_samples),
+                                 lambda n: trajectory_indices(n, config.pca_temporal_samples))
     k = config.pca_components
 
     cols = _Columns()
     per_layer = max(1, batch * steps * width * 8 * 4)
     chunk = max(1, min(layers, WORKING_BYTES // per_layer))
     table = device_positional_means(pm, device)
-    positions = torch.as_tensor([[int(s) + t for t in range(steps)] for s in starts],
-                                dtype=torch.long, device=device)  # [B, steps]
+    start_t = torch.as_tensor([int(s) for s in starts], dtype=torch.long, device=device)
+    step_t = torch.arange(steps, device=device)[None, :]
+    if not counts.uniform(steps):  # a padded step reads its row's last real position
+        step_t = torch.minimum(step_t, (counts.dev - 1)[:, None])
+    positions = start_t[:, None] + step_t  # [B, steps]
     previous: Tensor | None = None
     for first in range(0, layers, chunk):
         last = min(layers, first + chunk)
@@ -365,8 +679,10 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
         if corrected.dtype not in invariant_ops.SUPPORTED_DTYPES:
             raise ExternalCaptureError(f"block outputs corrected to {corrected.dtype}")
         norms = row_norm(corrected).float().transpose(1, 2).contiguous()  # [B, chunk, steps]
-        mean, dev = row_mean(norms).double(), row_std(norms).double()
-        traj_values = norms[:, :, traj].double()
+        lengths = counts.lengths(norms)
+        mean = row_mean(norms, lengths=lengths).double()
+        dev = row_std(norms, lengths=lengths).double()
+        traj_values = take_steps(norms, traj, dim=2).double()
         if previous is not None:
             # The first layer of this chunk differs from the last of the one before.
             prev_all = torch.cat([previous, corrected[:, :, :-1]], dim=2)
@@ -379,12 +695,14 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
         if delta.shape[2]:
             dn = row_norm(delta).float().transpose(1, 2).contiguous()
             dc = _rowcos(delta.double(), prev_all.double()).float().transpose(1, 2).contiguous()
-            dn_mean, dn_std = row_mean(dn).double(), row_std(dn).double()
-            dc_mean = row_mean(dc).double()
+            lengths = counts.lengths(dn)
+            dn_mean = row_mean(dn, lengths=lengths).double()
+            dn_std = row_std(dn, lengths=lengths).double()
+            dc_mean = row_mean(dc, lengths=lengths).double()
         for j, layer in enumerate(range(first, last)):
             cols.put(f"activation_norm_mean_L{layer}", mean[:, j])
             cols.put(f"activation_norm_std_L{layer}", dev[:, j])
-            for i in range(len(traj)):
+            for i in range(traj_values.shape[2]):
                 cols.put(f"activation_norm_traj{i}_L{layer}", traj_values[:, j, i])
             if layer >= delta_first:
                 d = layer - delta_first
@@ -393,24 +711,26 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
                 cols.put(f"delta_cosine_mean_L{layer - 1}", dc_mean[:, d])
             x = corrected[:, :, j]  # [B, steps, width]
             if layer in sampled:
-                spectral_steps, lap = laplacians[layer]
-                lap = lap.to(device).double()
-                signal = row_norm(x[:, list(spectral_steps)].double())  # [B, k]
-                shape = lap.shape
-                lap_signal = row_dot(lap.transpose(1, 2).contiguous(),
-                                     signal[:, None, :].expand(shape).contiguous())
+                entry = laplacians[layer]
+                if len(entry) == 2:  # (steps, lap): every row has the same spectral steps
+                    spectral_steps, lap = entry
+                    k_counts = uniform_counts(batch, len(spectral_steps), device)
+                else:
+                    spectral_steps, lap, k_counts = entry
                 cols.put(f"spectral_smoothness_L{layer}",
-                         row_dot(lap_signal, signal) / row_sumsq(signal).clamp_min(1e-12))
+                         spectral_smoothness(x, spectral_steps, k_counts, lap.to(device).double()))
             if layer in families.trajectory_layers:
-                _residual_trajectory(cols, layer, x, row_norm(h[:, 0, j]), n_windows, include_stft)
+                _residual_trajectory(cols, layer, x, row_norm(h[:, 0, j]), n_windows, include_stft,
+                                     counts)
             if layer in config.pca_layers:
                 components = lane.pca[layer] if isinstance(lane.pca, dict) else lane.pca
                 pca_mean = lane.pca_mean[layer] if isinstance(lane.pca_mean, dict) else lane.pca_mean
-                centred = x[:, pca_index].double() - pca_mean  # [B, T, width]
-                shape = (batch, len(pca_index), k, width)
+                centred = take_steps(x, pca_index).double() - pca_mean  # [B, T, width]
+                samples = centred.shape[1]
+                shape = (batch, samples, k, width)
                 projections = row_dot(centred[:, :, None, :].expand(shape),
                                       components[:k][None, None].expand(shape))
-                for ti in range(len(pca_index)):
+                for ti in range(samples):
                     for ci in range(k):
                         cols.put(f"pca_L{layer}_t{ti}_c{ci}", projections[:, ti, ci])
         previous = corrected[:, :, -1:]
@@ -454,7 +774,9 @@ def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str
                 values: Tensor, mean_logprob: Tensor, knnlm: Tensor | None,
                 capture_identity: Mapping[str, Any], *, num_layers: int,
                 routing_names: Sequence[str] | None = None, routing_values: Tensor | None = None,
-                retained_attention_summary_bytes: int = 0) -> list[GpuFeatureResult | ExternalCaptureError]:
+                retained_attention_summary_bytes: int | Sequence[int] = 0,
+                bucket_rule: str = BUCKET_RULE,
+                bucket_width: int | None = None) -> list[GpuFeatureResult | ExternalCaptureError]:
     """Each row's ``GpuFeatureResult``, assembled for the whole batch at once.
 
     ``values [B, len(names)]`` holds every lane feature (float64, each the value the per-row
@@ -462,8 +784,10 @@ def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str
     one gather and cast once, and the routing family's float32 ``routing_values [B, ...]``
     follows them. ``num_layers`` is the capture's layer count, every one of which the attention
     reduction read. ``mean_logprob [B]`` and ``knnlm [B, hidden]`` (or ``None``) are per row.
-    The receipt's lane id is :func:`hybrid_lane_id`; the fields common to the batch are
-    computed once. A row with a nonfinite feature gets the :class:`ExternalCaptureError` that
+    The receipt's lane id is :func:`hybrid_lane_id` under ``bucket_rule``, and the receipt
+    names the batch's canonical step width ``bucket_width``; the fields common to the batch
+    are computed once. ``retained_attention_summary_bytes`` is one count for every row, or
+    one per row. A row with a nonfinite feature gets the :class:`ExternalCaptureError` that
     refuses it, in its place.
 
     Raises
@@ -489,14 +813,14 @@ def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str
     knn = knnlm.float().cpu().numpy() if knnlm is not None else None
     names_out = tuple(all_names)
     common = dict(
-        lane_id=hybrid_lane_id(lane, capture_identity),
+        lane_id=hybrid_lane_id(lane, capture_identity, bucket_rule),
         stats_lane_id=stats_lane_id(lane, capture_identity),
         external_lane_id=external_lane_id(lane, capture_identity),
         fast_lane_id=lane.lane_id,
         lane_source_sha256=dict(lane.source_sha256),
         readout_source_sha256=dict(READOUT_SOURCE_SHA256),
         stats_source_sha256=STATS_SOURCE_SHA256,
-        batched=batched_receipt(lane.device),
+        batched=batched_receipt(lane.device, bucket_rule),
         capture=dict(capture_identity),
         capture_kind=CAPTURE_KIND,
         reductions=dict({family: "batched" for family in BATCHED_FAMILIES},
@@ -508,16 +832,21 @@ def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str
         certified=False,
         batch_size=batch,
         attention_layers_reduced=int(num_layers),
-        retained_attention_summary_bytes=int(retained_attention_summary_bytes),
+        bucket_width=int(bucket_width) if bucket_width is not None else None,
         routing_family=routed,
     )
+    retained = ([int(retained_attention_summary_bytes)] * batch
+                if isinstance(retained_attention_summary_bytes, int)
+                else [int(r) for r in retained_attention_summary_bytes])
+    if len(retained) != batch:
+        raise ExternalCaptureError(f"{len(retained)} retained-summary sizes for {batch} rows")
     results: list[GpuFeatureResult | ExternalCaptureError] = []
     for b, span in enumerate(spans):
         if not finite[b]:
             results.append(ExternalCaptureError("the reduction produced a nonfinite feature"))
             continue
         receipt = dict(common, replay_id=str(uuid.uuid4()), span_start=span.start,
-                       span_end=span.end,
+                       span_end=span.end, retained_attention_summary_bytes=retained[b],
                        input_tokens_sha256=hashlib.sha256(np.asarray(
                            list(span.token_ids[:span.end]), dtype="<i8").tobytes()).hexdigest())
         receipt["capture"] = dict(capture_identity)
@@ -534,8 +863,12 @@ __all__ = (
     "ATTENTION_SOURCE_SHA256",
     "BATCHED_FAMILIES",
     "BATCHED_SOURCE_SHA256",
+    "BUCKET_FLOOR",
     "BUCKET_RULE",
+    "BUCKET_RULES",
+    "SMALLEST_BUCKET",
     "BlockOutputs",
+    "Counts",
     "EFF_DIM",
     "FAMILIES_SOURCE_SHA256",
     "HYBRID_LANE_PREFIX",
@@ -545,8 +878,15 @@ __all__ = (
     "TOPK_TIES",
     "batched_receipt",
     "block_output_features",
+    "bucket_width",
+    "canonical_size",
     "eigvalsh_path",
     "finish_rows",
     "hybrid_lane_id",
+    "per_row_index",
     "row_backend",
+    "spectral_smoothness",
+    "take_steps",
+    "uniform_counts",
+    "window_steps",
 )

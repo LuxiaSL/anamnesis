@@ -104,6 +104,7 @@ packages = ["anamnesis"]
 pythonpath = ["."]
 testpaths = ["tests"]
 # Four workers by default, so a local run leaves the machine usable; CI asks for one per core.
-# Tests marked slow run in CI; locally, `-m "not slow"` skips them.
-addopts = "-n 4"
+# Tests marked slow run in CI; locally, `-m "not slow"` skips them. `--dist loadgroup` keeps an
+# `xdist_group` on one worker, for modules whose peaks must not run side by side.
+addopts = "-n 4 --dist loadgroup"
 markers = ["slow: long-running; CI runs it, local runs may skip it with -m 'not slow'"]

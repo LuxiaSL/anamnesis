@@ -32,13 +32,23 @@ two engines, or two pin tables, never share an id. :attr:`EngineReducer.reducer_
 names this module's and the statistics reducer's source digests.
 
 **Batched.** By default (``batched=True``) the rows of a batch are
-grouped by step count (and, within it, by surface shapes and routing plan), and each
+grouped by step-count bucket (and, within it, by surface shapes and routing plan), and each
 group's families, attention included, are reduced together, batchmate-invariant
 (:mod:`anamnesis.extraction.fast.batched_attention`,
 :mod:`anamnesis.extraction.fast.batched_stats`,
 :mod:`anamnesis.extraction.fast.batched_families`); those rows carry the hybrid lane id,
 never the per-row one. The batched gate top-k breaks ties at the k-th value by the lowest
 column index, which the per-row reduction does not define.
+
+**Buckets.** ``buckets`` names the bucket rule
+(:data:`~anamnesis.extraction.fast.batched_stats.BUCKET_RULES`,
+:func:`~anamnesis.extraction.fast.batched_stats.bucket_width`). A row of ``n`` steps is
+padded with zeros to its bucket's canonical width and reduced beside rows of other step
+counts in the same bucket; every reduction over its steps is masked to its own ``n``, and
+every per-row position (windows, halves, trajectory points, the spectral graph's steps,
+epochs) is its own, and so are its short-span placeholders. A row joins a bucket only when
+its own lane's feature names are the bucket lane's, name for name; others (a one-step span)
+are batched only with rows of their exact step count. The rule joins the lane id.
 
 **Refusals.** The first row that cannot be reduced raises :class:`ExternalCaptureError`
 naming its index, so a caller can retry the others one at a time. A row is refused when its span is incomplete, its step count disagrees with its
@@ -65,10 +75,16 @@ from anamnesis.extraction.fast.batched_families import (
     routing_features,
 )
 from anamnesis.extraction.fast.batched_stats import (
+    BUCKET_FLOOR,
+    BUCKET_RULE,
+    BUCKET_RULES,
+    Counts,
     RowSpan,
     batched_receipt,
     block_output_features,
+    bucket_width,
     finish_rows,
+    take_steps,
 )
 from anamnesis.extraction.fast.external import ExternalCaptureError, RoutingPoint
 from anamnesis.extraction.fast.external_stats import (
@@ -197,21 +213,38 @@ _SCALARS = ("head_prompt_mass", "head_recency_mass", "head_sink")
 """The per-row statistics contract's names of ``head_scalars``' three columns."""
 
 
-def _shape_key(row: Any) -> tuple:
-    """What rows must share to be reduced in one batch: every stacked surface's shape and
-    the routing plan."""
+def _shape_key(row: Any, width: int | None = None) -> tuple:
+    """What rows must share to be reduced in one batch: every stacked surface's shape (its
+    steps padded to ``width``, when given) and the routing plan."""
     s = row.surfaces
-    return (tuple((name, tuple(s[name].shape)) for name in _FINITE_REFUSALS),
-            tuple(tuple(c.shape) for c in s["committed"]),
+
+    def shape(x) -> tuple:
+        dims = tuple(x.shape)
+        return dims if width is None or not dims else (int(width),) + dims[1:]
+
+    return (tuple((name, shape(s[name])) for name in _FINITE_REFUSALS),
+            tuple(shape(c) for c in s["committed"]),
             tuple(tuple(int(n) for n in pair) for pair in row.route_sources),
             int(row.final_sources))
 
 
-def validate_batch(rows: Sequence[Any], device) -> tuple[dict[str, Any], list[int]]:
-    """The surfaces of rows that share a :func:`_shape_key`, stacked on ``device``, and
-    the indices of rows holding a nonfinite value, found with one device-to-host copy for
-    the whole batch."""
-    stacked = {name: torch.stack([row.surfaces[name].to(device) for row in rows])
+def _pad_stack(tensors: Sequence[Any], width: int | None, device) -> torch.Tensor:
+    """``tensors`` stacked on ``device``, each zero-padded along its steps to ``width``."""
+    moved = [t.to(device) for t in tensors]
+    if width is None or all(t.shape[0] == width for t in moved):
+        return torch.stack(moved)
+    out = moved[0].new_zeros((len(moved), int(width), *moved[0].shape[1:]))
+    for b, t in enumerate(moved):
+        out[b, :t.shape[0]] = t
+    return out
+
+
+def validate_batch(rows: Sequence[Any], device,
+                   width: int | None = None) -> tuple[dict[str, Any], list[int]]:
+    """The surfaces of rows that share a :func:`_shape_key`, stacked on ``device`` (each row's
+    steps zero-padded to ``width``, when given), and the indices of rows holding a nonfinite
+    value, found with one device-to-host copy for the whole batch."""
+    stacked = {name: _pad_stack([row.surfaces[name] for row in rows], width, device)
                for name in _FINITE_REFUSALS}
     flags = torch.stack([torch.isfinite(x).reshape(len(rows), -1).all(dim=1)
                          for x in stacked.values()]).cpu()
@@ -320,10 +353,11 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
 
 
 def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[RowSpan],
-                    engine: Mapping[str, Any]) -> list[Any]:
-    """Rows that share a :func:`_shape_key`, every family batched."""
+                    engine: Mapping[str, Any], width: int | None = None,
+                    bucket_rule: str = BUCKET_RULE) -> list[Any]:
+    """Rows that share a :func:`_shape_key` (padded to ``width``), every family batched."""
     results: list[Any] = [None] * len(rows)
-    stacked, bad = validate_batch(rows, lane.device)
+    stacked, bad = validate_batch(rows, lane.device, width)
     for b in bad:
         results[b] = ExternalCaptureError(_first_refusal(rows[b]))
     if bad:
@@ -337,27 +371,36 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
     sampled = list(lane.config.sampled_layers)
     first = rows[keep[0]]
     starts = [spans[b].start for b in keep]
-    committed = [torch.stack([rows[b].surfaces["committed"][c].to(lane.device) for b in keep])
+    steps = int(stacked["depth"].shape[1])
+    padded = width is not None and bucket_rule != "exact-steps" and steps >= BUCKET_FLOOR
+    counts = Counts.of([int(rows[b].positions) for b in keep], lane.device, steps, padded)
+    committed = [_pad_stack([rows[b].surfaces["committed"][c] for b in keep], width, lane.device)
                  for c in range(len(first.surfaces["committed"]))]
     try:
         attention = attention_features(lane, stacked["head_entropy"], stacked["mean_entropy"],
-                                       stacked["head_scalars"], stacked["mean_rows"], starts)
-        blocks = block_output_features(lane, stacked["depth"], starts, attention.laplacians)
+                                       stacked["head_scalars"], stacked["mean_rows"], starts,
+                                       counts)
+        blocks = block_output_features(lane, stacked["depth"], starts, attention.laplacians,
+                                       counts)
         kvqg = kvqg_features(lane, stacked["k"], stacked["v"], stacked["q"], stacked["gate"],
-                             attention.per_head)
-        outputs, logprob = outputs_features(lane, stacked["logit_stats"])
+                             attention.per_head, counts)
+        outputs, logprob = outputs_features(lane, stacked["logit_stats"], counts)
         routing_names, routing_values = routing_features(
-            sampled, _batched_points(stacked, first), committed)
+            sampled, _batched_points(stacked, first), committed, counts)
         depth = stacked["depth"]
-        knnlm = (depth[:, depth.shape[1] - 1, depth.shape[2] - 1]
-                 if lane.config.enable_knnlm_baseline else None)
+        knnlm = None
+        if lane.config.enable_knnlm_baseline:
+            final = depth[:, :, depth.shape[2] - 1]  # [B, steps, hidden]: the last layer
+            knnlm = (final[:, steps - 1] if counts.uniform(steps)
+                     else take_steps(final, (counts.dev - 1)[:, None])[:, 0])
         finished = finish_rows(
             lane, [spans[b] for b in keep], attention.names + blocks.names + kvqg.names
             + outputs.names,
             torch.cat([attention.values, blocks.values, kvqg.values, outputs.values], dim=1),
             logprob, knnlm, engine, num_layers=int(depth.shape[2]),
             routing_names=tuple(routing_names), routing_values=routing_values,
-            retained_attention_summary_bytes=attention.retained_bytes)
+            retained_attention_summary_bytes=attention.retained_bytes,
+            bucket_rule=bucket_rule, bucket_width=steps)
     except (ExternalCaptureError, ValueError) as err:
         err = err if isinstance(err, ExternalCaptureError) else ExternalCaptureError(str(err))
         for b in keep:
@@ -370,14 +413,19 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
 
 def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                               token_ids: Sequence[Sequence[int]],
-                              engine: Mapping[str, Any]) -> list[Any]:
-    """Signed rows of one step count, every family batched across the rows
-    (:func:`attention_features`, :func:`block_output_features`, :func:`kvqg_features`,
+                              engine: Mapping[str, Any],
+                              bucket_rule: str = BUCKET_RULE,
+                              width: int | None = None) -> list[Any]:
+    """Signed rows of one lane, every family batched across the rows of one step-count
+    bucket (:func:`attention_features`, :func:`block_output_features`, :func:`kvqg_features`,
     :func:`outputs_features`, :func:`routing_features`) and assembled by
-    :func:`finish_rows`. Rows whose surfaces differ in shape or routing plan reduce in
-    separate batches. Returns, per row in order, its ``GpuFeatureResult`` or the
-    :class:`ExternalCaptureError` that refused it; a refused row is left out of the batch,
-    which changes no other row's bytes."""
+    :func:`finish_rows`. Rows are grouped by their bucket's canonical width under
+    ``bucket_rule`` (or all at ``width``, when given) and padded to it; rows whose surfaces differ in shape (past their steps)
+    or routing plan reduce in separate batches. Returns, per row in order, its
+    ``GpuFeatureResult`` or the :class:`ExternalCaptureError` that refused it; a refused
+    row is left out of the batch, which changes no other row's bytes."""
+    if bucket_rule not in BUCKET_RULES:
+        raise ValueError(f"bucket rule must be one of {BUCKET_RULES}, not {bucket_rule!r}")
     results: list[Any] = [None] * len(rows)
     spans: dict[int, RowSpan] = {}
     for i, (row, seq) in enumerate(zip(rows, token_ids, strict=True)):
@@ -387,10 +435,11 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
             results[i] = err
     groups: dict[tuple, list[int]] = {}
     for i in sorted(spans):
-        groups.setdefault(_shape_key(rows[i]), []).append(i)
-    for members in groups.values():
+        padded_to = width if width is not None else bucket_width(int(rows[i].positions), bucket_rule)
+        groups.setdefault((padded_to, _shape_key(rows[i], padded_to)), []).append(i)
+    for (padded_to, _), members in groups.items():
         reduced = _reduce_uniform(lane, [rows[i] for i in members],
-                                  [spans[i] for i in members], engine)
+                                  [spans[i] for i in members], engine, padded_to, bucket_rule)
         for i, result in zip(members, reduced, strict=True):
             results[i] = result
     return results
@@ -405,22 +454,28 @@ class EngineReducer:
     digest every row must carry; built from a preset it defaults to the preset's
     ``checkpoint_sha256`` (none declared: rows are not checked).
 
-    ``batched`` selects the hybrid reduction: rows of one step count reduce every family
-    together (:func:`reduce_signed_rows_hybrid`), batchmate-invariant. Its rows carry the
-    hybrid lane id
-    (:func:`~anamnesis.extraction.fast.batched_stats.hybrid_lane_id`) and the reducer
-    identity names the batched module's digests. The default is the batched reduction;
-    ``batched=False`` reduces row by row under the per-row statistics lane id.
+    ``batched`` selects the hybrid reduction: rows of one step-count bucket reduce every
+    family together (:func:`reduce_signed_rows_hybrid`), batchmate-invariant, under the
+    bucket rule ``buckets`` (default
+    :data:`~anamnesis.extraction.fast.batched_stats.BUCKET_RULE`). Its rows carry the hybrid
+    lane id (:func:`~anamnesis.extraction.fast.batched_stats.hybrid_lane_id`) and the reducer
+    identity names the batched module's digests and the bucket rule. The default is the
+    batched reduction; ``batched=False`` reduces row by row under the per-row statistics
+    lane id.
     """
 
     def __init__(self, *, preset: str | None = None, calib_dir: str | Path | None = None,
                  device: str = "cuda",
                  lane_for: Callable[[int], GpuFeatureLane] | None = None,
-                 expected_weights: str | None = None, batched: bool = True) -> None:
+                 expected_weights: str | None = None, batched: bool = True,
+                 buckets: str = BUCKET_RULE) -> None:
         if (lane_for is None) == (preset is None):
             raise ValueError("give a preset (with calib_dir) or lane_for, one of the two")
+        if buckets not in BUCKET_RULES:
+            raise ValueError(f"buckets must be one of {BUCKET_RULES}, not {buckets!r}")
         self._lanes: dict[int, GpuFeatureLane] = {}
         self.batched = bool(batched)
+        self.buckets = buckets
         if lane_for is not None:
             self._lane_for = lane_for
             self.expected_weights = expected_weights
@@ -433,7 +488,7 @@ class EngineReducer:
         identity = dict(engine_reducer_source_sha256=ENGINE_REDUCER_SOURCE_SHA256,
                         stats_source_sha256=STATS_SOURCE_SHA256)
         if self.batched:
-            batched_identity = batched_receipt("cpu")
+            batched_identity = batched_receipt("cpu", buckets)
             for by_device in ("row_backend", "eigvalsh"):  # a row's lane id names its device's
                 batched_identity.pop(by_device)
             identity.update(batched=batched_identity)
@@ -464,6 +519,14 @@ class EngineReducer:
 
         self._lane_for = lane_for
 
+    def _group_width(self, steps: int) -> int:
+        """The canonical width a row of ``steps`` steps reduces at: its bucket's, when its own
+        lane's names are the bucket lane's, name for name; else its exact step count."""
+        width = bucket_width(steps, self.buckets)
+        if width != steps and self.lane(steps).names != self.lane(width).names:
+            return steps
+        return width
+
     def lane(self, steps: int) -> GpuFeatureLane:
         """The lane for a span of ``steps`` steps (one per capped step count)."""
         key = min(int(steps), SCHEMA_STEP_CAP)
@@ -475,8 +538,8 @@ class EngineReducer:
                engine: Mapping[str, Any]) -> list[EngineReducedRow]:
         """One :class:`EngineReducedRow` per signed row, in order.
 
-        With ``batched``, the rows are grouped by step count and each group's families are
-        reduced together; a row's bytes do not depend on its group.
+        With ``batched``, the rows are grouped by step-count bucket and each group's families
+        are reduced together; a row's bytes do not depend on its batchmates.
 
         Raises
         ------
@@ -504,11 +567,11 @@ class EngineReducer:
                     results[i] = err
                     break
                 continue
-            groups.setdefault(int(row.positions), []).append(i)
-        for steps, members in groups.items():
+            groups.setdefault(self._group_width(int(row.positions)), []).append(i)
+        for width, members in groups.items():
             reduced = reduce_signed_rows_hybrid(
-                self.lane(steps), [rows[i] for i in members],
-                [token_ids[i] for i in members], engine)
+                self.lane(width), [rows[i] for i in members],
+                [token_ids[i] for i in members], engine, self.buckets, width)
             for i, result in zip(members, reduced, strict=True):
                 results[i] = result
         for i, result in enumerate(results):
