@@ -49,6 +49,10 @@ from anamnesis.extraction.fast.engine_reducer import EngineReducer
 from anamnesis.extraction.fast.features import GpuFeatureLane
 from anamnesis.extraction.fast.schema import resolve_gpu_schema
 
+pytestmark = pytest.mark.xdist_group("step-buckets")
+"""One worker runs this module (with ``--dist loadgroup``): its batches peak at several GB, and
+two of them side by side exceed a CI runner's memory."""
+
 LAYERS, QUERY_HEADS, KV_HEADS, HEAD_DIM, GATE = 6, 4, 2, 2, 12
 SAMPLED, TRAJECTORY, PCA = (1, 3, 4), (2, 3), (0, 3)
 MAX_START, MAX_STEPS = 12, 70
