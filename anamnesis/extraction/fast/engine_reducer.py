@@ -28,7 +28,9 @@ the final read's. ``surfaces`` maps names to tensors over the ``kept`` positions
 
 **Identity.** A reduced row's lane id is :func:`stats_lane_id` of its lane under the
 ``engine`` mapping the caller passes (the engine's identity and geometry), so rows from
-two engines, or two pin tables, never share an id. :attr:`EngineReducer.reducer_identity`
+two engines, or two pin tables, never share an id. A batched row's lane id also names the
+instruction set it was reduced on (:func:`~anamnesis.extraction.fast.batched_stats.device_arch`),
+so rows reduced on two GPU architectures never share one either. :attr:`EngineReducer.reducer_identity`
 names this module's and the statistics reducer's source digests.
 
 **Batched.** By default (``batched=True``) the rows of a batch are
@@ -567,7 +569,7 @@ class EngineReducer:
             identity.update(lens=self.lens.identity())
         if self.batched:
             batched_identity = batched_receipt("cpu", buckets)
-            for by_device in ("row_backend", "eigvalsh"):  # a row's lane id names its device's
+            for by_device in ("row_backend", "eigvalsh", "device_arch"):  # a row's lane id names its device's
                 batched_identity.pop(by_device)
             identity.update(batched=batched_identity)
         self.reducer_identity = (
