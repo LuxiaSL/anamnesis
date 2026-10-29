@@ -582,9 +582,9 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
     (the signed row's ``depth``); ``starts[b]`` is row ``b``'s prompt length, which selects
     its positional means; ``counts`` is each row's own step count (default: every row fills
     ``steps``), the rest of its steps being padding; ``laplacians[layer]`` is, at each sampled
-    layer, the spectral steps (one list, or each row's ``[B, K]``), how many each row has, and
-    ``[B, K, K]``, each row's normalised Laplacian as its attention reduction left it; or,
-    when every row has the same spectral steps, the list and the Laplacians alone.
+    layer, the spectral steps (one list, or each row's ``[B, K]``), ``[B, K, K]``, each row's
+    normalised Laplacian as its attention reduction left it, and how many spectral steps each
+    row has; the counts may be left out when every row has the same spectral steps.
 
     Raises
     ------
@@ -674,7 +674,7 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
                     spectral_steps, lap = entry
                     k_counts = uniform_counts(batch, len(spectral_steps), device)
                 else:
-                    spectral_steps, k_counts, lap = entry
+                    spectral_steps, lap, k_counts = entry
                 cols.put(f"spectral_smoothness_L{layer}",
                          spectral_smoothness(x, spectral_steps, k_counts, lap.to(device).double()))
             if layer in families.trajectory_layers:

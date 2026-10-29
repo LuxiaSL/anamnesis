@@ -67,14 +67,14 @@ FLOW = "attn_flow:"
 class AttentionFeatures:
     """The attention family of ``B`` rows: ``names`` and ``values [B, len(names)]`` (float64);
     at each sampled layer, ``laplacians[layer]`` (the spectral steps, one list or each row's
-    ``[B, K]``, how many each row has, and each row's normalised Laplacian ``[B, K, K]``,
-    zero-padded past its own size, which the smoothness feature reads) and
+    ``[B, K]``; each row's normalised Laplacian ``[B, K, K]``, zero-padded past its own size,
+    which the smoothness feature reads; and how many spectral steps each row has) and
     ``per_head[layer]`` (each row's per-head entropy and sink, ``[B, steps, heads]``, which
     the per-head family reads); and ``retained_bytes``, the bytes of those summaries, per row."""
 
     names: tuple[str, ...]
     values: Tensor
-    laplacians: dict[int, tuple[Tensor | list[int], Counts, Tensor]]
+    laplacians: dict[int, tuple[Tensor | list[int], Tensor, Counts]]
     per_head: dict[int, tuple[Tensor, Tensor]]
     retained_bytes: list[int]
 
@@ -418,7 +418,7 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
     log_length = lengths.clamp_min(2).double().log()[:, :, None]
     per_layer = max(1, batch * t * (width + 1) * 8 * 6)
     chunk = max(1, min(len(sampled), WORKING_BYTES // per_layer))
-    laplacians: dict[int, tuple[Tensor | list[int], Counts, Tensor]] = {}
+    laplacians: dict[int, tuple[Tensor | list[int], Tensor, Counts]] = {}
     per_head: dict[int, tuple[Tensor, Tensor]] = {}
     retained = [0] * batch
     for first in range(0, len(sampled), chunk):
@@ -447,8 +447,8 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
                     name = f"{name}_L{layer}"
                 cols.put(name, value.reshape(batch, n)[:, i])
             layer_k = k_counts.derive(sizes[i::n], size_dev[:, i])
-            laplacians[layer] = (steps[:, i] if isinstance(steps, Tensor) else steps, layer_k,
-                                 normalized[:, i])
+            laplacians[layer] = (steps[:, i] if isinstance(steps, Tensor) else steps,
+                                 normalized[:, i], layer_k)
             per_ent = head_entropy[:, :, layer].double() / log_length
             per_sink = head_scalars[:, :, j, 2].double()
             per_head[layer] = (per_ent, per_sink)
