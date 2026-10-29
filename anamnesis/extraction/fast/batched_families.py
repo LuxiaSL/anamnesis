@@ -183,8 +183,9 @@ def _halves(x: Tensor, counts: Counts) -> tuple[Tensor, Counts, Tensor, Counts]:
         return (x[:, :mid], counts.derive([mid] * len(counts.host), counts.dev // 2),
                 x[:, mid:], counts.derive([steps - mid] * len(counts.host), counts.dev - counts.dev // 2))
     mid = counts.dev // 2
-    first = counts.derive([n // 2 for n in counts.host], mid)
-    second = counts.derive([n - n // 2 for n in counts.host], counts.dev - mid)
+    first = counts.derive([n // 2 for n in counts.host], mid, steps)
+    second = counts.derive([n - n // 2 for n in counts.host], counts.dev - mid,
+                           max(1, steps - steps // 2))
     return x, first, window_steps(x, mid, max(1, steps - steps // 2)), second
 
 
@@ -355,9 +356,9 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
     counts = counts if counts is not None else uniform_counts(batch, steps, device)
     if len(counts.host) != batch or counts.hi > steps or counts.lo < 1:
         raise ExternalCaptureError(f"step counts {counts.host} for {batch} rows of {steps} steps")
-    if counts.lo < 4 <= counts.hi or counts.lo < 2 <= counts.hi:
-        raise ExternalCaptureError("rows below four steps share a batch with longer rows")
-    short = counts.hi < 2  # placeholders below two steps (and, below four, per head)
+    if counts.lo < 2 <= counts.hi:
+        raise ExternalCaptureError("rows below two steps share a batch with longer rows")
+    short = counts.reach < 2  # placeholders below two steps (and, below four, per head)
     n_windows, include_stft = families.temporal_n_windows, families.enable_stft
     one = counts.minus(1)
     cols = _Columns()
@@ -372,7 +373,7 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
     gate_sparsity: dict[int, Tensor] = {}
     window, stride = config.epoch_window_size, config.epoch_stride
     epoch_rows = counts.dev >= window + stride  # rows with epochs
-    any_epochs = counts.hi >= window + stride
+    any_epochs = counts.reach >= window + stride
     novelty_traj, _ = per_row_index(one, ("traj", 5), trajectory_indices)
     for j, layer in enumerate(sampled):
         k_raw = keys[:, :, j].to(device).float()
@@ -421,10 +422,11 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
                                        boundaries.new_full((), -math.inf)).amax(dim=1)
                 epochs.append((count, peak.double(), spread_b.double()))
 
-        # Per-head keys: AttentionReducer.head_features.
+        # Per-head keys: AttentionReducer.head_features (placeholders below four steps).
         prefix = f"ph_L{layer}"
         ent, sink = per_head[layer]
-        if counts.hi < 4:
+        head_start = len(cols.columns)
+        if counts.reach < 4:
             from anamnesis.extraction.feature_families.per_head import _per_head_names
 
             _zeros(cols, _per_head_names(layer), batch, device)
@@ -446,6 +448,11 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
             spread_h = _time_mean(1 - sims, counts)  # [B, kv heads]
             cols.put(prefix + "_kv_key_spread_head_mean", row_mean(spread_h))
             cols.put(prefix + "_kv_key_spread_head_std", row_std(spread_h))
+            if counts.lo < 4:  # rows below four steps take the placeholders
+                short_rows = counts.dev < 4
+                for c in range(head_start, len(cols.columns)):
+                    value = cols.columns[c]
+                    cols.columns[c] = torch.where(short_rows, value.new_zeros(()), value)
 
         # Values: FamilyReducer.value.
         v_raw = values[:, :, j].to(device).float()
@@ -642,7 +649,7 @@ def outputs_features(lane: GpuFeatureLane, logit_stats: Tensor,
     for i in range(picked.shape[1]):
         cols.put(f"surprise_traj{i}", picked[:, i])
     window = config.surprise_window
-    if counts.hi >= window:
+    if counts.reach >= window:
         values = surprise.unfold(1, window, 1).contiguous()  # [B, n - window + 1, window]
         running_mean = row_mean(values.double())
         running_std = row_std(values).float()

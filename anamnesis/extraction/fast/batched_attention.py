@@ -233,7 +233,7 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
     out["cache_lookback_ratio"] = (row_sum(prompt, lengths=live)
                                    / row_sum(generated, lengths=live).clamp_min(1e-12))
 
-    if counts.hi < 10:
+    if counts.reach < 10:
         fit = mean.new_zeros(rows)
     elif not ragged:
         sample_steps = _decay_steps(t)
@@ -336,7 +336,7 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
         normalized = torch.where(inside[:, :, None] & inside[:, None, :], normalized,
                                  normalized.new_zeros(()))
 
-    if counts.hi >= 2:
+    if counts.reach >= 2:
         if counts.lo < 2:
             raise ExternalCaptureError("rows below two steps share a batch with longer rows")
         sys = prompt / total
@@ -458,7 +458,7 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
             per_head[layer] = (per_ent, per_sink)
             for b in range(batch):
                 retained[b] += (layer_k.host[b] ** 2 + 2 * counts.host[b] * heads) * 8
-        if counts.hi < 2:
+        if counts.reach < 2:
             from anamnesis.extraction.feature_families.attention_flow import _attention_flow_names
 
             for j in js:

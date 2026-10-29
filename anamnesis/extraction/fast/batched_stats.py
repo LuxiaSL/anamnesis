@@ -114,19 +114,22 @@ def eigvalsh_path(device: torch.device | str) -> str:
 EFF_DIM = "norms"
 """How a hybrid row computes every effective dimension: from Frobenius norms."""
 
-BUCKET_FLOOR = 8
-"""Step counts below this have feature schemas of their own (the fast lane's per-step cap), so
-rows below it are batched only with rows of their exact step count."""
+BUCKET_FLOOR = 2
+"""Rows of fewer steps than this have a feature schema of their own (a one-step span lacks
+names the others carry), so they are batched only with rows of their exact step count."""
+
+SMALLEST_BUCKET = 8
+"""The canonical width of every rule's first bucket: rows of ``BUCKET_FLOOR`` to eight steps
+share it."""
 
 BUCKET_RULES = ("exact-steps", "pow2", "pow4", "tail256")
-"""The step-count bucket rules (:func:`bucket_width`):
+"""The step-count bucket rules (:func:`bucket_width`), for a row of ``n >= BUCKET_FLOOR`` steps:
 
 * ``exact-steps``: rows are batched only with rows of the same step count; nothing is padded.
-* ``pow2``: a row of ``n >= BUCKET_FLOOR`` steps is padded to the smallest power of two at or
-  above ``n``.
-* ``pow4``: to the smallest ``8 * 4**i`` at or above ``n`` (8, 32, 128, 512, ...).
-* ``tail256``: to 256 steps (the signing decoder's tail) up to 256, and to the smallest power of
-  two above that.
+* ``pow2``: the smallest power of two at or above ``n``, at least :data:`SMALLEST_BUCKET`.
+* ``pow4``: the smallest ``8 * 4**i`` at or above ``n`` (8, 32, 128, 512, ...).
+* ``tail256``: 256 steps (the signing decoder's tail) up to 256, and the smallest power of two
+  above that.
 
 Below :data:`BUCKET_FLOOR` every rule is ``exact-steps``."""
 
@@ -143,12 +146,12 @@ def bucket_width(steps: int, rule: str = BUCKET_RULE) -> int:
         raise ValueError(f"a row needs at least one step, not {steps}")
     if rule == "exact-steps" or steps < BUCKET_FLOOR:
         return steps
-    pow2 = 1 << (steps - 1).bit_length()
+    pow2 = max(SMALLEST_BUCKET, 1 << (steps - 1).bit_length())
     if rule == "pow2":
         return pow2
     if rule == "tail256":
         return max(256, pow2)
-    width = BUCKET_FLOOR
+    width = SMALLEST_BUCKET
     while width < steps:
         width *= 4
     return width
@@ -204,6 +207,7 @@ def batched_receipt(device: torch.device | str, bucket_rule: str = BUCKET_RULE) 
                 attention_source_sha256=ATTENTION_SOURCE_SHA256,
                 invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256,
                 bucket_rule=bucket_rule, bucket_floor=BUCKET_FLOOR,
+                smallest_bucket=SMALLEST_BUCKET,
                 row_backend=row_backend(device), eff_dim=EFF_DIM,
                 topk_ties=TOPK_TIES, eigvalsh=eigvalsh_path(device), per_row=list(PER_ROW_EXCEPTIONS))
 
@@ -249,6 +253,13 @@ class Counts:
     @property
     def hi(self) -> int:
         return self._hi
+
+    @property
+    def reach(self) -> int:
+        """The largest count the rows' reduction provides for: the canonical width for padded
+        counts that know it (so a bucket's branches are its own, never its batchmates'), else
+        the largest count."""
+        return self.width if self.padded and self.width is not None else self._hi
 
     def uniform(self, width: int) -> bool:
         """Whether every row fills ``width`` and the rows are not a padded bucket."""
@@ -402,7 +413,7 @@ def _slope_rows(y: Tensor, counts: Counts | None = None) -> Tensor:
         w, count, xc, denominator = _unit_abscissa(m, y.device)
         ym = row_sum(y * w) / count
         return row_sum(xc * (y - ym[..., None]) * w) / denominator
-    if counts.hi < 2:
+    if counts.reach < 2:
         return y.new_zeros(y.shape[:-1])
     table, count_t, den_t = _abscissa_table(1 << m.bit_length(), y.device)
     n = counts.dev
@@ -428,7 +439,7 @@ def _windowed_rows(x: Tensor, n_windows: int, counts: Counts) -> Tensor:
                                    lambda c: c - (n_windows - 1) * (c // n_windows) if last
                                    else c // n_windows)
         segment = window_steps(x, width * i, canonical)
-        seg_counts = counts.derive(sizes, size_dev)
+        seg_counts = counts.derive(sizes, size_dev, canonical)
         lengths = seg_counts.lengths(segment)
         pieces.extend((row_mean(segment, lengths=lengths), row_std(segment, lengths=lengths),
                        _slope_rows(segment, seg_counts)))
@@ -554,12 +565,10 @@ def _residual_trajectory(cols: _Columns, layer: int, corrected: Tensor, raw_firs
     from anamnesis.extraction.feature_families.residual_stream import _trajectory_feature_names
 
     batch, steps = corrected.shape[:2]
-    if counts.hi < 3:
+    if counts.reach < 3:
         names = _trajectory_feature_names(layer, n_windows, include_stft)
         cols.block(names, corrected.new_zeros(batch, len(names), dtype=torch.float64))
         return
-    if counts.lo < 3:
-        raise ExternalCaptureError("rows below three steps share a batch with longer rows")
     prefix = f"res_traj_L{layer}"
     x = corrected.double()
     vel = x[:, 1:] - x[:, :-1]
@@ -583,6 +592,8 @@ def _residual_trajectory(cols: _Columns, layer: int, corrected: Tensor, raw_firs
                        _temporal_rows(vn, n_windows, include_stft, one).double(),
                        _temporal_rows(angles, n_windows, include_stft, two).double()], dim=1)
     block = torch.where((raw_first_norm < 1e-6)[:, None], block.new_zeros(()), block)
+    if counts.lo < 3:  # rows below three steps take the placeholder
+        block = torch.where((counts.dev < 3)[:, None], block.new_zeros(()), block)
     cols.block(names, block)
 
 
@@ -853,6 +864,7 @@ __all__ = (
     "BUCKET_FLOOR",
     "BUCKET_RULE",
     "BUCKET_RULES",
+    "SMALLEST_BUCKET",
     "BlockOutputs",
     "Counts",
     "EFF_DIM",

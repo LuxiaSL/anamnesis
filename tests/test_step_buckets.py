@@ -3,9 +3,11 @@
 Signed rows are random but well-formed, over a toy lane whose thresholds fall inside the
 buckets: the decay fit (ten steps), epochs (window 8, stride 4: twelve steps), the surprise
 window (twenty), the entropy subsampling (thirty and sixty) and the spectral graph's size.
-Under the ``pow2`` rule a row of ``n >= 8`` steps is padded to the next power of two and
-reduced beside rows of other step counts in its bucket; rows below eight keep exact-step
-groups.
+Under the ``pow2`` rule a row of ``n >= 2`` steps is padded to the next power of two (at
+least eight) and reduced beside rows of other step counts in its bucket, the short-span
+placeholders (the residual trajectory below three steps, per-head below four, the windows
+and spectrum below four and eight) per row; a one-step row, whose schema is its own, keeps
+an exact-step group.
 
 The checks:
 
@@ -56,8 +58,10 @@ ENGINE = {"producer": "synthetic-engine", "width": 128, "weights": "w" * 64}
 
 BUCKETED = (9, 11, 13, 16, 17, 19, 21, 31, 33, 47, 61, 64, 65, 70)
 """Step counts at or above the floor, straddling each toy threshold inside a bucket."""
-SHORT = (3, 5, 7)
-"""Step counts below the floor, which keep exact-step groups."""
+SHORT = (2, 3, 4, 5, 7)
+"""Step counts below eight, which share the first bucket and take their placeholders per row."""
+ALONE = (1,)
+"""Step counts below the floor, whose schema is their own: exact-step groups."""
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 DEVICES = [pytest.param("cpu", 8, id="cpu"),
@@ -114,7 +118,7 @@ def lanes(device: str, hidden: int):
     built: dict[int, GpuFeatureLane] = {}
 
     def lane_for(steps: int) -> GpuFeatureLane:
-        steps = min(int(steps), BUCKET_FLOOR)
+        steps = min(int(steps), 8)
         if steps not in built:
             names = resolve_gpu_schema(LAYERS, steps, extraction, families,
                                        components).feature_names
@@ -185,10 +189,10 @@ def digests(device: str, hidden: int, steps, seeds, starts, buckets: str = "pow2
 
 
 def test_the_bucket_rules():
-    assert [bucket_width(n, "pow2") for n in (1, 7, 8, 9, 16, 17, 129, 256, 257)] == [
-        1, 7, 8, 16, 16, 32, 256, 256, 512]
-    assert [bucket_width(n, "pow4") for n in (7, 8, 9, 32, 33, 129)] == [7, 8, 32, 32, 128, 512]
-    assert [bucket_width(n, "tail256") for n in (5, 8, 200, 256, 300)] == [5, 256, 256, 256, 512]
+    assert [bucket_width(n, "pow2") for n in (1, 2, 7, 8, 9, 16, 17, 129, 256, 257)] == [
+        1, 8, 8, 8, 16, 16, 32, 256, 256, 512]
+    assert [bucket_width(n, "pow4") for n in (1, 2, 8, 9, 32, 33, 129)] == [1, 8, 8, 32, 32, 128, 512]
+    assert [bucket_width(n, "tail256") for n in (1, 5, 8, 200, 256, 300)] == [1, 256, 256, 256, 256, 512]
     assert [bucket_width(n, "exact-steps") for n in (1, 9, 200)] == [1, 9, 200]
     assert set(BUCKET_RULES) == {"exact-steps", "pow2", "pow4", "tail256"}
     with pytest.raises(ValueError):
@@ -201,9 +205,9 @@ def test_the_bucket_rules():
 def test_a_row_has_the_same_bytes_alone_and_beside_rows_of_other_step_counts(device, hidden):
     rng = np.random.default_rng(11)
     targets = [signed_row(n, int(rng.integers(1, MAX_START + 1)), 2000 + n, hidden)
-               for n in (9, 13, 16, 21, 47, 61, 70, 5)]
+               for n in (9, 13, 16, 21, 47, 61, 70, 5, 2, 1)]
     alone = [reduce(device, hidden, [t])[0] for t in targets]
-    pool = BUCKETED + SHORT
+    pool = BUCKETED + SHORT + ALONE
     for size in (2, 8, 24):
         for t, target in enumerate(targets):
             n = target[0].positions
@@ -225,7 +229,7 @@ def test_a_bucketed_row_matches_the_exact_step_path(device, hidden):
     a GPU, every coordinate agrees to rounding, and the count that differ is printed."""
     rng = np.random.default_rng(5)
     made = [signed_row(n, int(rng.integers(1, MAX_START + 1)), 300 + n, hidden)
-            for n in BUCKETED + SHORT]
+            for n in BUCKETED + SHORT + ALONE]
     bucketed = reduce(device, hidden, made)
     exact = reduce(device, hidden, made, buckets="exact-steps")
     moved = 0
@@ -286,8 +290,8 @@ sys.path.insert(0, {tests!r})
 from test_step_buckets import digests
 print(json.dumps(digests({device!r}, {hidden}, {steps!r}, {seeds!r}, {starts!r})))
 """
-RESTART_BATCH = dict(steps=[9, 16, 21, 47, 70, 5], seeds=[1, 2, 3, 4, 5, 6],
-                     starts=[3, 12, 1, 7, 2, 9])
+RESTART_BATCH = dict(steps=[9, 16, 21, 47, 70, 5, 2, 1], seeds=[1, 2, 3, 4, 5, 6, 7, 8],
+                     starts=[3, 12, 1, 7, 2, 9, 4, 5])
 
 
 @pytest.mark.parametrize("device,hidden", DEVICES)
@@ -358,13 +362,13 @@ def _launches(monkeypatch) -> list[tuple]:
     return calls
 
 
-@pytest.mark.parametrize("target", [13, 16, 61, 64], ids=lambda n: f"steps{n}")
+@pytest.mark.parametrize("target", [3, 13, 16, 61, 64], ids=lambda n: f"steps{n}")
 def test_a_rows_kernels_do_not_depend_on_its_bucketmates(monkeypatch, target):
-    """A row's reductions run at widths, and with masks, fixed by its own count and its
-    bucket: a GPU kernel's bytes may follow its width, so batchmates of other step counts
-    must not change any width a row is reduced at. Checked as the sequence of primitive
-    calls for the row alone and for the row beside the longest and shortest counts of its
-    bucket."""
+    """A row's reductions run at widths, with masks and through branches fixed by its own
+    count and its bucket: a GPU kernel's bytes may follow its width, so batchmates of other
+    step counts must not change any width a row is reduced at, nor which reductions run.
+    Checked as the sequence of primitive calls for the row alone and for the row beside the
+    longest and shortest counts of its bucket."""
     calls = _launches(monkeypatch)
     row = signed_row(target, 4, 31, 8)
     reduce("cpu", 8, [row])

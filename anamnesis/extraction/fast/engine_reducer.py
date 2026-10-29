@@ -46,7 +46,8 @@ column index, which the per-row reduction does not define.
 padded with zeros to its bucket's canonical width and reduced beside rows of other step
 counts in the same bucket; every reduction over its steps is masked to its own ``n``, and
 every per-row position (windows, halves, trajectory points, the spectral graph's steps,
-epochs) is its own. Rows below :data:`SCHEMA_STEP_CAP` steps, whose feature schemas differ,
+epochs) is its own, and so are its short-span placeholders. A row joins a bucket only when
+its own lane's feature names are the bucket lane's, name for name; others (a one-step span)
 are batched only with rows of their exact step count. The rule joins the lane id.
 
 **Refusals.** The first row that cannot be reduced raises :class:`ExternalCaptureError`
@@ -96,7 +97,7 @@ from anamnesis.extraction.fast.features import GpuFeatureLane
 ENGINE_REDUCER_SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 """This module's source digest, part of :attr:`EngineReducer.reducer_identity`."""
 
-SCHEMA_STEP_CAP = BUCKET_FLOOR
+SCHEMA_STEP_CAP = 8
 """Step counts at or above this share one feature schema (the fast lane's per-step cap)."""
 
 SURFACES = ("depth", "q", "k", "v", "gate", "head_entropy", "mean_entropy", "head_scalars",
@@ -413,12 +414,13 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
 def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                               token_ids: Sequence[Sequence[int]],
                               engine: Mapping[str, Any],
-                              bucket_rule: str = BUCKET_RULE) -> list[Any]:
+                              bucket_rule: str = BUCKET_RULE,
+                              width: int | None = None) -> list[Any]:
     """Signed rows of one lane, every family batched across the rows of one step-count
     bucket (:func:`attention_features`, :func:`block_output_features`, :func:`kvqg_features`,
     :func:`outputs_features`, :func:`routing_features`) and assembled by
     :func:`finish_rows`. Rows are grouped by their bucket's canonical width under
-    ``bucket_rule`` and padded to it; rows whose surfaces differ in shape (past their steps)
+    ``bucket_rule`` (or all at ``width``, when given) and padded to it; rows whose surfaces differ in shape (past their steps)
     or routing plan reduce in separate batches. Returns, per row in order, its
     ``GpuFeatureResult`` or the :class:`ExternalCaptureError` that refused it; a refused
     row is left out of the batch, which changes no other row's bytes."""
@@ -433,11 +435,11 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
             results[i] = err
     groups: dict[tuple, list[int]] = {}
     for i in sorted(spans):
-        width = bucket_width(int(rows[i].positions), bucket_rule)
-        groups.setdefault((width, _shape_key(rows[i], width)), []).append(i)
-    for (width, _), members in groups.items():
+        padded_to = width if width is not None else bucket_width(int(rows[i].positions), bucket_rule)
+        groups.setdefault((padded_to, _shape_key(rows[i], padded_to)), []).append(i)
+    for (padded_to, _), members in groups.items():
         reduced = _reduce_uniform(lane, [rows[i] for i in members],
-                                  [spans[i] for i in members], engine, width, bucket_rule)
+                                  [spans[i] for i in members], engine, padded_to, bucket_rule)
         for i, result in zip(members, reduced, strict=True):
             results[i] = result
     return results
@@ -517,6 +519,14 @@ class EngineReducer:
 
         self._lane_for = lane_for
 
+    def _group_width(self, steps: int) -> int:
+        """The canonical width a row of ``steps`` steps reduces at: its bucket's, when its own
+        lane's names are the bucket lane's, name for name; else its exact step count."""
+        width = bucket_width(steps, self.buckets)
+        if width != steps and self.lane(steps).names != self.lane(width).names:
+            return steps
+        return width
+
     def lane(self, steps: int) -> GpuFeatureLane:
         """The lane for a span of ``steps`` steps (one per capped step count)."""
         key = min(int(steps), SCHEMA_STEP_CAP)
@@ -557,11 +567,11 @@ class EngineReducer:
                     results[i] = err
                     break
                 continue
-            groups.setdefault(bucket_width(int(row.positions), self.buckets), []).append(i)
+            groups.setdefault(self._group_width(int(row.positions)), []).append(i)
         for width, members in groups.items():
             reduced = reduce_signed_rows_hybrid(
                 self.lane(width), [rows[i] for i in members],
-                [token_ids[i] for i in members], engine, self.buckets)
+                [token_ids[i] for i in members], engine, self.buckets, width)
             for i, result in zip(members, reduced, strict=True):
                 results[i] = result
         for i, result in enumerate(results):
