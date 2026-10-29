@@ -133,8 +133,10 @@ BUCKET_RULES = ("exact-steps", "pow2", "pow4", "tail256")
 
 Below :data:`BUCKET_FLOOR` every rule is ``exact-steps``."""
 
-BUCKET_RULE = "tail256"
-"""The default bucket rule: one bucket for every span the signing decoder keeps (fastest on real traffic, and one lane for a drain and an in-process signer alike)."""
+BUCKET_RULE = "pow2"
+"""The default bucket rule. It pads a row to at most twice its steps, so small batches and small
+devices stay cheap. A serving fleet that reduces full 128-row batches is fastest under
+``tail256``, and passes it explicitly; every signer of one lane must name the same rule."""
 
 
 def bucket_width(steps: int, rule: str = BUCKET_RULE) -> int:
