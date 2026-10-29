@@ -37,6 +37,7 @@ from anamnesis.extraction.fast.batched_stats import (
     BATCHED_SOURCE_SHA256,
     FAMILIES_SOURCE_SHA256,
     HYBRID_LANE_PREFIX,
+    device_arch,
     hybrid_lane_id,
 )
 from anamnesis.extraction.fast.engine_reducer import (
@@ -314,6 +315,7 @@ def test_the_hybrid_has_its_own_lane_id_and_receipt(device, hidden):
         assert receipt[field_name] == per_row.meta["receipt"][field_name], field_name
     assert receipt["batched"]["row_backend"] == (
         "triton" if device == "cuda" and invariant_ops.HAVE_TRITON else "torch")
+    assert receipt["batched"]["device_arch"] == device_arch(device)
     assert receipt["routing_family"] and len(hybrid.features) == len(per_row.features)
     assert "block_outputs" not in per_row.meta["receipt"]["reductions"]
     assert hybrid.meta["reducer_identity"] != per_row.meta["reducer_identity"]
@@ -838,3 +840,28 @@ def test_the_tie_rule_is_where_the_gate_topk_leaves_the_per_row_lane():
     np.testing.assert_allclose(gate_topk_overlap_rows(continuous).numpy(),
                                [gate_topk_overlap(continuous[b].numpy()) for b in range(16)],
                                rtol=1e-12, atol=0)
+
+
+def test_the_device_arch_names_the_instruction_set():
+    assert device_arch("cpu").startswith("cpu-")
+    if torch.cuda.is_available():
+        major, minor = torch.cuda.get_device_capability()
+        assert device_arch("cuda") == f"cuda-sm_{major}{minor}"
+
+
+def test_rows_reduced_on_two_archs_never_share_a_lane_id(monkeypatch):
+    """The same row, the same lane and engine: only the instruction set differs, and so does
+    the lane id."""
+    import anamnesis.extraction.fast.batched_stats as batched_stats
+
+    row, ids = signed_row(16, 4, 0, 8)
+    lane_for = lanes("cpu", 8)
+    first = EngineReducer(lane_for=lane_for, batched=True).reduce(
+        [row], token_ids=[ids], engine=ENGINE)[0]
+    monkeypatch.setattr(batched_stats, "device_arch", lambda device: "cpu-other-isa")
+    second = EngineReducer(lane_for=lane_for, batched=True).reduce(
+        [row], token_ids=[ids], engine=ENGINE)[0]
+    assert first.features.tobytes() == second.features.tobytes()
+    assert first.lane_id != second.lane_id
+    assert second.meta["receipt"]["batched"]["device_arch"] == "cpu-other-isa"
+    assert first.meta["reducer_identity"] == second.meta["reducer_identity"]

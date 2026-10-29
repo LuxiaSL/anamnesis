@@ -190,6 +190,25 @@ def row_backend(device: torch.device | str) -> str:
     return "triton" if device.type == "cuda" and invariant_ops.HAVE_TRITON else "torch"
 
 
+def device_arch(device: torch.device | str) -> str:
+    """The instruction set a row's arithmetic runs on: ``cuda-sm_<major><minor>`` (the
+    compute capability, which is what kernels are compiled for) on CUDA; on the CPU,
+    ``cpu-<machine>-<vector ISA>`` (``torch.backends.cpu.get_cpu_capability``). Rows reduced on
+    two of these may differ in their last bits (another fused multiply-add, another
+    transcendental, another kernel), so they never share a lane id."""
+    device = torch.device(device)
+    if device.type == "cuda":
+        major, minor = torch.cuda.get_device_capability(device)
+        return f"cuda-sm_{major}{minor}"
+    import platform
+
+    try:
+        isa = torch.backends.cpu.get_cpu_capability()
+    except (AttributeError, RuntimeError):
+        isa = "unknown"
+    return f"{device.type}-{platform.machine() or 'unknown'}-{isa}"
+
+
 def hybrid_lane_id(lane: GpuFeatureLane, capture_identity: Mapping[str, Any],
                    bucket_rule: str = BUCKET_RULE) -> str:
     """The lane id of a row whose families were reduced batched under ``bucket_rule``."""
@@ -210,7 +229,7 @@ def batched_receipt(device: torch.device | str, bucket_rule: str = BUCKET_RULE) 
                 invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256,
                 bucket_rule=bucket_rule, bucket_floor=BUCKET_FLOOR,
                 smallest_bucket=SMALLEST_BUCKET,
-                row_backend=row_backend(device), eff_dim=EFF_DIM,
+                row_backend=row_backend(device), device_arch=device_arch(device), eff_dim=EFF_DIM,
                 topk_ties=TOPK_TIES, eigvalsh=eigvalsh_path(device), per_row=list(PER_ROW_EXCEPTIONS))
 
 
@@ -880,6 +899,7 @@ __all__ = (
     "block_output_features",
     "bucket_width",
     "canonical_size",
+    "device_arch",
     "eigvalsh_path",
     "finish_rows",
     "hybrid_lane_id",
