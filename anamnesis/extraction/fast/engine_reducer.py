@@ -32,9 +32,11 @@ two engines, or two pin tables, never share an id. :attr:`EngineReducer.reducer_
 names this module's and the statistics reducer's source digests.
 
 **Batched.** By default a batch is reduced row by row. With ``batched=True`` the rows are
-grouped by step count and each group's block-output family is reduced together, batchmate-
-invariant (:mod:`anamnesis.extraction.fast.batched_stats`); those rows carry the hybrid
-lane id, never the per-row one.
+grouped by step count (and, within it, by surface shapes and routing plan), and each
+group's families other than attention are reduced together, batchmate-invariant
+(:mod:`anamnesis.extraction.fast.batched_stats`,
+:mod:`anamnesis.extraction.fast.batched_families`); those rows carry the hybrid lane id,
+never the per-row one.
 
 **Refusals.** The first row that cannot be reduced raises :class:`ExternalCaptureError`
 naming its index, so a caller can retry the others one at a time. A row is refused when its span is incomplete, its step count disagrees with its
@@ -54,10 +56,19 @@ from typing import Any
 import numpy as np
 import torch
 
+from anamnesis.extraction.fast.batched_families import (
+    kvqg_features,
+    outputs_features,
+    routing_features,
+)
 from anamnesis.extraction.fast.batched_stats import (
     BATCHED_FAMILIES,
     BATCHED_SOURCE_SHA256,
+    EFF_DIM,
+    FAMILIES_SOURCE_SHA256,
     INVARIANT_OPS_SOURCE_SHA256,
+    PER_ROW_EXCEPTIONS,
+    BatchedRow,
     HybridStatsSpan,
     block_output_features,
 )
@@ -166,14 +177,129 @@ def reduce_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int],
     return span.finish(**_finish_arguments(lane, row, seq, engine))
 
 
+_FINITE_REFUSALS = dict(
+    depth="the capture holds a nonfloating or nonfinite tensor",
+    k="the capture holds a nonfloating or nonfinite tensor",
+    v="the capture holds a nonfloating or nonfinite tensor",
+    q="the capture holds a nonfloating or nonfinite tensor",
+    gate="the capture holds a nonfloating or nonfinite tensor",
+    logit_stats="logit_stats must be finite float32 or float64 [{steps}, 6]",
+    route="the routing weights hold a nonfinite value",
+    route_final="the routing weights hold a nonfinite value",
+)
+"""The surfaces whose finiteness a batch checks, and the refusal of a row that fails."""
+
+
+def _shape_key(row: Any) -> tuple:
+    """What rows must share to be reduced in one batch: every stacked surface's shape and
+    the routing plan."""
+    s = row.surfaces
+    return (tuple((name, tuple(s[name].shape)) for name in _FINITE_REFUSALS),
+            tuple(tuple(c.shape) for c in s["committed"]),
+            tuple(tuple(int(n) for n in pair) for pair in row.route_sources),
+            int(row.final_sources))
+
+
+def validate_batch(rows: Sequence[Any], device) -> tuple[dict[str, Any], list[int]]:
+    """The surfaces of rows that share a :func:`_shape_key`, stacked on ``device``, and
+    the indices of rows holding a nonfinite value, found with one device-to-host copy for
+    the whole batch."""
+    stacked = {name: torch.stack([row.surfaces[name].to(device) for row in rows])
+               for name in _FINITE_REFUSALS}
+    flags = torch.stack([torch.isfinite(x).reshape(len(rows), -1).all(dim=1)
+                         for x in stacked.values()]).cpu()
+    return stacked, [b for b in range(len(rows)) if not bool(flags[:, b].all())]
+
+
+def _first_refusal(row: Any) -> str:
+    for name, message in _FINITE_REFUSALS.items():
+        if not bool(torch.isfinite(row.surfaces[name]).all()):
+            return message.format(steps=int(row.positions))
+    return "the capture holds a nonfloating or nonfinite tensor"
+
+
+def _batched_points(stacked: Mapping[str, Any], row: Any) -> list[RoutingPoint]:
+    """:func:`routing_points` over the batch's stacked routing weights."""
+    route, final = stacked["route"], stacked["route_final"]
+    points: list[RoutingPoint] = []
+    for layer, (n_attn, n_mlp) in enumerate(row.route_sources):
+        if n_attn:
+            points.append(("pre_attn", layer, route[:, :, layer, 0, :n_attn]))
+        points.append(("pre_mlp", layer, route[:, :, layer, 1, :n_mlp]))
+    points.append(("final", -1, final[:, :, :row.final_sources]))
+    return points
+
+
+def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any],
+                    begun: Sequence[tuple[HybridStatsSpan, list[int]]],
+                    engine: Mapping[str, Any]) -> list[Any]:
+    """Rows that share a :func:`_shape_key`, every family but attention batched."""
+    results: list[Any] = [None] * len(rows)
+    stacked, bad = validate_batch(rows, lane.device)
+    for b in bad:
+        results[b] = ExternalCaptureError(_first_refusal(rows[b]))
+    if bad:
+        keep = [b for b in range(len(rows)) if b not in set(bad)]
+        if not keep:
+            return results
+        index = torch.as_tensor(keep, device=lane.device)
+        stacked = {name: x.index_select(0, index) for name, x in stacked.items()}
+    else:
+        keep = list(range(len(rows)))
+    sampled = list(lane.config.sampled_layers)
+    spans = [begun[b][0] for b in keep]
+    laplacians, per_head = {}, {}
+    for layer in sampled:
+        popped = [span.attention_reducer.spectral.pop(layer) for span in spans]
+        laplacians[layer] = (popped[0][0], torch.stack([lap for _, lap in popped]))
+        heads = [span.attention_reducer.per_head.pop(layer) for span in spans]
+        per_head[layer] = (torch.stack([ent for ent, _ in heads]),
+                           torch.stack([sink for _, sink in heads]))
+    first = rows[keep[0]]
+    committed = [torch.stack([rows[b].surfaces["committed"][c].to(lane.device) for b in keep])
+                 for c in range(len(first.surfaces["committed"]))]
+    try:
+        blocks = block_output_features(lane, stacked["depth"], [int(rows[b].start) for b in keep],
+                                       laplacians)
+        kvqg = kvqg_features(lane, stacked["k"], stacked["v"], stacked["q"], stacked["gate"],
+                             per_head)
+        outputs, logprob = outputs_features(lane, stacked["logit_stats"])
+        routing_names, routing_values = routing_features(
+            sampled, _batched_points(stacked, first), committed)
+    except ExternalCaptureError as err:
+        for b in keep:
+            results[b] = err
+        return results
+    names = blocks.names + kvqg.names + outputs.names
+    values = torch.cat([blocks.values, kvqg.values, outputs.values], dim=1)
+    logprob = logprob.cpu().tolist()
+    for position, b in enumerate(keep):
+        span, seq = begun[b]
+        s = rows[b].surfaces
+        per_layer = {name: {layer: s[name][:, j] for j, layer in enumerate(sampled)}
+                     for name in ("k", "v", "q", "gate")}
+        try:
+            results[b] = span.finish(
+                hidden=s["depth"].permute(1, 0, 2), keys=per_layer["k"], values=per_layer["v"],
+                queries=per_layer["q"], gates=per_layer["gate"], logit_stats=s["logit_stats"],
+                token_ids=seq, capture_identity=dict(engine),
+                batched=BatchedRow(names, values[position], logprob[position],
+                                   tuple(routing_names), routing_values[position]),
+                batch_size=len(keep))
+        except ExternalCaptureError as err:
+            results[b] = err
+    return results
+
+
 def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                               token_ids: Sequence[Sequence[int]],
                               engine: Mapping[str, Any]) -> list[Any]:
-    """Signed rows of one step count through :class:`HybridStatsSpan`: the block-output
-    family batched across the rows by :func:`block_output_features`, every other family
-    per row. Returns, per row in order, its ``GpuFeatureResult`` or the
-    :class:`ExternalCaptureError` that refused it; a refused row is left out of the batch,
-    which changes no other row's bytes."""
+    """Signed rows of one step count through :class:`HybridStatsSpan`: every family but
+    attention batched across the rows (:func:`block_output_features`, :func:`kvqg_features`,
+    :func:`outputs_features`, :func:`routing_features`), attention per row. Rows whose
+    surfaces differ in shape or routing plan reduce in separate batches. Returns, per row
+    in order, its ``GpuFeatureResult`` or the :class:`ExternalCaptureError` that refused it;
+    a refused row is left out of the batch, which changes no other row's bytes."""
     results: list[Any] = [None] * len(rows)
     begun: dict[int, tuple[HybridStatsSpan, list[int]]] = {}
     for i, (row, seq) in enumerate(zip(rows, token_ids, strict=True)):
@@ -181,36 +307,14 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
             begun[i] = _begin_signed_row(lane, row, seq, HybridStatsSpan)
         except ExternalCaptureError as err:
             results[i] = err
-    shapes = {i: tuple(rows[i].surfaces["depth"].shape) for i in begun}
-    reference = next(iter(shapes.values()), None)
-    for i, shape in shapes.items():
-        if len(shape) != 3 or shape != reference:
-            results[i] = ExternalCaptureError(
-                f"depth {list(shape)} is not the batch's {list(reference)}")
-            begun.pop(i)
-    if begun:
-        order = sorted(begun)
-        sampled = list(lane.config.sampled_layers)
-        laplacians = {}
-        for layer in sampled:
-            popped = [begun[i][0].attention_reducer.spectral.pop(layer) for i in order]
-            laplacians[layer] = (popped[0][0], torch.stack([lap for _, lap in popped]))
-        try:
-            blocks = block_output_features(
-                lane, torch.stack([rows[i].surfaces["depth"].to(lane.device) for i in order]),
-                [int(rows[i].start) for i in order], laplacians)
-        except ExternalCaptureError as err:
-            for i in order:
-                results[i] = err
-            return results
-        for b, i in enumerate(order):
-            span, seq = begun[i]
-            try:
-                results[i] = span.finish(**_finish_arguments(lane, rows[i], seq, engine),
-                                         block_outputs=(blocks.names, blocks.row(b)),
-                                         batch_size=len(order))
-            except ExternalCaptureError as err:
-                results[i] = err
+    groups: dict[tuple, list[int]] = {}
+    for i in sorted(begun):
+        groups.setdefault(_shape_key(rows[i]), []).append(i)
+    for members in groups.values():
+        reduced = _reduce_uniform(lane, [rows[i] for i in members],
+                                  [begun[i] for i in members], engine)
+        for i, result in zip(members, reduced, strict=True):
+            results[i] = result
     return results
 
 
@@ -223,10 +327,9 @@ class EngineReducer:
     digest every row must carry; built from a preset it defaults to the preset's
     ``checkpoint_sha256`` (none declared: rows are not checked).
 
-    ``batched`` selects the hybrid reduction: rows of one step count reduce their
-    block-output family together through
-    :func:`~anamnesis.extraction.fast.batched_stats.block_output_features`, batchmate-
-    invariant, and every other family per row. Its rows carry the hybrid lane id
+    ``batched`` selects the hybrid reduction: rows of one step count reduce every family
+    but attention together (:func:`reduce_signed_rows_hybrid`), batchmate-invariant, and
+    attention per row. Its rows carry the hybrid lane id
     (:func:`~anamnesis.extraction.fast.batched_stats.hybrid_lane_id`) and the reducer
     identity names the batched module's digests. The default is the per-row reduction.
     """
@@ -253,7 +356,9 @@ class EngineReducer:
         if self.batched:
             identity.update(batched_families=list(BATCHED_FAMILIES),
                             batched_source_sha256=BATCHED_SOURCE_SHA256,
-                            invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256)
+                            families_source_sha256=FAMILIES_SOURCE_SHA256,
+                            invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256,
+                            eff_dim=EFF_DIM, per_row=list(PER_ROW_EXCEPTIONS))
         self.reducer_identity = (
             "anamnesis.extraction.fast.engine_reducer:EngineReducer@"
             + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest())
@@ -292,8 +397,8 @@ class EngineReducer:
                engine: Mapping[str, Any]) -> list[EngineReducedRow]:
         """One :class:`EngineReducedRow` per signed row, in order.
 
-        With ``batched``, the rows are grouped by step count and each group's block-output
-        family is reduced together; a row's bytes do not depend on its group.
+        With ``batched``, the rows are grouped by step count and each group's families
+        other than attention are reduced together; a row's bytes do not depend on its group.
 
         Raises
         ------
