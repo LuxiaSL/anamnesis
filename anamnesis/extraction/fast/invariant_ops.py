@@ -90,6 +90,22 @@ _ALIGN_BYTES = 16
 if HAVE_TRITON:
 
     @triton.jit
+    def _div(a, b, IS_FP64: tl.constexpr):
+        # float64 division and square root round correctly as written; float32 needs
+        # the _rn forms, or the compiler emits the approximate instructions.
+        if IS_FP64:
+            return a / b
+        else:
+            return tl.div_rn(a, b)
+
+    @triton.jit
+    def _sqrt(a, IS_FP64: tl.constexpr):
+        if IS_FP64:
+            return tl.sqrt(a)
+        else:
+            return tl.sqrt_rn(a)
+
+    @triton.jit
     def _row_reduce_kernel(
         x_ptr,
         y_ptr,
@@ -100,6 +116,7 @@ if HAVE_TRITON:
         OP: tl.constexpr,
         MASK_KIND: tl.constexpr,
         BLOCK_W: tl.constexpr,
+        IS_FP64: tl.constexpr,
     ):
         row = tl.program_id(0).to(tl.int64)
         base = row * W
@@ -129,11 +146,11 @@ if HAVE_TRITON:
         total = tl.sum(acc, axis=0)
         n = tl.maximum(tl.sum(count, axis=0), 1).to(total.dtype)
         if OP == 3:
-            total = tl.div_rn(total, n)
+            total = _div(total, n, IS_FP64)
         elif OP == 4:
-            total = tl.sqrt_rn(total)
+            total = _sqrt(total, IS_FP64)
         elif OP == 5:
-            mean = tl.div_rn(total, n)
+            mean = _div(total, n, IS_FP64)
             acc = tl.zeros([BLOCK_W], dtype=out_ptr.dtype.element_ty)
             for start in range(0, W, BLOCK_W):
                 cols = start + offs
@@ -145,7 +162,7 @@ if HAVE_TRITON:
                 x = tl.load(x_ptr + base + cols, mask=keep, other=0.0)
                 d = tl.where(keep, x - mean, 0.0)
                 acc += d * d
-            total = tl.sqrt_rn(tl.div_rn(tl.sum(acc, axis=0), n))
+            total = _sqrt(_div(tl.sum(acc, axis=0), n, IS_FP64), IS_FP64)
         tl.store(out_ptr + row, total)
 
 
@@ -291,6 +308,7 @@ def _triton_reduce(
             OP=op,
             MASK_KIND=kind,
             BLOCK_W=BLOCK,
+            IS_FP64=rows.dtype == torch.float64,
             num_warps=NUM_WARPS,
             num_stages=NUM_STAGES,
         )
