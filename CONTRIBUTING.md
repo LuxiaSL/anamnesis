@@ -189,3 +189,82 @@ rewritten.
 - **A machine** qualifies itself: `python -m anamnesis.scripts.qualify_box`. Different hardware
   gives different numbers, which is expected rather than wrong; results from different machines
   must not be mixed inside one contrast.
+
+## Public voice
+
+Strangers read the README, the pages under `docs/`, this file, and every module docstring that
+those pages link to. A third documentation check keeps them at least as easy to read as they are.
+It counts the features that make prose hard to follow on the first pass. The features come from
+Clark, Martin & Mahowald,
+[*Why is AI-generated language so hard to understand?*](https://arxiv.org/abs/2610.29162):
+
+- sentences over 30 words, which usually hold two or three claims;
+- long distances between a word and the word that it attaches to;
+- object relative clauses, most of all the ones that drop their "that" ("the gates a change
+  passes");
+- three or more nouns in a row ("checkpoint series replay");
+- a thing as the subject of a mind verb ("the pass decides");
+- a noun used as a verb ("to task").
+
+Each rate is compared with a sample of English Wikipedia. Human expository prose sits near one
+times the reference on every feature. A page that is dense with code names runs higher on stacked
+nouns, and that is fine where the names are real identifiers.
+
+### Writing to it
+
+Put one claim in each sentence. Keep the subject near its verb. Give an object relative its
+"that": write "the gates that a change passes". Use at most two nouns in a row, and unpack a
+longer run with a preposition. Give a mind verb a person as its subject, not a thing. When you
+rewrite a sentence, keep every fact that it states: every number, name, caveat and link.
+
+### How the check holds a page
+
+`tools/legibility_baseline.json` records each page's numbers. A page fails when a feature rises
+more than ten percent above its baseline, plus one occurrence. The mean distance between linked
+words may rise by three percent. A page that is not in the baseline yet must be no worse than the
+median page here, and a page under 150 words is reported but not held to that. The check holds
+object relatives as a whole, and the ones without "that" on their own, so giving a relative its
+"that" never fails a page. On a failing page,
+the check prints the flagged sentences, so you can see what to rewrite.
+
+The check parses with spaCy's transformer model, at the versions that
+`tools/legibility_requirements.txt` pins. Those are most of a gigabyte of downloads, so CI runs
+the check as its own job on Python 3.12. To run it locally, install the requirements into an
+environment of their own:
+
+```bash
+pip install -r tools/legibility_requirements.txt
+python -m tools.check_legibility                            # every public page
+python -m tools.check_legibility --page README.md --flags   # one page, every flagged sentence
+```
+
+The measurement is `tools/legibility_measure.py`, and the reference statistics are
+`tools/legibility_reference.json`. A ratio means something only when the page and the reference
+are counted by the same code. So a change to the measurement, or to a pinned version, comes with
+a rebuilt reference and a re-measured baseline.
+
+### When prose improves
+
+A page that gets better passes, and the check lists the features whose baseline can tighten.
+Run `python -m tools.check_legibility --update-baseline`, and commit the new baseline with the
+rewrite. From then on the page is held to its new level. A regression enters the baseline only
+with a reason: `--update-baseline --reason "..."` records the reason on each page that would have
+failed, where a reviewer reads it in the diff.
+
+### Flourishes
+
+Some passages are voice rather than exposition. The definition of a signature is the example:
+its wording is fixed, and every page that states it quotes it verbatim. Fence such a passage,
+and say why in the fence:
+
+```markdown
+<!-- legibility: flourish — the definition of a signature, quoted verbatim on every page that states it -->
+A signature is a lossy compression of the causal history of a forward pass over a span of text.
+<!-- /legibility -->
+```
+
+The check skips fenced text, and its receipt lists every fence with its reason. A fence that
+states no reason fails, and so does one that is never closed. A fence is legitimate for a line
+that is written to be quoted, or a line that carries the project's stance. It is not a way to keep
+a hard paragraph: if a passage explains something, rewrite it instead. A docstring takes the same
+two markers, but `help()` shows them to the reader, so a docstring fence should be rare.

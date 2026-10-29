@@ -1,0 +1,146 @@
+{
+  "pages": {
+    "CONTRIBUTING.md": {
+      "dep_len": 2.327,
+      "rates": {
+        "denominal": 0.8718,
+        "inanimate": 2.6155,
+        "long": 8.2825,
+        "orc": 1.3078,
+        "orc_all": 13.0776,
+        "orc_reduced": 11.7698,
+        "stacked": 0.4359
+      },
+      "sentences": 122,
+      "words": 2294
+    },
+    "README.md": {
+      "dep_len": 2.3121,
+      "rates": {
+        "denominal": 0.0,
+        "inanimate": 8.0645,
+        "long": 9.0726,
+        "orc": 1.0081,
+        "orc_all": 17.1371,
+        "orc_reduced": 16.129,
+        "stacked": 5.0403
+      },
+      "sentences": 46,
+      "words": 992
+    },
+    "anamnesis/__init__.py": {
+      "dep_len": 2.305,
+      "rates": {
+        "denominal": 0.0,
+        "inanimate": 4.4248,
+        "long": 6.6372,
+        "orc": 6.6372,
+        "orc_all": 17.6991,
+        "orc_reduced": 11.0619,
+        "stacked": 6.6372
+      },
+      "sentences": 23,
+      "words": 452
+    },
+    "anamnesis/analysis/gauntlet/__init__.py": {
+      "dep_len": 1.9103,
+      "rates": {
+        "denominal": 2.7322,
+        "inanimate": 2.7322,
+        "long": 19.1257,
+        "orc": 0.0,
+        "orc_all": 2.7322,
+        "orc_reduced": 2.7322,
+        "stacked": 2.7322
+      },
+      "sentences": 10,
+      "words": 366
+    },
+    "anamnesis/extraction/__init__.py": {
+      "dep_len": 2.2099,
+      "rates": {
+        "denominal": 2.3041,
+        "inanimate": 2.3041,
+        "long": 9.2166,
+        "orc": 0.0,
+        "orc_all": 16.129,
+        "orc_reduced": 16.129,
+        "stacked": 4.6083
+      },
+      "sentences": 24,
+      "words": 434
+    },
+    "anamnesis/modes/__init__.py": {
+      "dep_len": 2.3704,
+      "rates": {
+        "denominal": 0.0,
+        "inanimate": 0.0,
+        "long": 8.2988,
+        "orc": 0.0,
+        "orc_all": 29.0456,
+        "orc_reduced": 29.0456,
+        "stacked": 0.0
+      },
+      "sentences": 11,
+      "words": 241
+    },
+    "anamnesis/scripts/__init__.py": {
+      "dep_len": 2.4873,
+      "rates": {
+        "denominal": 0.0,
+        "inanimate": 5.1216,
+        "long": 2.5608,
+        "orc": 1.2804,
+        "orc_all": 12.8041,
+        "orc_reduced": 11.5237,
+        "stacked": 6.402
+      },
+      "sentences": 50,
+      "words": 781
+    },
+    "anamnesis/synthetic_bank.py": {
+      "dep_len": 2.1132,
+      "rates": {
+        "denominal": 5.2448,
+        "inanimate": 3.4965,
+        "long": 12.2378,
+        "orc": 0.0,
+        "orc_all": 8.7413,
+        "orc_reduced": 8.7413,
+        "stacked": 0.0
+      },
+      "sentences": 23,
+      "words": 572
+    },
+    "docs/ARCHITECTURE.md": {
+      "dep_len": 2.4091,
+      "rates": {
+        "denominal": 0.8251,
+        "inanimate": 4.9505,
+        "long": 11.0011,
+        "orc": 0.275,
+        "orc_all": 10.176,
+        "orc_reduced": 9.901,
+        "stacked": 1.9252
+      },
+      "sentences": 165,
+      "words": 3636
+    },
+    "docs/VLLM_LANE.md": {
+      "dep_len": 2.4712,
+      "rates": {
+        "denominal": 1.077,
+        "inanimate": 3.5003,
+        "long": 12.3856,
+        "orc": 0.0,
+        "orc_all": 7.0005,
+        "orc_reduced": 7.0005,
+        "stacked": 2.154
+      },
+      "sentences": 155,
+      "words": 3714
+    }
+  },
+  "parser": "en_core_web_trf",
+  "reference": "wikimedia/wikipedia 20231101.en, first 3000 articles (bigrams), 120 parsed"
+}
