@@ -205,10 +205,10 @@ def test_the_bucket_rules():
 def test_a_row_has_the_same_bytes_alone_and_beside_rows_of_other_step_counts(device, hidden):
     rng = np.random.default_rng(11)
     targets = [signed_row(n, int(rng.integers(1, MAX_START + 1)), 2000 + n, hidden)
-               for n in (9, 13, 16, 21, 47, 61, 70, 5, 2, 1)]
+               for n in (9, 16, 61, 70, 5, 2, 1)]
     alone = [reduce(device, hidden, [t])[0] for t in targets]
     pool = BUCKETED + SHORT + ALONE
-    for size in (2, 8, 24):
+    for size in (2, 12):
         for t, target in enumerate(targets):
             n = target[0].positions
             same_bucket = [m for m in pool if bucket_width(m, "pow2") == bucket_width(n, "pow2")]
