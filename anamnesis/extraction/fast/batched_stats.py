@@ -25,15 +25,17 @@ byte. The names, their placeholders for short spans (residual trajectory below t
 steps, windowed operators below four, the spectrum below eight) and the zeroing of a
 trajectory whose first raw block output is null are the per-row loop's.
 
-**The hybrid row.** :class:`HybridStatsSpan` is an :class:`ExternalStatsSpan` whose
-``finish`` takes every family but attention computed batched: the block outputs here, and
-the key, value, query, gate, per-head, cross-layer, output and routing families in
-:mod:`anamnesis.extraction.fast.batched_families`. The attention family it reduces exactly
-as the statistics span does. Its arithmetic differs from the statistics span's, so its lane
-id is :func:`hybrid_lane_id`, which folds the statistics lane id together with both batched
-modules' and the primitives' source digests, the batched families, the per-row exceptions,
-the effective-dimension method, the bucket rule and the row-reduction backend, under its
-own prefix :data:`HYBRID_LANE_PREFIX`.
+**The batched row.** Every family is reduced batched: the attention family in
+:mod:`anamnesis.extraction.fast.batched_attention`, the block outputs here, and the key,
+value, query, gate, per-head, cross-layer, output and routing families in
+:mod:`anamnesis.extraction.fast.batched_families`. :func:`finish_rows` assembles each row's
+vector in the lane's schema for the whole batch at once and writes each row's receipt. The
+arithmetic differs from the statistics span's, so a batched row's lane id is
+:func:`hybrid_lane_id`, which folds the statistics lane id together with the three batched
+modules' and the primitives' source digests, the batched families, the per-row exceptions
+(none), the effective-dimension method, the gate top-k's tie rule, the eigensolver's path,
+the bucket rule and the row-reduction backend, under its own prefix
+:data:`HYBRID_LANE_PREFIX`.
 """
 
 from __future__ import annotations
@@ -62,7 +64,6 @@ from anamnesis.extraction.fast.external import (
 from anamnesis.extraction.fast.external_stats import (
     CAPTURE_KIND,
     STATS_SOURCE_SHA256,
-    ExternalStatsSpan,
     stats_lane_id,
 )
 from anamnesis.extraction.fast.features import GpuFeatureLane, GpuFeatureResult
@@ -87,13 +88,28 @@ FAMILIES_SOURCE_SHA256 = hashlib.sha256(
 """The source digest of :mod:`anamnesis.extraction.fast.batched_families`, part of every
 hybrid row's lane id."""
 
-BATCHED_FAMILIES = ("block_outputs", "keys", "per_head_keys", "values", "queries", "gates",
-                    "cross_layer", "outputs", "routing")
-"""The families a hybrid row reduces batched; the attention family is reduced per row."""
+ATTENTION_SOURCE_SHA256 = hashlib.sha256(
+    Path(__file__).with_name("batched_attention.py").read_bytes()).hexdigest()
+"""The source digest of :mod:`anamnesis.extraction.fast.batched_attention`, part of every
+hybrid row's lane id."""
 
-PER_ROW_EXCEPTIONS = ("gate_topk_overlap",)
-"""Features the batched reduction computes per row, inside the batch, for a stated reason
-(:mod:`anamnesis.extraction.fast.batched_families`)."""
+BATCHED_FAMILIES = ("attention", "block_outputs", "keys", "per_head_keys", "values", "queries",
+                    "gates", "cross_layer", "outputs", "routing")
+"""The families a hybrid row reduces batched: all of them."""
+
+PER_ROW_EXCEPTIONS: tuple[str, ...] = ()
+"""Features the batched reduction computes per row: none."""
+
+TOPK_TIES = "lowest-index"
+"""How the gate's top-k breaks ties at the k-th value: the lowest column index first
+(:func:`anamnesis.extraction.fast.batched_families.gate_topk_overlap_rows`)."""
+
+def eigvalsh_path(device: torch.device | str) -> str:
+    """How the spectral Laplacians' eigenvalues are solved on ``device``
+    (:func:`anamnesis.extraction.fast.batched_attention.eigvalsh_rows`): ``batched`` (one call
+    over a chunk's rows and sampled layers, never a batch of one) on CUDA, ``per-matrix`` on
+    CPU."""
+    return "batched" if torch.device(device).type == "cuda" else "per-matrix"
 
 EFF_DIM = "norms"
 """How a hybrid row computes every effective dimension: from Frobenius norms."""
@@ -135,15 +151,20 @@ def row_backend(device: torch.device | str) -> str:
 
 def hybrid_lane_id(lane: GpuFeatureLane, capture_identity: Mapping[str, Any]) -> str:
     """The lane id of a row whose families were reduced batched."""
-    payload = dict(stats_lane_id=stats_lane_id(lane, capture_identity),
-                   batched_source_sha256=BATCHED_SOURCE_SHA256,
-                   invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256,
-                   batched_families=list(BATCHED_FAMILIES), bucket_rule=BUCKET_RULE,
-                   row_backend=row_backend(lane.device),
-                   families_source_sha256=FAMILIES_SOURCE_SHA256, eff_dim=EFF_DIM,
-                   per_row=list(PER_ROW_EXCEPTIONS))
-    return HYBRID_LANE_PREFIX + hashlib.sha256(
-        json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    return HYBRID_LANE_PREFIX + hashlib.sha256(json.dumps(
+        dict(stats_lane_id=stats_lane_id(lane, capture_identity), **batched_receipt(lane.device)),
+        sort_keys=True, default=str).encode()).hexdigest()
+
+
+def batched_receipt(device: torch.device | str) -> dict[str, Any]:
+    """What a hybrid row's receipt records of its batched reduction on ``device``, and its
+    lane id folds in."""
+    return dict(families=list(BATCHED_FAMILIES), source_sha256=BATCHED_SOURCE_SHA256,
+                families_source_sha256=FAMILIES_SOURCE_SHA256,
+                attention_source_sha256=ATTENTION_SOURCE_SHA256,
+                invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256,
+                bucket_rule=BUCKET_RULE, row_backend=row_backend(device), eff_dim=EFF_DIM,
+                topk_ties=TOPK_TIES, eigvalsh=eigvalsh_path(device), per_row=list(PER_ROW_EXCEPTIONS))
 
 
 @dataclass(frozen=True)
@@ -399,160 +420,133 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
 
 
 @dataclass(frozen=True)
-class BatchedRow:
-    """One row's share of a batched reduction: every lane feature computed batched
-    (``names`` and float64 ``values``, one per name), the row's mean log probability, and
-    its routing family's names and float32 values (``None`` for a row without routing)."""
+class RowSpan:
+    """What a batched row's receipt names of its span: the prompt length ``start``, the span
+    end ``end`` (the length of its token ids) and the token ids up to it."""
 
-    names: tuple[str, ...]
-    values: Tensor
-    mean_logprob: float
-    routing_names: tuple[str, ...] | None = None
-    routing_values: Tensor | None = None
+    start: int
+    end: int
+    token_ids: Sequence[int]
 
 
-class HybridStatsSpan(ExternalStatsSpan):
-    """A statistics span whose every family but attention is handed over, computed batched.
+_ORDER: dict[tuple[int, int], tuple[tuple[str, ...], tuple[str, ...], Tensor]] = {}
 
-    :meth:`finish` takes the row's :class:`BatchedRow` (the block-output, key, value,
-    query, gate, per-head, cross-layer, output and routing families) and adds the
-    attention family its own :meth:`attention_stats` reduced; the receipt's fields are
-    the statistics span's, plus the hybrid lane id and which families were batched.
+
+def _schema_order(names: tuple[str, ...], schema: tuple[str, ...], device) -> Tensor:
+    """The index of each schema name in ``names``, kept for the pair."""
+    key = (id(names), id(schema))
+    hit = _ORDER.get(key)
+    if hit is not None and hit[0] is names and hit[1] is schema and hit[2].device == torch.device(device):
+        return hit[2]
+    if len(set(names)) != len(names) or set(names) != set(schema) or len(names) != len(schema):
+        missing, extra = set(schema) - set(names), set(names) - set(schema)
+        raise ValueError(
+            f"GPU feature schema mismatch: missing={sorted(missing)}, extra={sorted(extra)}")
+    where = {name: i for i, name in enumerate(names)}
+    order = torch.tensor([where[name] for name in schema], dtype=torch.long, device=device)
+    if len(_ORDER) > 64:
+        _ORDER.clear()
+    _ORDER[key] = (names, schema, order)
+    return order
+
+
+def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str, ...],
+                values: Tensor, mean_logprob: Tensor, knnlm: Tensor | None,
+                capture_identity: Mapping[str, Any], *, num_layers: int,
+                routing_names: Sequence[str] | None = None, routing_values: Tensor | None = None,
+                retained_attention_summary_bytes: int = 0) -> list[GpuFeatureResult | ExternalCaptureError]:
+    """Each row's ``GpuFeatureResult``, assembled for the whole batch at once.
+
+    ``values [B, len(names)]`` holds every lane feature (float64, each the value the per-row
+    reduction would emit before its float32 cast); they are put in the lane's schema order by
+    one gather and cast once, and the routing family's float32 ``routing_values [B, ...]``
+    follows them. ``num_layers`` is the capture's layer count, every one of which the attention
+    reduction read. ``mean_logprob [B]`` and ``knnlm [B, hidden]`` (or ``None``) are per row.
+    The receipt's lane id is :func:`hybrid_lane_id`; the fields common to the batch are
+    computed once. A row with a nonfinite feature gets the :class:`ExternalCaptureError` that
+    refuses it, in its place.
+
+    Raises
+    ------
+    ExternalCaptureError
+        When ``values`` does not match ``names`` and ``spans``.
     """
-
-    def _validate_shapes(self, hidden: Tensor, keys: Mapping[int, Tensor],
-                         values: Mapping[int, Tensor], queries: Mapping[int, Tensor],
-                         gates: Mapping[int, Tensor], logit_stats: Tensor,
-                         token_ids: Sequence[int]) -> None:
-        """``ExternalSpan._validate``'s checks that read shapes and settings only. The
-        finiteness of the surfaces is checked once for the whole batch, before the batched
-        reduction, by :func:`~anamnesis.extraction.fast.engine_reducer.reduce_signed_rows_hybrid`."""
-        lane, steps = self.lane, self.steps
-        if not torch.are_deterministic_algorithms_enabled():
-            raise ExternalCaptureError("the reduction runs with deterministic algorithms on")
-        if lane.device.type == "cuda" and torch.backends.cuda.matmul.allow_tf32:
-            raise ExternalCaptureError("the reduction runs with TF32 off")
-        if not isinstance(hidden, Tensor) or hidden.ndim != 3 or hidden.shape[:2] != (self.num_layers, steps):
-            raise ExternalCaptureError(
-                f"hidden must be [{self.num_layers}, {steps}, width], got "
-                f"{tuple(hidden.shape) if isinstance(hidden, Tensor) else type(hidden).__name__}")
-        if (lane.pm.ndim != 3 or lane.pm.shape[0] < self.num_layers + 1
-                or lane.pm.shape[1] < self.start + steps or lane.pm.shape[2] != hidden.shape[2]):
-            raise ExternalCaptureError("the lane's positional means do not cover this capture")
-        sampled = set(lane.config.sampled_layers)
-        if not sampled <= set(range(self.num_layers)):
-            raise ExternalCaptureError("a sampled layer lies outside the capture")
-        for name, mapping, ndim in (("keys", keys, 3), ("values", values, 3), ("queries", queries, 3),
-                                    ("gates", gates, 2)):
-            if set(mapping) != sampled:
-                raise ExternalCaptureError(f"{name} must hold exactly the sampled layers")
-            for layer, x in mapping.items():
-                if x.ndim != ndim or x.shape[0] != steps:
-                    raise ExternalCaptureError(f"{name} layer {layer} has shape {tuple(x.shape)}")
-                if not x.is_floating_point():
-                    raise ExternalCaptureError("the capture holds a nonfloating or nonfinite tensor")
-        if not hidden.is_floating_point():
-            raise ExternalCaptureError("the capture holds a nonfloating or nonfinite tensor")
-        if (not isinstance(logit_stats, Tensor) or tuple(logit_stats.shape) != (steps, 6)
-                or logit_stats.dtype not in (torch.float32, torch.float64)):
-            raise ExternalCaptureError(f"logit_stats must be finite float32 or float64 [{steps}, 6]")
-        if len(token_ids) < self.end:
-            raise ExternalCaptureError("token_ids do not cover the span")
-
-    def finish(self, *, hidden: Tensor, keys: Mapping[int, Tensor],
-               values: Mapping[int, Tensor], queries: Mapping[int, Tensor],
-               gates: Mapping[int, Tensor], logit_stats: Tensor,
-               token_ids: Sequence[int], capture_identity: Mapping[str, Any],
-               batched: BatchedRow, batch_size: int = 1) -> GpuFeatureResult:
-        """The row's features: its attention family and ``batched``, assembled in the
-        lane's schema, with the routing family after them. ``hidden`` (``[layers, steps,
-        width]``, a view is enough), the per-layer surfaces and ``logit_stats`` are the
-        row's own, checked here for shape; their values were reduced into ``batched``.
-
-        Raises
-        ------
-        ExternalCaptureError
-            When a surface is mis-shaped, an attention layer was not reduced, ``batched``
-            is mis-shaped, or a feature is nonfinite.
-        """
-        if self.finished:
-            raise ExternalCaptureError("a span is finished once")
-        if not isinstance(batched, BatchedRow):
-            raise ExternalCaptureError("a hybrid span is finished with its BatchedRow")
-        if batched.values.ndim != 1 or batched.values.shape[0] != len(batched.names):
-            raise ExternalCaptureError(
-                f"{len(batched.names)} batched names for values {tuple(batched.values.shape)}")
-        self.finished = True
-        lane, steps, start, end = self.lane, self.steps, self.start, self.end
-        self._validate_shapes(hidden, keys, values, queries, gates, logit_stats, token_ids)
-        if self.attention_reducer.seen != set(range(self.num_layers)):
-            missing = sorted(set(range(self.num_layers)) - self.attention_reducer.seen)
-            raise ExternalCaptureError(f"attention layers {missing} were not reduced")
-        out, attention = self.collector, self.attention_reducer
-        # The per-head summaries were handed to the batched reduction.
-        attention.per_head.clear()
-        out.put_block(list(batched.names), batched.values.to(lane.device))
-        vector = out.finish(list(lane.names))
-        names = list(lane.names)
-        routed = batched.routing_names is not None
-        if routed:
-            vector = torch.cat([vector, batched.routing_values.to(vector.device, vector.dtype)])
-            names += list(batched.routing_names)
-        features = vector.cpu().numpy()
-        if not np.isfinite(features).all():
-            raise ExternalCaptureError("the reduction produced a nonfinite feature")
-        knnlm = (hidden[-1][steps - 1].float().cpu().numpy().copy()
-                 if lane.config.enable_knnlm_baseline else None)
-        receipt = dict(
-            lane_id=hybrid_lane_id(lane, capture_identity),
-            stats_lane_id=stats_lane_id(lane, capture_identity),
-            external_lane_id=external_lane_id(lane, capture_identity),
-            fast_lane_id=lane.lane_id,
-            lane_source_sha256=dict(lane.source_sha256),
-            readout_source_sha256=dict(READOUT_SOURCE_SHA256),
-            stats_source_sha256=STATS_SOURCE_SHA256,
-            batched=dict(families=list(BATCHED_FAMILIES),
-                         source_sha256=BATCHED_SOURCE_SHA256,
-                         families_source_sha256=FAMILIES_SOURCE_SHA256,
-                         invariant_ops_source_sha256=INVARIANT_OPS_SOURCE_SHA256,
-                         bucket_rule=BUCKET_RULE, row_backend=row_backend(lane.device),
-                         eff_dim=EFF_DIM, per_row=list(PER_ROW_EXCEPTIONS)),
-            capture=dict(capture_identity),
-            capture_kind=CAPTURE_KIND,
-            reductions=dict({family: "batched" for family in BATCHED_FAMILIES},
-                            attention="stats", logits="stats",
-                            routing="batched" if routed else "none"),
-            replay_id=str(uuid.uuid4()),
-            replay_path="external-stats-hybrid",
-            span_start=start,
-            span_end=end,
-            input_tokens_sha256=hashlib.sha256(
-                np.asarray(list(token_ids[:end]), dtype="<i8").tobytes()).hexdigest(),
-            feature_schema_sha256=hashlib.sha256(json.dumps(names).encode()).hexdigest(),
-            calibration_sha256=lane.calibration_sha256,
-            channel="probe-free",
-            certified=False,
-            batch_size=int(batch_size),
-            attention_layers_reduced=len(attention.seen),
-            retained_attention_summary_bytes=attention.retained_bytes,
-            routing_family=routed,
-        )
-        return GpuFeatureResult(features, tuple(names), float(batched.mean_logprob), knnlm, receipt)
+    batch = len(spans)
+    if values.ndim != 2 or values.shape != (batch, len(names)):
+        raise ExternalCaptureError(
+            f"{batch} rows and {len(names)} batched names for values {tuple(values.shape)}")
+    schema = tuple(lane.names)
+    order = _schema_order(names, schema, values.device)
+    vector = values.index_select(1, order).float()
+    all_names = list(schema)
+    routed = routing_names is not None
+    if routed:
+        vector = torch.cat([vector, routing_values.to(vector.device, vector.dtype)], dim=1)
+        all_names += list(routing_names)
+    features = vector.cpu().numpy()
+    finite = np.isfinite(features).all(axis=1)
+    logprob = mean_logprob.double().cpu().tolist()
+    knn = knnlm.float().cpu().numpy() if knnlm is not None else None
+    names_out = tuple(all_names)
+    common = dict(
+        lane_id=hybrid_lane_id(lane, capture_identity),
+        stats_lane_id=stats_lane_id(lane, capture_identity),
+        external_lane_id=external_lane_id(lane, capture_identity),
+        fast_lane_id=lane.lane_id,
+        lane_source_sha256=dict(lane.source_sha256),
+        readout_source_sha256=dict(READOUT_SOURCE_SHA256),
+        stats_source_sha256=STATS_SOURCE_SHA256,
+        batched=batched_receipt(lane.device),
+        capture=dict(capture_identity),
+        capture_kind=CAPTURE_KIND,
+        reductions=dict({family: "batched" for family in BATCHED_FAMILIES},
+                        logits="stats", routing="batched" if routed else "none"),
+        replay_path="external-stats-hybrid",
+        feature_schema_sha256=hashlib.sha256(json.dumps(all_names).encode()).hexdigest(),
+        calibration_sha256=lane.calibration_sha256,
+        channel="probe-free",
+        certified=False,
+        batch_size=batch,
+        attention_layers_reduced=int(num_layers),
+        retained_attention_summary_bytes=int(retained_attention_summary_bytes),
+        routing_family=routed,
+    )
+    results: list[GpuFeatureResult | ExternalCaptureError] = []
+    for b, span in enumerate(spans):
+        if not finite[b]:
+            results.append(ExternalCaptureError("the reduction produced a nonfinite feature"))
+            continue
+        receipt = dict(common, replay_id=str(uuid.uuid4()), span_start=span.start,
+                       span_end=span.end,
+                       input_tokens_sha256=hashlib.sha256(np.asarray(
+                           list(span.token_ids[:span.end]), dtype="<i8").tobytes()).hexdigest())
+        receipt["capture"] = dict(capture_identity)
+        receipt["lane_source_sha256"] = dict(lane.source_sha256)
+        receipt["readout_source_sha256"] = dict(READOUT_SOURCE_SHA256)
+        receipt["batched"] = dict(common["batched"])
+        receipt["reductions"] = dict(common["reductions"])
+        results.append(GpuFeatureResult(features[b], names_out, float(logprob[b]),
+                                        knn[b].copy() if knn is not None else None, receipt))
+    return results
 
 
 __all__ = (
+    "ATTENTION_SOURCE_SHA256",
     "BATCHED_FAMILIES",
     "BATCHED_SOURCE_SHA256",
     "BUCKET_RULE",
-    "BatchedRow",
     "BlockOutputs",
     "EFF_DIM",
     "FAMILIES_SOURCE_SHA256",
     "HYBRID_LANE_PREFIX",
-    "HybridStatsSpan",
     "INVARIANT_OPS_SOURCE_SHA256",
     "PER_ROW_EXCEPTIONS",
+    "RowSpan",
+    "TOPK_TIES",
+    "batched_receipt",
     "block_output_features",
+    "eigvalsh_path",
+    "finish_rows",
     "hybrid_lane_id",
     "row_backend",
 )
