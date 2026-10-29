@@ -50,6 +50,13 @@ epochs) is its own, and so are its short-span placeholders. A row joins a bucket
 its own lane's feature names are the bucket lane's, name for name; others (a one-step span)
 are batched only with rows of their exact step count. The rule joins the lane id.
 
+**Lens.** With a ``lens`` head (:class:`~anamnesis.extraction.fast.lens.LensHead`), every
+row also carries the lens family (:mod:`anamnesis.extraction.fast.lens`) at the lane's
+sampled layers, after the routing family. It is opt-in: the head's identity joins the engine
+mapping the lane id is computed under, so a lens row never shares a lane with a row without
+one, and each receipt names the lens's built-in check (``lens_final_check``: the largest gap
+between the final read's entropy and the step's own). It needs the batched reduction.
+
 **Refusals.** The first row that cannot be reduced raises :class:`ExternalCaptureError`
 naming its index, so a caller can retry the others one at a time. A row is refused when its span is incomplete, its step count disagrees with its
 token ids, its weights digest is not the one the reducer was built for, or a surface is
@@ -60,6 +67,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +101,7 @@ from anamnesis.extraction.fast.external_stats import (
     routing_stats_from_routing,
 )
 from anamnesis.extraction.fast.features import GpuFeatureLane
+from anamnesis.extraction.fast.lens import LensError, LensHead, lens_features
 
 ENGINE_REDUCER_SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 """This module's source digest, part of :attr:`EngineReducer.reducer_identity`."""
@@ -354,8 +363,9 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
 
 def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[RowSpan],
                     engine: Mapping[str, Any], width: int | None = None,
-                    bucket_rule: str = BUCKET_RULE) -> list[Any]:
-    """Rows that share a :func:`_shape_key` (padded to ``width``), every family batched."""
+                    bucket_rule: str = BUCKET_RULE, lens: LensHead | None = None) -> list[Any]:
+    """Rows that share a :func:`_shape_key` (padded to ``width``), every family batched; with
+    ``lens``, the lens family after them."""
     results: list[Any] = [None] * len(rows)
     stacked, bad = validate_batch(rows, lane.device, width)
     for b in bad:
@@ -393,6 +403,18 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
             final = depth[:, :, depth.shape[2] - 1]  # [B, steps, hidden]: the last layer
             knnlm = (final[:, steps - 1] if counts.uniform(steps)
                      else take_steps(final, (counts.dev - 1)[:, None])[:, 0])
+        lensed = None
+        if lens is not None:
+            chosen = torch.zeros(len(keep), steps, dtype=torch.long)
+            for i, b in enumerate(keep):
+                n, start = int(rows[b].positions), spans[b].start
+                chosen[i, :n] = torch.as_tensor(
+                    [int(t) for t in spans[b].token_ids[start + 1:start + 1 + n]])
+            step_entropy = stacked["logit_stats"][:, :, 0]
+            lensed = lens_features(lens, depth, committed, first.route_sources, sampled,
+                                   chosen.to(lane.device), step_entropy,
+                                   counts.lengths(step_entropy))
+            engine = dict(engine, lens=lens.identity())
         finished = finish_rows(
             lane, [spans[b] for b in keep], attention.names + blocks.names + kvqg.names
             + outputs.names,
@@ -401,7 +423,9 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
             routing_names=tuple(routing_names), routing_values=routing_values,
             retained_attention_summary_bytes=attention.retained_bytes,
             bucket_rule=bucket_rule, bucket_width=steps)
-    except (ExternalCaptureError, ValueError) as err:
+        if lensed is not None:
+            finished = _with_lens(finished, lensed)
+    except (ExternalCaptureError, LensError, ValueError) as err:
         err = err if isinstance(err, ExternalCaptureError) else ExternalCaptureError(str(err))
         for b in keep:
             results[b] = err
@@ -411,12 +435,39 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
     return results
 
 
+def _with_lens(finished: Sequence[Any], lensed: Any) -> list[Any]:
+    """Each finished row with the lens family's values after its own, and its receipt naming
+    the lens family and the row's built-in check. A row whose lens values are nonfinite is
+    refused, as any family's would be."""
+    values = lensed.values.float().cpu().numpy()
+    check = lensed.final_check.double().cpu().tolist()
+    names: tuple[str, ...] | None = None
+    out: list[Any] = []
+    for b, result in enumerate(finished):
+        if isinstance(result, ExternalCaptureError):
+            out.append(result)
+            continue
+        if not np.isfinite(values[b]).all():
+            out.append(ExternalCaptureError("the lens produced a nonfinite feature"))
+            continue
+        if names is None or names[:len(result.feature_names)] != result.feature_names:
+            names = tuple(result.feature_names) + tuple(lensed.names)
+        receipt = dict(result.metadata or {})
+        receipt["reductions"] = dict(receipt.get("reductions", {}), lens="batched")
+        receipt["feature_schema_sha256"] = hashlib.sha256(json.dumps(list(names)).encode()).hexdigest()
+        receipt["lens_final_check"] = float(check[b])
+        out.append(replace(result, features=np.concatenate([result.features, values[b]]),
+                           feature_names=names, metadata=receipt))
+    return out
+
+
 def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                               token_ids: Sequence[Sequence[int]],
                               engine: Mapping[str, Any],
                               bucket_rule: str = BUCKET_RULE,
                               width: int | None = None,
-                              max_group_rows: int | None = None) -> list[Any]:
+                              max_group_rows: int | None = None,
+                              lens: LensHead | None = None) -> list[Any]:
     """Signed rows of one lane, every family batched across the rows of one step-count
     bucket (:func:`attention_features`, :func:`block_output_features`, :func:`kvqg_features`,
     :func:`outputs_features`, :func:`routing_features`) and assembled by
@@ -430,7 +481,7 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
     at most that many rows, in order. The reduction is batchmate-invariant, so a chunk's rows
     have the bytes they have in the whole group, and the cap is not part of the lane. It
     bounds the memory a batch takes (the stacked surfaces, padded to the bucket's width) at
-    the cost of more launches."""
+    the cost of more launches. ``lens`` adds the lens family (see the module docstring)."""
     if max_group_rows is not None and int(max_group_rows) < 1:
         raise ValueError(f"max_group_rows must be at least 1, not {max_group_rows}")
     if bucket_rule not in BUCKET_RULES:
@@ -451,7 +502,8 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
         for lo in range(0, len(group), step):
             members = group[lo:lo + step]
             reduced = _reduce_uniform(lane, [rows[i] for i in members],
-                                      [spans[i] for i in members], engine, padded_to, bucket_rule)
+                                      [spans[i] for i in members], engine, padded_to, bucket_rule,
+                                      lens)
             for i, result in zip(members, reduced, strict=True):
                 results[i] = result
     return results
@@ -476,13 +528,19 @@ class EngineReducer:
     it is not part of the lane. The default is the
     batched reduction; ``batched=False`` reduces row by row under the per-row statistics
     lane id.
+
+    ``lens`` (a :class:`~anamnesis.extraction.fast.lens.LensHead`) or ``lens_checkpoint`` (a
+    checkpoint path, read by :meth:`~anamnesis.extraction.fast.lens.LensHead.from_checkpoint`
+    as the weights ``expected_weights`` names) turns on the lens family. The head must belong
+    to ``expected_weights``, and the lens needs the batched reduction.
     """
 
     def __init__(self, *, preset: str | None = None, calib_dir: str | Path | None = None,
                  device: str = "cuda",
                  lane_for: Callable[[int], GpuFeatureLane] | None = None,
                  expected_weights: str | None = None, batched: bool = True,
-                 buckets: str = BUCKET_RULE, max_group_rows: int | None = None) -> None:
+                 buckets: str = BUCKET_RULE, max_group_rows: int | None = None,
+                 lens: LensHead | None = None, lens_checkpoint: str | Path | None = None) -> None:
         if (lane_for is None) == (preset is None):
             raise ValueError("give a preset (with calib_dir) or lane_for, one of the two")
         if buckets not in BUCKET_RULES:
@@ -502,8 +560,11 @@ class EngineReducer:
                 raise ValueError("a preset needs its calib_dir")
             self._build_from_preset(preset, Path(calib_dir), device)
             self.expected_weights = expected_weights or self._preset.checkpoint_sha256
+        self.lens = self._lens(lens, lens_checkpoint)
         identity = dict(engine_reducer_source_sha256=ENGINE_REDUCER_SOURCE_SHA256,
                         stats_source_sha256=STATS_SOURCE_SHA256)
+        if self.lens is not None:
+            identity.update(lens=self.lens.identity())
         if self.batched:
             batched_identity = batched_receipt("cpu", buckets)
             for by_device in ("row_backend", "eigvalsh"):  # a row's lane id names its device's
@@ -512,6 +573,22 @@ class EngineReducer:
         self.reducer_identity = (
             "anamnesis.extraction.fast.engine_reducer:EngineReducer@"
             + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest())
+
+    def _lens(self, lens: LensHead | None, checkpoint: str | Path | None) -> LensHead | None:
+        if lens is not None and checkpoint is not None:
+            raise ValueError("give a lens head or a lens checkpoint, not both")
+        if lens is None and checkpoint is None:
+            return None
+        if not self.batched:
+            raise ValueError("the lens family needs the batched reduction")
+        if not self.expected_weights:
+            raise ValueError("the lens family needs expected_weights: a head reads one model")
+        if checkpoint is not None:
+            lens = LensHead.from_checkpoint(checkpoint, weights=self.expected_weights)
+        if lens.weights != self.expected_weights:
+            raise ValueError(f"the lens head belongs to weights {lens.weights}, the rows to "
+                             f"{self.expected_weights}")
+        return lens
 
     def _build_from_preset(self, preset: str, calib_dir: Path, device: str) -> None:
         from anamnesis.config import resolve_preset
@@ -589,7 +666,7 @@ class EngineReducer:
             reduced = reduce_signed_rows_hybrid(
                 self.lane(width), [rows[i] for i in members],
                 [token_ids[i] for i in members], engine, self.buckets, width,
-                max_group_rows=self.max_group_rows)
+                max_group_rows=self.max_group_rows, lens=self.lens)
             for i, result in zip(members, reduced, strict=True):
                 results[i] = result
         for i, result in enumerate(results):
