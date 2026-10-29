@@ -66,13 +66,15 @@ anchor, the hook path (`anamnesis/extraction/state_extractor.py`), on the same p
 per engine release. The **fixture vectors** are what the lane produced on 44 rows of that
 comparison, chosen for where a host is likeliest to move: the largest attention shifts,
 coverage shifts and gate-sparsity displacements, the largest spectral deviations, and 16
-rows evenly spaced over the rest. The **tolerance** is the spread between the lane and the
-anchor that comparison measured while the lane's effects were retained. Its row ceilings are
-ratios of a row's **distance** (its standardized L2 difference over one component of the
-vector: the **covered substrate**, which is every coordinate outside the attention
-families, or the **attention** families) to the row's **path floor** (how far the anchor's
-own two execution paths, its one-forward replay and its token-by-token path, disagree on that
-row). A path floor is measured under the lane's arithmetic, the cuBLAS workspace pin
+rows evenly spaced over the rest. The **tolerance** is the spread that this comparison
+measured between the lane and the anchor, while the lane's effects were retained. Each row
+ceiling is a ratio: the row's
+**distance** divided by its **path floor**. A row's distance is its standardized L2 difference
+over one component of the vector. The vector has two components: the **covered substrate**,
+which is every coordinate outside the attention families, and the **attention** families. A
+row's path floor is how far the anchor's own two execution paths disagree on that row. The two
+paths are the anchor's one-forward replay and its token-by-token path. A path floor is
+measured under the lane's arithmetic, the cuBLAS workspace pin
 (`CUBLAS_WORKSPACE_CONFIG=:16:8`) and deterministic algorithms, which is the arithmetic every
 reference the lane is scored against was computed in. Without the pin, cuBLAS picks its GEMM
 algorithms by matrix shape, so a floor measured unpinned mixes the path disagreement with
