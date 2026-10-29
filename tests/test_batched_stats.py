@@ -307,6 +307,51 @@ def test_two_processes_give_the_same_bytes(device, hidden):
     assert runs[0] == batch_digests(device, hidden, 16, [5, 6, 7], [2, 9, 20])
 
 
+def block_inputs(lane, steps: int, seeds, hidden: int):
+    """``block_output_features``'s inputs for rows of the given seeds: block outputs, starts
+    and, per sampled layer, a random symmetric Laplacian over the spectral steps."""
+    stride = lane.config.spectral_subsample_step
+    spectral = list(range(0, steps, stride))
+    if len(spectral) < 3:
+        spectral = list(range(steps))
+    depth, starts, laps = [], [], []
+    for seed in seeds:
+        g = torch.Generator().manual_seed(seed)
+        depth.append(torch.randn(steps, LAYERS, hidden, generator=g))
+        starts.append(1 + seed % MAX_START)
+        a = torch.randn(len(SAMPLED), len(spectral), len(spectral), generator=g, dtype=torch.float64)
+        laps.append(a + a.transpose(1, 2))
+    stacked = torch.stack(laps)
+    laplacians = {layer: (spectral, stacked[:, j].to(lane.device))
+                  for j, layer in enumerate(SAMPLED)}
+    return torch.stack(depth).to(lane.device), starts, laplacians
+
+
+def moved_rows(lane, steps: int, hidden: int, sizes=(2, 8, 32, 128)) -> int:
+    """Rows of the batch whose float64 block-output values differ from the row alone."""
+    from anamnesis.extraction.fast.batched_stats import block_output_features
+
+    moved = 0
+    seeds = list(range(max(sizes)))
+    depth, starts, laps = block_inputs(lane, steps, seeds, hidden)
+    alone = [block_output_features(lane, depth[b:b + 1], starts[b:b + 1],
+                                   {k: (s, v[b:b + 1]) for k, (s, v) in laps.items()}).values[0]
+             for b in seeds]
+    for size in sizes:
+        together = block_output_features(lane, depth[:size], starts[:size],
+                                         {k: (s, v[:size]) for k, (s, v) in laps.items()}).values
+        moved += sum(int(not torch.equal(together[b], alone[b])) for b in range(size))
+    return moved
+
+
+@pytest.mark.parametrize("device,hidden", DEVICES)
+@pytest.mark.parametrize("steps", [3, 40], ids=["steps3", "steps40"])
+def test_the_block_outputs_are_batchmate_invariant_in_float64(device, hidden, steps):
+    """Before the collector's float32 cast: every row's float64 values, alone and in
+    batches of 2, 8, 32 and 128."""
+    assert moved_rows(lanes(device, hidden)(steps), steps, hidden) == 0
+
+
 def _torch_reductions(monkeypatch):
     """The batched module's primitives replaced by torch's own last-dimension reductions."""
     from anamnesis.extraction.fast import batched_stats
@@ -326,18 +371,10 @@ def _torch_reductions(monkeypatch):
 
 
 @CUDA
-def test_the_invariance_check_bites_on_torch_reductions(monkeypatch):
-    """The falsifier: with torch's reductions in place of the primitives, some row's bytes
-    move with its batchmates on a GPU, so the invariance test can fail."""
+@pytest.mark.parametrize("steps", [3, 40], ids=["steps3", "steps40"])
+def test_the_invariance_check_bites_on_torch_reductions(monkeypatch, steps):
+    """The falsifier: with torch's reductions in place of the primitives, some row's float64
+    values move with its batchmates on a GPU, so the invariance check can fail."""
     _torch_reductions(monkeypatch)
-    lane_for = lanes("cuda", 1536)
-    target = signed_row(40, 7, 1000, 1536)
-    alone = reduce("cuda", 1536, [target[0]], [target[1]], batched=True, lane_for=lane_for)[0]
-    moved = 0
-    for size in (8, 32):
-        mates = [signed_row(40, 1 + m % MAX_START, size * 100 + m, 1536) for m in range(size - 1)]
-        batch = [target] + mates
-        got = reduce("cuda", 1536, [r for r, _ in batch], [i for _, i in batch], batched=True,
-                     lane_for=lane_for)[0]
-        moved += int((got.features != alone.features).sum())
-    assert moved > 0
+    lane = lanes("cuda", 1536)(steps)
+    assert moved_rows(lane, steps, 1536) > 0
