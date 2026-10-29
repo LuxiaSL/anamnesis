@@ -239,6 +239,16 @@ class ModelPreset(BaseModel):
         default=None,
         description="How this row's weights descend from parent's; one of LINEAGE_KINDS",
     )
+    calibration_from_parent: bool = Field(
+        default=False,
+        description=(
+            "This row reads under its parent's calibration, by declaration: its "
+            "calibration_root and calibration_dir are the parent's, and the registry checks "
+            "that they are. A fine-tune read against its base's calibration is a declared "
+            "reference, which a lineage contrast names as 'reference:<calibration_sha256>'. "
+            "Left False, a row with a parent has a calibration of its own"
+        ),
+    )
 
     @field_validator("sampled_layers", "pca_layers", "trajectory_layers", "contrastive_layers")
     @classmethod
@@ -335,6 +345,11 @@ class ModelPreset(BaseModel):
                 f"lineage together; {', '.join(given)} given without {', '.join(missing)}"
             )
         if not given:
+            if self.calibration_from_parent:
+                raise ValueError(
+                    f"{self.name}: calibration_from_parent is set on a row with no parent; "
+                    "only a row in a lineage reads under its parent's calibration"
+                )
             return
         if self.parent == self.name:
             raise ValueError(f"{self.name}: a row is not its own parent")
@@ -699,11 +714,19 @@ def _check_parent_links(presets: dict[str, ModelPreset]) -> None:
                 f"{row.parent_checkpoint_sha256}, and that row binds "
                 f"{parent.checkpoint_sha256}; the link names the weights the parent row binds"
             )
-        if (row.calibration_root, row.calibration_dir) == (
-                parent.calibration_root, parent.calibration_dir):
+        shared = (row.calibration_root, row.calibration_dir) == (
+            parent.calibration_root, parent.calibration_dir)
+        if shared and not row.calibration_from_parent:
             raise ModelRegistryError(
                 f"preset {key!r} shares its calibration directory with its parent "
-                f"{row.parent!r}; a different checkpoint has its own calibration"
+                f"{row.parent!r}; a different checkpoint has its own calibration, or "
+                "declares calibration_from_parent to read under its parent's"
+            )
+        if row.calibration_from_parent and not shared:
+            raise ModelRegistryError(
+                f"preset {key!r} declares calibration_from_parent, and its calibration "
+                f"({row.calibration_root}, {row.calibration_dir}) is not its parent "
+                f"{row.parent!r}'s ({parent.calibration_root}, {parent.calibration_dir})"
             )
         seen = [key]
         cursor: str | None = row.parent

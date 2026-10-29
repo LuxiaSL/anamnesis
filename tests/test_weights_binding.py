@@ -249,6 +249,7 @@ def test_a_lineage_resolves_and_traces(tmp_path: Path, monkeypatch: pytest.Monke
     ({"tiny-sft": {"parent": "nowhere"}}, "which no registry file defines"),
     ({"tiny-sft": {"parent_checkpoint_sha256": "9" * 64}}, "the link names the weights"),
     ({"tiny-sft": {"calibration_dir": "calibration/tiny-base"}}, "own calibration"),
+    ({"tiny-sft": {"calibration_from_parent": True}}, "is not its parent"),
     ({"tiny-base": {"parent": "tiny-dpo", "parent_checkpoint_sha256": SHA_C, "lineage": "family"}},
      "cycle"),
 ])
@@ -261,6 +262,29 @@ def test_a_link_the_registry_cannot_trace_is_refused(
     write_registry(tmp_path, monkeypatch, rows)
     with pytest.raises(ModelRegistryError, match=message):
         load_registry()
+
+
+def test_a_declared_parent_calibration_loads(tmp_path: Path,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fine-tune may read under its base's calibration when it says so: the SFT and DPO
+    rounds share the base's directory, and the declaration is what admits it."""
+    rows = lineage_rows()
+    for key in ("tiny-sft", "tiny-dpo"):
+        rows[key] = {**rows[key], "calibration_dir": "calibration/tiny-base",
+                     "calibration_from_parent": True}
+    write_registry(tmp_path, monkeypatch, rows)
+    registry = load_registry()
+    assert registry.ancestry("tiny-dpo") == ("tiny-dpo", "tiny-sft", "tiny-base")
+    for key in ("tiny-sft", "tiny-dpo"):
+        row = resolve_preset(key)
+        assert row.calibration_from_parent
+        assert row.resolved_calibration_dir() == resolve_preset("tiny-base").resolved_calibration_dir()
+    assert "calibration_from_parent" not in ModelConfig.from_preset(resolve_preset("tiny-sft")).model_dump()
+
+
+def test_a_parentless_row_cannot_declare_a_parent_calibration() -> None:
+    with pytest.raises(ValueError, match="no parent"):
+        tiny_preset(calibration_from_parent=True)
 
 
 def test_an_unbound_row_is_what_it_was(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
