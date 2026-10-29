@@ -35,6 +35,10 @@ gains it on both paths or the schema check fails:
 * :mod:`~anamnesis.extraction.fast.harvest` — one span against a model the
   caller keeps resident, in process: the feature vector, the lane's receipt and,
   when asked, the per-position logit series, with nothing written to disk.
+* :mod:`~anamnesis.extraction.fast.graphed` — the external readout's
+  reductions recorded once per span shape as CUDA graphs and replayed, so a short
+  span stops paying a host launch per kernel. A replayed row is the eager row,
+  byte for byte, under the same lane id.
 
 This module imports none of them: addressing the layout arithmetic should not
 pull in torch.
