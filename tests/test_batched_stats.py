@@ -1,12 +1,15 @@
-"""The hybrid engine reduction: the block-output family batched, batchmate-invariant.
+"""The hybrid engine reduction: every family but attention batched, batchmate-invariant.
 
 Signed rows are random but well-formed, in the engine's layout, over a toy lane with the
-whole declared battery (sampled, trajectory and PCA layers). A row reduced alone and the
-same row inside batches of random mates of the same step count and other prompt lengths
-must give the same bytes for the whole vector, in this process and in a fresh one. Against
-the per-row reduction, the names are the same, every family that stays per row is byte
-for byte the same, and the block-output family agrees to rounding. On a GPU the same
-checks run at a width the primitives cut into two tiles.
+whole declared battery (sampled, trajectory and PCA layers, epochs, the surprise window).
+A row reduced alone and the same row inside batches of random mates of the same step count
+and other prompt lengths must give the same bytes for the whole vector, in this process and
+in a fresh one. Against the per-row reduction, the names are the same, the attention family
+(the one family still reduced per row) is byte for byte the same, every batched family
+agrees to rounding, and the effective dimensions (Frobenius norms against singular values)
+agree to rounding of their own size. On a GPU the same checks run at a width the primitives
+cut into two tiles, and the batched families' float64 values are checked at tsumugi's head,
+gate and hidden widths for batches up to 128 rows.
 """
 
 from __future__ import annotations
@@ -27,7 +30,9 @@ import torch
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig
 from anamnesis.extraction.fast import invariant_ops
 from anamnesis.extraction.fast.batched_stats import (
+    BATCHED_FAMILIES,
     BATCHED_SOURCE_SHA256,
+    FAMILIES_SOURCE_SHA256,
     HYBRID_LANE_PREFIX,
     hybrid_lane_id,
 )
@@ -44,12 +49,31 @@ LAYERS, QUERY_HEADS, KV_HEADS, HEAD_DIM, GATE = 6, 4, 2, 2, 12
 SAMPLED, TRAJECTORY, PCA = (1, 3, 4), (2, 3), (0, 3)
 MAX_START, MAX_STEPS = 24, 40
 ENGINE = {"producer": "synthetic-engine", "width": 128, "weights": "w" * 64}
-PORTED = ("activation_norm_", "delta_norm_", "delta_cosine_", "spectral_smoothness_",
-          "res_traj_", "pca_")
-"""Name prefixes of the block-output family, the features the hybrid computes batched."""
+ATTENTION = ("attn_entropy_", "head_agreement_", "cache_", "spectral_fiedler_",
+             "spectral_hfer_", "spectral_spectral_entropy_", "attn_flow_")
+"""Name prefixes of the attention family, the one family the hybrid reduces per row."""
 
 TOLERANCE = dict(rtol=1e-5, atol=1e-6)
-"""Hybrid against per-row on the block-output family: float32 rounding of reordered sums."""
+"""Hybrid against per-row on the batched families: float32 rounding of reordered sums."""
+
+EFF_DIM_TOLERANCE = dict(rtol=1e-5, atol=1e-6)
+"""Hybrid (Frobenius norms) against per-row (singular values) on the effective dimensions."""
+
+
+def name_group(name: str) -> str:
+    """``attention``, ``eff_dim`` (the key, value and query effective dimensions) or the
+    name's family prefix."""
+    if name.startswith(ATTENTION):
+        return "attention"
+    if name.endswith("_eff_dim") or "_eff_dim_L" in name:
+        return "eff_dim"
+    for prefix in ("activation_norm_", "delta_norm_", "delta_cosine_", "spectral_smoothness_",
+                   "res_traj_", "pca_", "kv_key_cka", "kv_value_cka", "kv_key_", "ph_",
+                   "value_", "qk_", "q_crosslayer", "gate_", "epoch_", "attnres_",
+                   "surprise_boundary"):
+        if name.startswith(prefix):
+            return prefix
+    return "outputs"
 
 CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 DEVICES = [pytest.param("cpu", 8, id="cpu"),
@@ -84,7 +108,8 @@ def lanes(device: str, hidden: int):
     """``lane_for(steps)``: one toy lane per step count, sharing one calibration."""
     g = np.random.default_rng(7)
     extraction = ExtractionConfig(sampled_layers=list(SAMPLED), pca_layers=list(PCA),
-                                  pca_components=3, early_layer_cutoff=2, late_layer_cutoff=4)
+                                  pca_components=3, early_layer_cutoff=2, late_layer_cutoff=4,
+                                  epoch_window_size=8, epoch_stride=4)
     families = FeaturePipelineConfig(
         include_core_blocks=True, enable_residual_trajectory=True,
         trajectory_layers=list(TRAJECTORY), enable_attention_flow=True,
@@ -190,6 +215,26 @@ def test_a_row_has_the_same_bytes_alone_and_in_any_batch(device, hidden, steps):
             assert got.meta["receipt"]["batch_size"] == size
 
 
+def agreement(hybrid, per_row) -> dict[str, list[float]]:
+    """Per name group, the largest absolute and relative difference between the hybrid's
+    and the per-row reduction's features; asserts the names agree."""
+    report: dict[str, list[float]] = {}
+    for h, p in zip(hybrid, per_row, strict=True):
+        names = p.meta["feature_names"]
+        assert h.meta["feature_names"] == names
+        assert h.names_digest == p.names_digest
+        groups = np.array([name_group(n) for n in names])
+        for group in set(groups):
+            sel = groups == group
+            a, b = h.features[sel].astype(np.float64), p.features[sel].astype(np.float64)
+            diff = np.abs(a - b)
+            rel = diff / np.maximum(np.abs(b), 1e-30)
+            acc = report.setdefault(group, [0.0, 0.0])
+            acc[0] = max(acc[0], float(diff.max(initial=0)))
+            acc[1] = max(acc[1], float(rel[np.abs(b) > 1e-6].max(initial=0)))
+    return report
+
+
 @pytest.mark.parametrize("device,hidden", DEVICES)
 @pytest.mark.parametrize("steps", STEP_COUNTS, ids=[f"steps{s}" for s in STEP_COUNTS])
 def test_the_hybrid_agrees_with_the_per_row_reduction(device, hidden, steps):
@@ -198,29 +243,26 @@ def test_the_hybrid_agrees_with_the_per_row_reduction(device, hidden, steps):
     rows, ids = [r for r, _ in made], [i for _, i in made]
     hybrid = reduce(device, hidden, rows, ids, batched=True, lane_for=lane_for)
     per_row = reduce(device, hidden, rows, ids, batched=False, lane_for=lane_for)
-    report: dict[str, tuple[float, float]] = {}
     for h, p in zip(hybrid, per_row, strict=True):
         names = p.meta["feature_names"]
-        assert h.meta["feature_names"] == names
-        assert h.names_digest == p.names_digest
-        ported = np.array([n.startswith(PORTED) for n in names])
-        assert ported.sum() > 100
-        assert h.features[~ported].tobytes() == p.features[~ported].tobytes()
-        np.testing.assert_allclose(h.features[ported], p.features[ported], **TOLERANCE)
+        groups = np.array([name_group(n) for n in names])
+        attention, eff = groups == "attention", groups == "eff_dim"
+        batched = ~attention & ~eff
+        assert attention.sum() > 10 and batched.sum() > 100
+        assert h.features[attention].tobytes() == p.features[attention].tobytes()
+        np.testing.assert_allclose(h.features[batched], p.features[batched], **TOLERANCE)
+        np.testing.assert_allclose(h.features[eff], p.features[eff], **EFF_DIM_TOLERANCE)
+        assert abs(h.meta["mean_logprob"] - p.meta["mean_logprob"]) < 1e-12
         if steps < 3:  # the trajectory's placeholders are exact zeros in both
             traj = np.array([n.startswith("res_traj_") for n in names])
             assert not h.features[traj].any() and not p.features[traj].any()
-        for prefix in PORTED:
-            sel = np.array([n.startswith(prefix) for n in names])
-            a, b = h.features[sel].astype(np.float64), p.features[sel].astype(np.float64)
-            diff = np.abs(a - b)
-            rel = diff / np.maximum(np.abs(b), 1e-30)
-            prev = report.get(prefix, (0.0, 0.0))
-            report[prefix] = (max(prev[0], float(diff.max(initial=0))),
-                              max(prev[1], float(rel[np.abs(b) > 1e-6].max(initial=0))))
+        if steps >= 16:  # the toy lane's epochs (window 8, stride 4) are live
+            assert any(n.startswith("epoch_") for n in names)
+    report = agreement(hybrid, per_row)
+    assert report["attention"] == [0.0, 0.0]
     print(json.dumps({"device": device, "steps": steps,
                       "max_abs_rel": {k: [f"{v[0]:.3g}", f"{v[1]:.3g}"]
-                                      for k, v in report.items()}}))
+                                      for k, v in sorted(report.items())}}))
 
 
 @pytest.mark.parametrize("device,hidden", DEVICES)
@@ -236,11 +278,18 @@ def test_the_hybrid_has_its_own_lane_id_and_receipt(device, hidden):
     assert hybrid.lane_id == hybrid_lane_id(lane, ENGINE) != per_row.lane_id
     assert per_row.lane_id == stats_lane_id(lane, ENGINE)
     assert receipt["stats_lane_id"] == per_row.lane_id
-    assert receipt["reductions"]["block_outputs"] == "batched"
-    assert receipt["batched"]["families"] == ["block_outputs"]
+    for family in BATCHED_FAMILIES:
+        assert receipt["reductions"][family] == "batched"
+    assert receipt["reductions"]["attention"] == "stats"
+    assert receipt["batched"]["families"] == list(BATCHED_FAMILIES)
+    assert "keys" in BATCHED_FAMILIES and "routing" in BATCHED_FAMILIES
     assert receipt["batched"]["source_sha256"] == BATCHED_SOURCE_SHA256
+    assert receipt["batched"]["families_source_sha256"] == FAMILIES_SOURCE_SHA256
+    assert receipt["batched"]["eff_dim"] == "norms"
+    assert receipt["batched"]["per_row"] == ["gate_topk_overlap"]
     assert receipt["batched"]["row_backend"] == (
         "triton" if device == "cuda" and invariant_ops.HAVE_TRITON else "torch")
+    assert receipt["routing_family"] and len(hybrid.features) == len(per_row.features)
     assert "block_outputs" not in per_row.meta["receipt"]["reductions"]
     assert hybrid.meta["reducer_identity"] != per_row.meta["reducer_identity"]
 
@@ -395,3 +444,145 @@ def test_the_device_gather_is_the_host_slice_byte_for_byte():
                      for s in starts])
     assert gathered.contiguous().numpy().tobytes() == host.tobytes()
     assert device_positional_means(pm, "cpu") is table   # one upload per host table
+
+
+TSUMUGI_WIDTHS = dict(query_heads=12, kv_heads=6, head_dim=128, gate=4096, committed=1536)
+"""Tsumugi's per-layer widths: the batched families' float64 values are checked at these on a GPU."""
+
+TOY_WIDTHS = dict(query_heads=QUERY_HEADS, kv_heads=KV_HEADS, head_dim=HEAD_DIM, gate=GATE,
+                  committed=8)
+
+
+def family_inputs(steps: int, seeds, widths: dict[str, int], device: str) -> dict[str, Any]:
+    """The batched families' inputs for rows of the given seeds, stacked on ``device``."""
+    n_s = len(SAMPLED)
+    rows = []
+    for seed in seeds:
+        g = torch.Generator().manual_seed(seed)
+        heads = widths["query_heads"]
+        route = torch.rand(steps, LAYERS, 2, LAYERS + 2, generator=g) + 1e-3
+        rows.append(dict(
+            k=torch.randn(steps, n_s, widths["kv_heads"], widths["head_dim"], generator=g),
+            v=torch.randn(steps, n_s, widths["kv_heads"], widths["head_dim"], generator=g),
+            q=torch.randn(steps, n_s, heads, widths["head_dim"], generator=g),
+            gate=torch.randn(steps, n_s, widths["gate"], generator=g),
+            ent=torch.rand(steps, n_s, heads, generator=g, dtype=torch.float64),
+            sink=torch.rand(steps, n_s, heads, generator=g, dtype=torch.float64),
+            logit_stats=torch.stack([torch.rand(steps, generator=g) * 5,
+                                     torch.rand(steps, generator=g),
+                                     torch.rand(steps, generator=g),
+                                     (torch.rand(steps, generator=g) * 50).floor(),
+                                     torch.rand(steps, generator=g),
+                                     -torch.rand(steps, generator=g) * 5], dim=1).double(),
+            route=route / route.sum(-1, keepdim=True),
+            committed=torch.randn(4, steps, widths["committed"], generator=g)))
+    return {name: torch.stack([r[name] for r in rows]).to(device) for name in rows[0]}
+
+
+def family_values(lane, inputs: dict[str, Any], rows: slice) -> torch.Tensor:
+    """The key/value/query/gate, per-head, cross-layer, output and routing families of the
+    selected rows, as one float64 ``[rows, features]``."""
+    from anamnesis.extraction.fast.batched_families import (
+        kvqg_features,
+        outputs_features,
+        routing_features,
+    )
+
+    x = {name: value[rows] for name, value in inputs.items()}
+    per_head = {layer: (x["ent"][:, :, j], x["sink"][:, :, j]) for j, layer in enumerate(SAMPLED)}
+    kvqg = kvqg_features(lane, x["k"], x["v"], x["q"], x["gate"], per_head)
+    outputs, logprob = outputs_features(lane, x["logit_stats"])
+    points = []
+    for layer in range(LAYERS):
+        if layer:
+            points.append(("pre_attn", layer, x["route"][:, :, layer, 0, :layer]))
+        points.append(("pre_mlp", layer, x["route"][:, :, layer, 1, :layer + 1]))
+    points.append(("final", -1, x["route"][:, :, -1, 1]))
+    _, routing = routing_features(SAMPLED, points, list(x["committed"].unbind(1)))
+    return torch.cat([kvqg.values, outputs.values, logprob[:, None], routing.double()], dim=1)
+
+
+def moved_family_rows(lane, steps: int, widths, device: str, sizes=(2, 8, 32, 128)) -> int:
+    """Rows of the batch whose float64 batched-family values differ from the row alone."""
+    inputs = family_inputs(steps, range(max(sizes)), widths, device)
+    alone = [family_values(lane, inputs, slice(b, b + 1))[0] for b in range(max(sizes))]
+    moved = 0
+    for size in sizes:
+        together = family_values(lane, inputs, slice(0, size))
+        moved += sum(int(not torch.equal(together[b], alone[b])) for b in range(size))
+    return moved
+
+
+@pytest.mark.parametrize("steps", [1, 3, 40], ids=["steps1", "steps3", "steps40"])
+def test_the_batched_families_are_batchmate_invariant_in_float64(steps):
+    """Before the collector's float32 cast: every row's float64 values of the key, value,
+    query, gate, per-head, cross-layer, output and routing families, alone and in batches
+    of 2, 8, 32 and 128."""
+    assert moved_family_rows(lanes("cpu", 8)(steps), steps, TOY_WIDTHS, "cpu") == 0
+
+
+@CUDA
+@pytest.mark.slow
+@pytest.mark.parametrize("steps", [3, 23, 40], ids=["steps3", "steps23", "steps40"])
+def test_the_batched_families_are_batchmate_invariant_at_tsumugi_widths(steps):
+    assert moved_family_rows(lanes("cuda", 64)(steps), steps, TSUMUGI_WIDTHS, "cuda") == 0
+
+
+def _torch_family_reductions(monkeypatch):
+    """Both batched modules' primitives replaced by torch's own last-dimension reductions."""
+    from anamnesis.extraction.fast import batched_families
+
+    _torch_reductions(monkeypatch)
+    from anamnesis.extraction.fast import batched_stats
+
+    for name in ("row_sum", "row_sumsq", "row_dot", "row_mean", "row_std", "row_norm"):
+        monkeypatch.setattr(batched_families, name, getattr(batched_stats, name))
+
+
+@CUDA
+@pytest.mark.slow
+def test_the_family_invariance_check_bites_on_torch_reductions(monkeypatch):
+    """The falsifier: with torch's reductions in place of the primitives, some row's float64
+    family values move with its batchmates on a GPU at tsumugi's widths."""
+    _torch_family_reductions(monkeypatch)
+    lane = lanes("cuda", 64)(23)
+    assert moved_family_rows(lane, 23, TSUMUGI_WIDTHS, "cuda") > 0
+
+
+def test_rows_of_one_step_count_and_different_shapes_reduce_in_their_own_batches():
+    """A row whose routing plan differs from its step-count mates is batched apart from
+    them; every row keeps its bytes alone."""
+    lane_for = lanes("cpu", 8)
+    made = [signed_row(16, 3 + i, 20 + i, 8) for i in range(4)]
+    odd, odd_ids = made[1]
+    plan = tuple((n_attn, max(1, n_mlp - 1)) for n_attn, n_mlp in odd.route_sources)
+    made[1] = (SignedRow(**{**odd.__dict__, "route_sources": plan}), odd_ids)
+    together = reduce("cpu", 8, [r for r, _ in made], [i for _, i in made], batched=True,
+                      lane_for=lane_for)
+    sizes = [r.meta["receipt"]["batch_size"] for r in together]
+    assert sizes == [3, 1, 3, 3]
+    for (row, ids), got in zip(made, together, strict=True):
+        alone = reduce("cpu", 8, [row], [ids], batched=True, lane_for=lane_for)[0]
+        assert got.features.tobytes() == alone.features.tobytes()
+
+
+@pytest.mark.parametrize("surface,match", [
+    ("logit_stats", r"row 1: logit_stats must be finite"),
+    ("route", r"row 1: the routing weights hold a nonfinite value"),
+    ("gate", r"row 1: the capture holds a nonfloating or nonfinite tensor"),
+])
+def test_a_nonfinite_surface_refuses_only_its_row(surface, match):
+    lane_for = lanes("cpu", 8)
+    row, ids = signed_row(16, 4, 0, 8)
+    other, other_ids = signed_row(16, 6, 1, 8)
+    bad = dict(other.surfaces, **{surface: other.surfaces[surface].clone()})
+    bad[surface].view(-1)[5] = float("nan")
+    bad_row = SignedRow(**{**other.__dict__, "surfaces": bad})
+    reducer = EngineReducer(lane_for=lane_for, batched=True, expected_weights=ENGINE["weights"])
+    with pytest.raises(ExternalCaptureError, match=match):
+        reducer.reduce([row, bad_row], token_ids=[ids, other_ids], engine=ENGINE)
+    results = reduce_signed_rows_hybrid(lane_for(16), [row, bad_row], [ids, other_ids], ENGINE)
+    alone = reducer.reduce([row], token_ids=[ids], engine=ENGINE)[0]
+    assert isinstance(results[1], ExternalCaptureError)
+    assert results[0].metadata["batch_size"] == 1
+    assert np.asarray(results[0].features, np.float32).tobytes() == alone.features.tobytes()
