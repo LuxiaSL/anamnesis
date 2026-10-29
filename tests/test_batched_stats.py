@@ -753,7 +753,9 @@ def test_the_attention_invariance_check_bites_on_torch_reductions(monkeypatch):
     _torch_attention_reductions(monkeypatch)
     shapes = TSUMUGI_ATTENTION
     lane = tsumugi_like_lane("cuda", shapes["layers"], shapes["sampled"])
-    assert moved_attention_rows(lane, 23, shapes, "cuda", 1024) > 0
+    moved = moved_attention_rows(lane, 23, shapes, "cuda", 1024)
+    print(json.dumps({"falsifier": "attention", "rows_checked": 2 + 8 + 32 + 128, "moved": moved}))
+    assert moved > 0
 
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=CUDA)])
