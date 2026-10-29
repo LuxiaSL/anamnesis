@@ -166,6 +166,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         raw_tensors_saved=False,
         certified=False,
     )
+    if runtime.weights is not None:
+        provenance["weights"] = runtime.weights
     (args.output / "deployment.json").write_text(
         json.dumps(provenance, indent=2) + "\n"
     )
@@ -191,7 +193,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         metadata.update(
             generation_id=i,
             lane_id=lane.lane_id,
-            extraction_lane=result.metadata,
+            # A preset that binds its weights stamps their record on every row, which
+            # is what a declared contrast reads; one that binds none adds nothing.
+            extraction_lane=result.metadata if runtime.weights is None
+            else {**result.metadata, "weights": runtime.weights},
             replay_seconds=elapsed,
             mean_logprob=result.mean_logprob,
             raw_tensors_saved=False,

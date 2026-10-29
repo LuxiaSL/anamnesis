@@ -192,6 +192,9 @@ class FastLaneRuntime:
     loaded: Any
     lane: Any
     calibration_provenance: dict[str, Any] = field(default_factory=dict)
+    weights: dict[str, Any] | None = None
+    """The weights record of a preset that binds its weights, checked against the
+    loaded model; None for a preset that binds none."""
 
     @property
     def gen_ids(self) -> tuple[int, ...]:
@@ -571,6 +574,9 @@ class PreparedLane:
     device: str
     model_files: dict[str, str] | None
     layer_split: LayerSplit | None = None
+    weights: dict[str, Any] | None = None
+    """The weights record of a preset that binds its weights, checked against
+    ``loaded``; None for a preset that binds none."""
     _schemas: dict[int, GpuFeatureSchema] = field(
         default_factory=dict, repr=False, compare=False
     )
@@ -611,6 +617,8 @@ class PreparedLane:
             lane_runtime_source_sha256=file_sha(Path(__file__)),
             numpy_dispatch=numpy_dispatch(),
         )
+        if self.weights is not None:
+            provenance["weights"] = dict(self.weights)
         if self.layer_split is not None and not self.layer_split.is_single:
             import torch
 
@@ -673,6 +681,10 @@ def prepare_fast_lane(
         From :func:`require_lane_arithmetic`, :func:`read_lane_calibration`,
         :func:`check_loaded_model` or :func:`weight_file_digests`; or when neither a
         model nor a path to load one is given.
+    anamnesis.extraction.weights_binding.WeightsMismatchError
+        When the preset binds its weights (``checkpoint_sha256``) and the model's
+        weights digest otherwise, whether the model was loaded here or handed in. A
+        subclass of :class:`ValueError`.
     """
     require_lane_arithmetic()
     row = resolve_preset(preset)
@@ -689,10 +701,12 @@ def prepare_fast_lane(
                 "or the digests themselves as model_files"
             )
         digests = weight_file_digests(model_path)
+    weights_checked = loaded is None
     if loaded is None:
         assert model_path is not None
         loaded = load_lane_model(row, model_path, device, layer_split)
-    return _bind(calibration, loaded, device, digests, layer_split)
+    return _bind(calibration, loaded, device, digests, layer_split,
+                 weights_checked=weights_checked)
 
 
 def _bind(
@@ -701,12 +715,22 @@ def _bind(
     device: str,
     model_files: dict[str, str] | None,
     layer_split: LayerSplit | None = None,
+    *,
+    weights_checked: bool = False,
 ) -> PreparedLane:
-    """A calibration and a model the lane can read, as one :class:`PreparedLane`."""
+    """A calibration and a model the lane can read, as one :class:`PreparedLane`.
+
+    For a preset that binds its weights, the model's weights digest is checked here
+    unless ``weights_checked`` says :func:`load_lane_model` just checked it on load.
+    """
+    from anamnesis.extraction.weights_binding import require_weights, weights_record
+
     check_loaded_model(loaded, calibration.preset, device, layer_split)
+    weights = (weights_record(calibration.preset) if weights_checked
+               else require_weights(loaded.model, calibration.preset))
     return PreparedLane(
         calibration=calibration, loaded=loaded, device=device, model_files=model_files,
-        layer_split=layer_split,
+        layer_split=layer_split, weights=weights,
     )
 
 
@@ -779,6 +803,7 @@ def resolve_fast_lane(
         device,
         model_files,
         layer_split,
+        weights_checked=True,
     )
     lane, _ = prepared.lane(spans[0].n_steps)
     return FastLaneRuntime(
@@ -796,4 +821,5 @@ def resolve_fast_lane(
         loaded=prepared.loaded,
         lane=lane,
         calibration_provenance=calibration.provenance(),
+        weights=prepared.weights,
     )

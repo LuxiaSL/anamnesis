@@ -99,7 +99,8 @@ class HarvestResult:
         the digest of the calibration bytes actually read
         (``calibration_files_sha256``) and how far they reach
         (``positions_calibrated``), which differ from the identity's only under a
-        calibration extension.
+        calibration extension; and, for a preset that binds its weights, their
+        record under ``weights``.
     prompt_length
         Where the prompt ends in ``input_ids``.
     input_ids
@@ -272,6 +273,7 @@ def harvest_loaded(
             **result.metadata,
             "calibration_files_sha256": calibration["calibration_files_sha256"],
             "positions_calibrated": calibration["positions_calibrated"],
+            **({} if prepared.weights is None else {"weights": dict(prepared.weights)}),
         },
         prompt_length=span.prompt_length,
         input_ids=np.asarray(ids, dtype=np.int32),
