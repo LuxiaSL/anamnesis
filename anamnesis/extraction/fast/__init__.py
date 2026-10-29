@@ -43,6 +43,10 @@ gains it on both paths or the schema check fails:
   that hands over attention statistics, logit statistics and routing reductions
   instead of weights and logits (a fused decode kernel's output). Its rows are
   their own lane.
+* :mod:`~anamnesis.extraction.fast.invariant_ops` — row sums, means, norms,
+  deviations and dot products in a fixed per-row order, so a row's bytes are the
+  same alone and inside any batch: Triton kernels on a GPU, elementwise torch
+  elsewhere.
 * :mod:`~anamnesis.extraction.fast.engine_reducer` — a decode engine's signed
   rows into signatures through the statistics reduction, one lane per capped step
   count, with the engine's identity in every row's lane id.
