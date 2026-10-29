@@ -29,12 +29,17 @@ values; here every effective dimension is computed from two Frobenius norms, ``s
 rounding. The key and value CKA uses the same identity: ``|C_b^T C_a|_F**2`` is the
 Frobenius inner product of the two layers' ``steps x steps`` Gram matrices.
 
-**What stays per row.** The gate's top-k Jaccard: its top-k comes from NumPy's
-``argsort``, whose order among tied values is part of the feature. Each row's gate
-surfaces move to the host in one copy for the whole batch, and each (row, layer) is
-reduced there by :func:`~anamnesis.extraction.fast.families.gate_topk_overlap`, the
-per-row lane's own function, on a thread pool. It reads only that row's values, so it is
-batchmate-invariant as it stands and agrees with the per-row lane to the byte.
+**The gate's top-k, ties broken by the lowest index.** The per-row lane's top-k Jaccard
+(:func:`~anamnesis.extraction.fast.families.gate_topk_overlap`) takes each step's top-k
+columns from NumPy's ``argsort``, whose order among tied values is an implementation
+detail; bf16 gates often tie at the k-th value. Here the top-k is defined: the ``k``
+columns of largest ``|SiLU|``, ties at the k-th value broken by the lowest column index,
+as a stable sort descending by value would take them (:data:`TOPK_TIES`). That set is a
+function of the step's values alone: the k-th largest value, which columns exceed it, and
+an exact integer count of the tied columns before each. It runs on the device, and the
+Jaccard of adjacent steps is an exact integer ratio averaged by :func:`row_mean`. Where a
+step has a tie at the k-th value that NumPy broke otherwise, the feature differs from the
+per-row lane's; elsewhere it agrees to the rounding of the mean.
 
 **Agreement with the per-row path.** The arithmetic is the per-row reducers', operator for
 operator, with each reduction's order replaced by the primitives' fixed order, the
@@ -49,9 +54,7 @@ per-row reducers'.
 from __future__ import annotations
 
 import math
-import os
 from collections.abc import Mapping, Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -60,7 +63,7 @@ import torch
 from torch import Tensor
 
 from anamnesis.extraction.fast.batched_stats import (
-    PER_ROW_EXCEPTIONS,
+    TOPK_TIES,
     WORKING_BYTES,
     _Columns,
     _cos,
@@ -69,7 +72,6 @@ from anamnesis.extraction.fast.batched_stats import (
     _temporal_rows,
 )
 from anamnesis.extraction.fast.external import ExternalCaptureError
-from anamnesis.extraction.fast.families import gate_topk_overlap
 from anamnesis.extraction.fast.features import GpuFeatureLane
 from anamnesis.extraction.fast.invariant_ops import (
     row_dot,
@@ -82,20 +84,35 @@ from anamnesis.extraction.fast.invariant_ops import (
 from anamnesis.extraction.fast.ops import trajectory_indices
 from anamnesis.extraction.feature_families.attn_res import EPS, QNAMES, SUMM, committed_pairs
 
-TOPK_WORKERS = min(32, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity")
-                   else os.cpu_count() or 1)
-"""Threads of the pool that computes the gate's top-k Jaccard on the host, one task per
-(row, sampled layer). NumPy releases the GIL in its ufuncs and sorts."""
+def gate_topk_overlap_rows(pre_silu: Tensor) -> Tensor:
+    """The gate's top-k Jaccard of each row of ``pre_silu [B, steps, width]``: ``[B]``
+    float64, with :data:`TOPK_TIES`.
 
-_TOPK_POOL: ThreadPoolExecutor | None = None
-
-
-def _topk_pool() -> ThreadPoolExecutor:
-    global _TOPK_POOL
-    if _TOPK_POOL is None:
-        _TOPK_POOL = ThreadPoolExecutor(max_workers=TOPK_WORKERS,
-                                        thread_name_prefix="batched-gate-topk")
-    return _TOPK_POOL
+    The SiLU is the per-row lane's, ``a * (1 / (1 + exp(-clip(a, -88, 88))))`` in float64,
+    and ``k = min(100, width // 10)``; ``k == 0`` keeps every column, as the per-row lane's
+    slice does. Adjacent steps' sets share ``s`` columns of a union of ``2k - s``.
+    """
+    batch, steps, width = pre_silu.shape
+    if steps < 2:
+        return torch.zeros(batch, dtype=torch.float64, device=pre_silu.device)
+    a = pre_silu.double()
+    a = (a * (1 / (1 + torch.exp(-a.clamp(-88, 88))))).abs()
+    k = min(100, width // 10)
+    if k == 0:
+        member = torch.ones_like(a, dtype=torch.bool)
+        k = width
+    else:
+        kth = a.topk(k, dim=-1, sorted=False).values.amin(dim=-1, keepdim=True)
+        above = a > kth
+        tied = a == kth
+        room = k - above.sum(dim=-1, keepdim=True)  # tied columns the set still takes
+        member = above | (tied & (tied.to(torch.int32).cumsum(dim=-1) <= room))
+    del a
+    shared = (member[:, :-1] & member[:, 1:]).sum(dim=-1)  # [B, steps - 1], exact
+    union = 2 * k - shared
+    overlaps = torch.where(union > 0, shared.double() / union.clamp_min(1).double(),
+                           torch.zeros((), dtype=torch.float64, device=shared.device))
+    return row_mean(overlaps)
 
 
 @dataclass(frozen=True)
@@ -246,15 +263,6 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
     n_windows, include_stft = families.temporal_n_windows, families.enable_stft
     cols = _Columns()
 
-    # The named per-row exception, started first so the host works while the device does.
-    topk: dict[str, list[Future]] = {}
-    if steps >= 2:
-        host = gates.float().cpu().numpy()
-        pool = _topk_pool()
-        for j, layer in enumerate(sampled):
-            topk[f"gate_L{layer}_topk_overlap_mean"] = [
-                pool.submit(gate_topk_overlap, host[b, :, j]) for b in range(batch)]
-
     key_x: dict[int, Tensor] = {}
     value_x: dict[int, Tensor] = {}
     eff_dims: list[tuple[str, Tensor]] = []
@@ -387,6 +395,8 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
             gate_means[layer] = _time_mean(g).float()
             gate_sparsity[layer] = row_mean(sp)
             del g
+            cols.put(prefix + "_topk_overlap_mean",
+                     gate_topk_overlap_rows(gates[:, :, j].to(device).float()))
             _operators(cols, prefix + "_sparsity", sp, n_windows, include_stft)
             _operators(cols, prefix + "_drift", dr, n_windows, include_stft)
 
@@ -450,9 +460,6 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
                 cols.put(f"kv_{label}_cka_{name}", row_mean(torch.stack(group, dim=1)))
             else:
                 _zeros(cols, [f"kv_{label}_cka_{name}"], batch, device)
-    for name, futures in topk.items():
-        cols.put(name, torch.tensor([f.result() for f in futures], dtype=torch.float64,
-                                    device=device))
     return _stack(cols, batch, device)
 
 
@@ -611,6 +618,8 @@ def routing_features(sampled_layers: Sequence[int], points: Sequence[tuple[str, 
 
 __all__ = (
     "BatchedFeatures",
+    "TOPK_TIES",
+    "gate_topk_overlap_rows",
     "kvqg_features",
     "outputs_features",
     "routing_features",
