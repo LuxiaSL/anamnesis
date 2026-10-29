@@ -1,8 +1,10 @@
 """Suite-wide settings.
 
-The suite runs one process per core (pytest-xdist). Each worker keeps its
-numerical libraries to one thread, so the workers share the machine instead of
-every worker's BLAS and torch pools claiming all of it.
+The suite runs four worker processes by default (pytest-xdist), and CI runs one
+per core (``-n auto``). Each worker keeps its numerical libraries to one thread,
+so the workers share the machine instead of every worker's BLAS and torch pools
+claiming all of it. Tests marked ``slow`` are left to CI by local runs that pass
+``-m "not slow"``.
 """
 
 from __future__ import annotations

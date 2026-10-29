@@ -103,4 +103,7 @@ packages = ["anamnesis"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-n auto"
+# Four workers by default, so a local run leaves the machine usable; CI asks for one per core.
+# Tests marked slow run in CI; locally, `-m "not slow"` skips them.
+addopts = "-n 4"
+markers = ["slow: long-running; CI runs it, local runs may skip it with -m 'not slow'"]
