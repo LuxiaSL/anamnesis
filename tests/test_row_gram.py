@@ -92,3 +92,13 @@ def test_gpu_kernel_is_batchmate_invariant_where_a_plain_matmul_is_not():
     assert torch.equal(gram_whole, gram_alone)
     if torch.equal(whole, alone):
         pytest.skip("this GPU's matmul happened to be batch-invariant at this shape; falsifier not shown")
+
+
+@needs_gpu
+@pytest.mark.parametrize("dtype", DTYPES, ids=["fp32", "fp64"])
+def test_gpu_kernel_is_exactly_symmetric_and_covers_ragged_tiles(dtype):
+    x, lengths = data(3, 45, 300, dtype, seed=9, device="cuda")  # 45 rows: a partial tile
+    g = row_gram(x, lengths=lengths, backend="triton")
+    assert torch.equal(g, g.transpose(1, 2))
+    want = materialized(x, lengths, "torch")
+    assert ((g - want).abs() <= 4 * torch.finfo(dtype).eps * (x.abs().amax() ** 2) * 300).all()

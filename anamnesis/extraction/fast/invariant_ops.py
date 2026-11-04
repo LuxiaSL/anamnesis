@@ -79,6 +79,16 @@ NUM_STAGES = 1
 
 SUPPORTED_DTYPES = (torch.float32, torch.float64)
 
+GRAM_BLOCK_M = 32
+"""Output tile edge of :func:`row_gram`'s kernel. Fixed: an entry's order is a function of it."""
+
+GRAM_BLOCK_K = 32
+"""Width chunk of :func:`row_gram`'s kernel. Fixed for the same reason."""
+
+GRAM_USE_DOT = True
+"""Whether :func:`row_gram`'s kernel accumulates each chunk with ``tl.dot`` (IEEE precision)
+or with an explicit multiply and sum. Fixed for the same reason."""
+
 Backend = Literal["auto", "triton", "torch"]
 
 # Operation codes shared by the kernel and the torch implementation.
@@ -176,32 +186,43 @@ if HAVE_TRITON:
         M,
         W,
         HAS_LENGTHS: tl.constexpr,
-        BLOCK_W: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+        BLOCK_K: tl.constexpr,
+        USE_DOT: tl.constexpr,
     ):
-        # One program per entry (b, i, j) of the Gram matrix: the dot product of rows i
-        # and j of batch b in row_sum's order (the same tiles, accumulator and fold), each
-        # product formed in registers and accumulated, which the compiler may fuse into a
-        # multiply-add. The order depends only on the row pair, so an entry is the same
-        # bytes alone and inside any batch.
-        pid = tl.program_id(0).to(tl.int64)
-        b = pid // (M * M)
-        rem = pid % (M * M)
-        base_i = (b * M + rem // M) * W
-        base_j = (b * M + rem % M) * W
-        offs = tl.arange(0, BLOCK_W)
+        # One program per (batch entry b, tile pair ti <= tj): the BLOCK_M x BLOCK_M block of
+        # x[b] x[b]^T at rows ti and columns tj, accumulated over the width in BLOCK_K chunks
+        # in a fixed order, then written to both (ti, tj) and its mirror. The order depends
+        # only on the tile, so an entry is the same bytes alone and inside any batch.
+        b = tl.program_id(0).to(tl.int64)
+        ti = tl.program_id(1)
+        tj = tl.program_id(2)
+        if ti > tj:
+            return
+        rows_i = ti * BLOCK_M + tl.arange(0, BLOCK_M)
+        rows_j = tj * BLOCK_M + tl.arange(0, BLOCK_M)
+        ks = tl.arange(0, BLOCK_K)
         if HAS_LENGTHS:
             limit = tl.minimum(tl.maximum(tl.load(len_ptr + b), 0), W)
         else:
             limit = W
-        acc = tl.zeros([BLOCK_W], dtype=out_ptr.dtype.element_ty)
-        for start in range(0, W, BLOCK_W):
-            cols = start + offs
+        base = b * M * W
+        acc = tl.zeros([BLOCK_M, BLOCK_M], dtype=out_ptr.dtype.element_ty)
+        for start in range(0, W, BLOCK_K):
+            cols = start + ks
             keep = cols < limit
-            xi = tl.load(x_ptr + base_i + cols, mask=keep, other=0.0)
-            xj = tl.load(x_ptr + base_j + cols, mask=keep, other=0.0)
-            acc += xi * xj
-        tl.store(out_ptr + pid, tl.sum(acc, axis=0))
-
+            a = tl.load(x_ptr + base + rows_i[:, None] * W + cols[None, :],
+                        mask=(rows_i[:, None] < M) & keep[None, :], other=0.0)
+            c = tl.load(x_ptr + base + rows_j[:, None] * W + cols[None, :],
+                        mask=(rows_j[:, None] < M) & keep[None, :], other=0.0)
+            if USE_DOT:
+                acc += tl.dot(a, tl.trans(c), input_precision="ieee")
+            else:
+                acc += tl.sum(a[:, None, :] * c[None, :, :], axis=2)
+        out = out_ptr + b * M * M
+        inside = (rows_i[:, None] < M) & (rows_j[None, :] < M)
+        tl.store(out + rows_i[:, None] * M + rows_j[None, :], acc, mask=inside)
+        tl.store(out + rows_j[None, :] * M + rows_i[:, None], acc, mask=inside)
 
 def _aligned_contiguous(t: Tensor) -> Tensor:
     """``t`` as a contiguous buffer whose address is 16-byte aligned.
@@ -436,13 +457,15 @@ def row_gram(
     """``x x^T`` of each batch entry of ``x [B, m, n]``: ``[B, m, m]``.
 
     Entry ``(b, i, j)`` is the dot product of ``x[b, i]`` and ``x[b, j]`` over their
-    unmasked positions, accumulated in :func:`row_sum`'s fixed order, so it is
-    batchmate- and restart-invariant like the other primitives. ``lengths`` (integer,
+    unmasked positions, accumulated in a fixed order that depends only on the entry's
+    tile, so it is batchmate- and restart-invariant like the other primitives, and the
+    matrix is exactly symmetric. ``lengths`` (integer,
     shape ``[B]``) masks positions ``>= lengths[b]`` in every row of batch entry ``b``.
 
-    On CUDA the products are formed inside the reduction and never stored, so the
-    working set is the Gram matrix, not the ``[B, m, m, n]`` product; the compiler may
-    fuse each product into its addition. The torch path materializes the product in
+    On CUDA one program computes a ``GRAM_BLOCK_M``-square tile of entries from rows it
+    loads once per width chunk, and only tiles on or above the diagonal are computed; the
+    products are never stored, so the working set is the Gram matrix, not the
+    ``[B, m, m, n]`` product. The torch path materializes the product in
     chunks of the first index (at most ``chunk_bytes`` each) and reduces it with
     :func:`row_sum`. The two agree to rounding, not to the byte.
     """
@@ -472,11 +495,12 @@ def row_gram(
             has_len, len_arg = True, _aligned_contiguous(lengths.to(device=x.device, dtype=torch.int32))
         else:
             has_len, len_arg = False, xs
+        tiles = -(-m // GRAM_BLOCK_M)
         with torch.cuda.device(x.device):
-            _gram_kernel[(batch * m * m,)](
+            _gram_kernel[(batch, tiles, tiles)](
                 xs, len_arg, out, m, n,
-                HAS_LENGTHS=has_len, BLOCK_W=BLOCK,
-                num_warps=NUM_WARPS, num_stages=NUM_STAGES,
+                HAS_LENGTHS=has_len, BLOCK_M=GRAM_BLOCK_M, BLOCK_K=GRAM_BLOCK_K,
+                USE_DOT=GRAM_USE_DOT, num_warps=NUM_WARPS, num_stages=NUM_STAGES,
             )
         return out
     if backend not in ("auto", "torch"):
@@ -496,6 +520,9 @@ __all__ = (
     "HAVE_TRITON",
     "NUM_STAGES",
     "NUM_WARPS",
+    "GRAM_BLOCK_K",
+    "GRAM_BLOCK_M",
+    "GRAM_USE_DOT",
     "SUPPORTED_DTYPES",
     "row_dot",
     "row_gram",
