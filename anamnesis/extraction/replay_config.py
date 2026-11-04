@@ -12,6 +12,8 @@ def native_replay_configs(
         early_layer_cutoff=preset.early_layer_cutoff,
         late_layer_cutoff=preset.late_layer_cutoff,
         enable_residual_pca=enable_pca,
+        **({"pca_temporal_samples": preset.pca_temporal_samples}
+           if preset.pca_temporal_samples is not None else {}),
     )
     family_config = FeaturePipelineConfig(
         include_core_blocks=True,
