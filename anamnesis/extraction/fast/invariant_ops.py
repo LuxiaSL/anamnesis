@@ -166,6 +166,43 @@ if HAVE_TRITON:
         tl.store(out_ptr + row, total)
 
 
+if HAVE_TRITON:
+
+    @triton.jit
+    def _gram_kernel(
+        x_ptr,
+        len_ptr,
+        out_ptr,
+        M,
+        W,
+        HAS_LENGTHS: tl.constexpr,
+        BLOCK_W: tl.constexpr,
+    ):
+        # One program per entry (b, i, j) of the Gram matrix: the dot product of rows i
+        # and j of batch b in row_sum's order (the same tiles, accumulator and fold), each
+        # product formed in registers and accumulated, which the compiler may fuse into a
+        # multiply-add. The order depends only on the row pair, so an entry is the same
+        # bytes alone and inside any batch.
+        pid = tl.program_id(0).to(tl.int64)
+        b = pid // (M * M)
+        rem = pid % (M * M)
+        base_i = (b * M + rem // M) * W
+        base_j = (b * M + rem % M) * W
+        offs = tl.arange(0, BLOCK_W)
+        if HAS_LENGTHS:
+            limit = tl.minimum(tl.maximum(tl.load(len_ptr + b), 0), W)
+        else:
+            limit = W
+        acc = tl.zeros([BLOCK_W], dtype=out_ptr.dtype.element_ty)
+        for start in range(0, W, BLOCK_W):
+            cols = start + offs
+            keep = cols < limit
+            xi = tl.load(x_ptr + base_i + cols, mask=keep, other=0.0)
+            xj = tl.load(x_ptr + base_j + cols, mask=keep, other=0.0)
+            acc += xi * xj
+        tl.store(out_ptr + pid, tl.sum(acc, axis=0))
+
+
 def _aligned_contiguous(t: Tensor) -> Tensor:
     """``t`` as a contiguous buffer whose address is 16-byte aligned.
 
@@ -392,6 +429,68 @@ def row_std(
     return _reduce(_STD, x, None, lengths, mask, backend)
 
 
+def row_gram(
+    x: Tensor, *, lengths: Tensor | None = None, backend: Backend = "auto",
+    chunk_bytes: int = 1 << 30,
+) -> Tensor:
+    """``x x^T`` of each batch entry of ``x [B, m, n]``: ``[B, m, m]``.
+
+    Entry ``(b, i, j)`` is the dot product of ``x[b, i]`` and ``x[b, j]`` over their
+    unmasked positions, accumulated in :func:`row_sum`'s fixed order, so it is
+    batchmate- and restart-invariant like the other primitives. ``lengths`` (integer,
+    shape ``[B]``) masks positions ``>= lengths[b]`` in every row of batch entry ``b``.
+
+    On CUDA the products are formed inside the reduction and never stored, so the
+    working set is the Gram matrix, not the ``[B, m, m, n]`` product; the compiler may
+    fuse each product into its addition. The torch path materializes the product in
+    chunks of the first index (at most ``chunk_bytes`` each) and reduces it with
+    :func:`row_sum`. The two agree to rounding, not to the byte.
+    """
+    if x.dtype not in SUPPORTED_DTYPES:
+        raise TypeError(f"row_gram takes float32 or float64, not {x.dtype}")
+    if x.dim() != 3:
+        raise ValueError(f"row_gram takes [B, m, n], not {tuple(x.shape)}")
+    batch, m, n = x.shape
+    if lengths is not None:
+        if lengths.shape != (batch,):
+            raise ValueError(f"lengths must have shape ({batch},), not {tuple(lengths.shape)}")
+        if lengths.dtype.is_floating_point or lengths.dtype == torch.bool:
+            raise TypeError(f"lengths must be an integer tensor, not {lengths.dtype}")
+    use_triton = backend == "triton" or (backend == "auto" and x.is_cuda and HAVE_TRITON)
+    if use_triton:
+        if not HAVE_TRITON:
+            raise RuntimeError("backend='triton' needs triton importable")
+        if not x.is_cuda:
+            raise RuntimeError("backend='triton' needs a CUDA tensor")
+        out = torch.empty(batch, m, m, dtype=x.dtype, device=x.device)
+        if out.numel() == 0:
+            return out
+        if n == 0:
+            return out.zero_()
+        xs = _aligned_contiguous(x)
+        if lengths is not None:
+            has_len, len_arg = True, _aligned_contiguous(lengths.to(device=x.device, dtype=torch.int32))
+        else:
+            has_len, len_arg = False, xs
+        with torch.cuda.device(x.device):
+            _gram_kernel[(batch * m * m,)](
+                xs, len_arg, out, m, n,
+                HAS_LENGTHS=has_len, BLOCK_W=BLOCK,
+                num_warps=NUM_WARPS, num_stages=NUM_STAGES,
+            )
+        return out
+    if backend not in ("auto", "torch"):
+        raise ValueError(f"backend must be 'auto', 'triton' or 'torch', not {backend!r}")
+    chunk = max(1, min(m, chunk_bytes // max(1, batch * m * n * x.element_size())))
+    parts = []
+    for first in range(0, m, chunk):
+        last = min(m, first + chunk)
+        product = x[:, first:last, None, :] * x[:, None, :, :]
+        lens = None if lengths is None else lengths.view(-1, 1, 1).expand(product.shape[:-1])
+        parts.append(row_sum(product, lengths=lens, backend="torch"))
+    return torch.cat(parts, dim=1)
+
+
 __all__ = (
     "BLOCK",
     "HAVE_TRITON",
@@ -399,6 +498,7 @@ __all__ = (
     "NUM_WARPS",
     "SUPPORTED_DTYPES",
     "row_dot",
+    "row_gram",
     "row_mean",
     "row_norm",
     "row_std",

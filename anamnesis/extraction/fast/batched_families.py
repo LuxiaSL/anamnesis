@@ -80,6 +80,7 @@ from anamnesis.extraction.fast.external import ExternalCaptureError
 from anamnesis.extraction.fast.features import GpuFeatureLane
 from anamnesis.extraction.fast.invariant_ops import (
     row_dot,
+    row_gram,
     row_mean,
     row_norm,
     row_std,
@@ -224,16 +225,15 @@ def _corr(a: Tensor, b: Tensor, min_n: int = 3, counts: Counts | None = None) ->
 
 def _gram(x: Tensor, counts: Counts | None = None) -> Tensor:
     """``x x^T`` of each row of ``x [B, m, n]``: ``[B, m, m]``, each entry a :func:`row_sum`
-    over an elementwise product (over each row's first ``counts`` of ``n``), chunked over the
-    first index to bound the working set."""
+    over an elementwise product (over each row's first ``counts`` of ``n``):
+    :func:`~anamnesis.extraction.fast.invariant_ops.row_gram`."""
     batch, m, n = x.shape
-    chunk = max(1, min(m, WORKING_BYTES // max(1, batch * m * n * x.element_size())))
-    parts = []
-    for first in range(0, m, chunk):
-        last = min(m, first + chunk)
-        product = x[:, first:last, None, :] * x[:, None, :, :]
-        parts.append(row_sum(product, lengths=counts.lengths(product) if counts else None))
-    return torch.cat(parts, dim=1)
+    lengths = None
+    if counts is not None and not counts.uniform(n):
+        if batch != len(counts.host):
+            raise ValueError(f"{len(counts.host)} counts for a batch of {batch} rows")
+        lengths = counts.dev
+    return row_gram(x, lengths=lengths, chunk_bytes=WORKING_BYTES)
 
 
 def _square_counts(counts: Counts) -> Counts:
