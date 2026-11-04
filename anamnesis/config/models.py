@@ -149,6 +149,14 @@ class ModelPreset(BaseModel):
             "count at every layer"
         ),
     )
+    pca_temporal_samples: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Positions of the span the residual-stream PCA projects at each PCA layer, evenly "
+            "spaced. None keeps the extraction's default"
+        ),
+    )
     trajectory_layers: tuple[int, ...] = Field(description="Layers residual trajectories are traced at")
     contrastive_layers: tuple[int, ...] = Field(description="Layers the contrastive projection reads")
     early_layer_cutoff: int = Field(ge=0, description="At or below this a layer counts as early")
