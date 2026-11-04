@@ -149,8 +149,20 @@ def _time_mean(x: Tensor, counts: Counts | None = None) -> Tensor:
 
 
 def _head_mean(x: Tensor) -> Tensor:
-    """``x [..., heads, dim]`` averaged over its heads in float32: ``[..., dim]``."""
-    return row_mean(x.float().transpose(-1, -2).contiguous())
+    """``x [..., heads, dim]`` averaged over its heads in float32: ``[..., dim]``.
+
+    The heads are added first to last, then the sum is divided by their count. Every step
+    is elementwise over ``[..., dim]``, so a position's mean reads only its own heads and is
+    the same bytes alone and inside any batch, with one pass per head and no transposed copy.
+    """
+    x = x.float()
+    heads = x.shape[-2]
+    if heads == 0:
+        return x.new_zeros(x.shape[:-2] + x.shape[-1:])
+    total = x[..., 0, :].clone()
+    for h in range(1, heads):
+        total += x[..., h, :]
+    return total / heads
 
 
 def _running_mean(x: Tensor) -> Tensor:
