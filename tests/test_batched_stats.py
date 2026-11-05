@@ -867,8 +867,7 @@ def test_rows_reduced_on_two_archs_never_share_a_lane_id(monkeypatch):
     assert first.meta["reducer_identity"] == second.meta["reducer_identity"]
 
 
-SYNC_ALLOWED = ("eigvalsh_rows", "validate_batch", "finish_rows",
-                "(outside) test_batched_stats.py:run")
+SYNC_ALLOWED = ("eigvalsh_rows", "validate_batch", "finish_rows")
 """Where the batched reduction may make the host wait for the device: the eigensolver's
 status check, the batch's validation, and the final copies of the features to the host."""
 
@@ -885,6 +884,8 @@ def _sync_sites(fn) -> list[str]:
         if "synchroniz" in str(message):
             stack = traceback.extract_stack()[:-1]
             frames = [f for f in stack if "anamnesis/extraction" in f.filename]
+            if any(f.name == "set_sync_debug_mode" for f in stack[-3:]):
+                return  # this helper turning the check off
             if frames:
                 sites.append(frames[-1].name)
             else:
@@ -922,8 +923,7 @@ def _sync_free_reduce(hidden: int):
                             expected_weights=ENGINE["weights"])
 
     def run():
-        reducer.reduce(rows, token_ids=ids, engine=ENGINE)
-        torch.cuda.synchronize()
+        reducer.reduce(rows, token_ids=ids, engine=ENGINE)  # ends with the copies to the host
     run()  # builds and uploads the lane's constants once
     return run
 
