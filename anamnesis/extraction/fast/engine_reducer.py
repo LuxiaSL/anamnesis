@@ -69,8 +69,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 from dataclasses import replace
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -463,13 +464,37 @@ def _with_lens(finished: Sequence[Any], lensed: Any) -> list[Any]:
     return out
 
 
+@contextmanager
+def uninitialized_fill(enabled: bool) -> Iterator[None]:
+    """Within the block, whether torch fills each new uninitialized allocation
+    (``torch.utils.deterministic.fill_uninitialized_memory``); the prior setting is restored on
+    exit, error or not.
+
+    Under ``torch.use_deterministic_algorithms`` torch writes NaN into every ``empty``
+    allocation, so that a read of memory nothing wrote is reproducible. That is a fill kernel
+    per allocation, which in the batched reduction is most of its fill launches. The reduction
+    writes every element it reads, so the fill never reaches a feature: a test reduces with the
+    fill on and off and requires the same bytes, and any read of unwritten memory would carry a
+    NaN into one run and not the other. The setting is process-wide, so another thread
+    allocating while the block runs sees it too. Nothing else in a signing process relies on
+    the fill to be correct; it only makes a read of unwritten memory repeatable."""
+    det = torch.utils.deterministic
+    previous = det.fill_uninitialized_memory
+    det.fill_uninitialized_memory = bool(enabled)
+    try:
+        yield
+    finally:
+        det.fill_uninitialized_memory = previous
+
+
 def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                               token_ids: Sequence[Sequence[int]],
                               engine: Mapping[str, Any],
                               bucket_rule: str = BUCKET_RULE,
                               width: int | None = None,
                               max_group_rows: int | None = None,
-                              lens: LensHead | None = None) -> list[Any]:
+                              lens: LensHead | None = None,
+                              fill_uninitialized: bool = False) -> list[Any]:
     """Signed rows of one lane, every family batched across the rows of one step-count
     bucket (:func:`attention_features`, :func:`block_output_features`, :func:`kvqg_features`,
     :func:`outputs_features`, :func:`routing_features`) and assembled by
@@ -483,7 +508,10 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
     at most that many rows, in order. The reduction is batchmate-invariant, so a chunk's rows
     have the bytes they have in the whole group, and the cap is not part of the lane. It
     bounds the memory a batch takes (the stacked surfaces, padded to the bucket's width) at
-    the cost of more launches. ``lens`` adds the lens family (see the module docstring)."""
+    the cost of more launches. ``lens`` adds the lens family (see the module docstring).
+
+    The groups reduce without torch's fill of new allocations (:func:`uninitialized_fill`), which
+    changes no byte; ``fill_uninitialized`` keeps the fill on."""
     if max_group_rows is not None and int(max_group_rows) < 1:
         raise ValueError(f"max_group_rows must be at least 1, not {max_group_rows}")
     if bucket_rule not in BUCKET_RULES:
@@ -499,15 +527,16 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
     for i in sorted(spans):
         padded_to = width if width is not None else bucket_width(int(rows[i].positions), bucket_rule)
         groups.setdefault((padded_to, _shape_key(rows[i], padded_to)), []).append(i)
-    for (padded_to, _), group in groups.items():
-        step = len(group) if max_group_rows is None else int(max_group_rows)
-        for lo in range(0, len(group), step):
-            members = group[lo:lo + step]
-            reduced = _reduce_uniform(lane, [rows[i] for i in members],
-                                      [spans[i] for i in members], engine, padded_to, bucket_rule,
-                                      lens)
-            for i, result in zip(members, reduced, strict=True):
-                results[i] = result
+    with uninitialized_fill(fill_uninitialized):
+        for (padded_to, _), group in groups.items():
+            step = len(group) if max_group_rows is None else int(max_group_rows)
+            for lo in range(0, len(group), step):
+                members = group[lo:lo + step]
+                reduced = _reduce_uniform(lane, [rows[i] for i in members],
+                                          [spans[i] for i in members], engine, padded_to,
+                                          bucket_rule, lens)
+                for i, result in zip(members, reduced, strict=True):
+                    results[i] = result
     return results
 
 
@@ -535,6 +564,10 @@ class EngineReducer:
     checkpoint path, read by :meth:`~anamnesis.extraction.fast.lens.LensHead.from_checkpoint`
     as the weights ``expected_weights`` names) turns on the lens family. The head must belong
     to ``expected_weights``, and the lens needs the batched reduction.
+
+    ``fill_uninitialized`` keeps torch's fill of new allocations on during the batched
+    reduction (:func:`uninitialized_fill`); it changes no byte, so it is not part of the lane or
+    the identity.
     """
 
     def __init__(self, *, preset: str | None = None, calib_dir: str | Path | None = None,
@@ -542,7 +575,8 @@ class EngineReducer:
                  lane_for: Callable[[int], GpuFeatureLane] | None = None,
                  expected_weights: str | None = None, batched: bool = True,
                  buckets: str = BUCKET_RULE, max_group_rows: int | None = None,
-                 lens: LensHead | None = None, lens_checkpoint: str | Path | None = None) -> None:
+                 lens: LensHead | None = None, lens_checkpoint: str | Path | None = None,
+                 fill_uninitialized: bool = False) -> None:
         if (lane_for is None) == (preset is None):
             raise ValueError("give a preset (with calib_dir) or lane_for, one of the two")
         if buckets not in BUCKET_RULES:
@@ -553,6 +587,7 @@ class EngineReducer:
         if max_group_rows is not None and int(max_group_rows) < 1:
             raise ValueError(f"max_group_rows must be at least 1, not {max_group_rows}")
         self.max_group_rows = None if max_group_rows is None else int(max_group_rows)
+        self.fill_uninitialized = bool(fill_uninitialized)
         if lane_for is not None:
             self._lane_for = lane_for
             self.expected_weights = expected_weights
@@ -668,7 +703,8 @@ class EngineReducer:
             reduced = reduce_signed_rows_hybrid(
                 self.lane(width), [rows[i] for i in members],
                 [token_ids[i] for i in members], engine, self.buckets, width,
-                max_group_rows=self.max_group_rows, lens=self.lens)
+                max_group_rows=self.max_group_rows, lens=self.lens,
+                fill_uninitialized=self.fill_uninitialized)
             for i, result in zip(members, reduced, strict=True):
                 results[i] = result
         for i, result in enumerate(results):
