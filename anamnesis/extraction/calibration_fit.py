@@ -931,6 +931,150 @@ def determined_components(cosines: NDArray[np.float64], threshold: float = 0.9) 
     return int(np.count_nonzero(np.asarray(cosines) >= threshold))
 
 
+def _group_contrasts(states: NDArray[np.float64], groups: NDArray[Any]) -> NDArray[np.float64]:
+    """Each state minus the mean of its group.
+
+    Raises
+    ------
+    CalibrationFitError
+        When a group has fewer than two members, so its contrast is zero by construction.
+    """
+    _, inverse, counts = np.unique(groups, return_inverse=True, return_counts=True)
+    if counts.min() < 2:
+        raise CalibrationFitError(
+            f"{int((counts < 2).sum())} groups have one member; a within-group contrast needs two"
+        )
+    sums = np.zeros((counts.size, states.shape[1]), dtype=np.float64)
+    np.add.at(sums, inverse, states)
+    return states - (sums / counts[:, None])[inverse]
+
+
+def _orthonormal_rows(rows: NDArray[np.float64]) -> NDArray[np.float64]:
+    """``rows`` orthonormalized in order (Gram-Schmidt by QR), each keeping its sign."""
+    if rows.shape[0] == 0:
+        return rows
+    q, r = np.linalg.qr(rows.T)
+    return (q * np.sign(np.where(np.diag(r) == 0, 1.0, np.diag(r)))).T
+
+
+def fit_hybrid_basis(
+    states: NDArray[np.floating],
+    groups: NDArray[Any],
+    n_across: int,
+    n_within: int,
+) -> dict[str, Any]:
+    """A basis in two parts, over positionally corrected states ``[n, width]``.
+
+    * **Across:** the leading ``n_across`` directions of variance across the states.
+      These are :func:`_fit_one`'s components, byte for byte, the per-layer basis's own
+      fit.
+    * **Within:** the ``n_within`` directions of most variance *within* groups that the
+      first part leaves. A group is a set of states that share their content, such as
+      the sibling continuations of one context at one point of the span. Each state's
+      contrast is the state minus its group's mean. The contrasts are projected off the
+      across part's span and decomposed exactly, so the within part is
+      orthogonal to the across part by construction. It holds the most within-group
+      variance any ``n_within`` directions outside that span can: Gram-Schmidt applied to
+      an independent within-group fit spans no more of it. The directions are the leading
+      eigenvectors of the projected contrasts' ``width x width`` scatter, each signed so its
+      largest entry is positive.
+
+    The rows are orthonormal, across first. ``mean`` is the across fit's, so a state
+    projects as ``(state - mean) @ components.T``, as with any per-layer basis.
+    ``explained_variance_ratio`` is each component's share of the variance across the
+    states, the quantity a PCA reports. ``within_variance_ratio`` is its share of the
+    within-group variance. ``parts`` records the split.
+
+    Raises
+    ------
+    CalibrationFitError
+        When the parts ask for more directions than the width or the samples hold, a
+        count is negative, the groups don't label every state, or a group has one member.
+    """
+    x = np.asarray(states, dtype=np.float64)
+    g = np.asarray(groups)
+    if x.ndim != 2:
+        raise CalibrationFitError(f"states must be [n, width], not {x.shape}")
+    if g.shape != (x.shape[0],):
+        raise CalibrationFitError(f"{g.shape} group labels for {x.shape[0]} states")
+    if n_across < 0 or n_within < 0:
+        raise CalibrationFitError("component counts cannot be negative")
+    if n_across + n_within > min(x.shape):
+        raise CalibrationFitError(
+            f"{n_across} + {n_within} components from {x.shape[0]} states of width {x.shape[1]}"
+        )
+    contrasts = _group_contrasts(x, g)
+    if n_across:
+        across = _fit_one(x, n_across)
+        a = across["components"].astype(np.float64)
+        mean = across["mean"]
+    else:
+        a = np.zeros((0, x.shape[1]))
+        mean = x.mean(axis=0).astype(np.float32)
+    left = contrasts - (contrasts @ a.T) @ a
+    if n_within:
+        # The leading eigenvectors of the contrasts' width x width scatter: the top right
+        # singular vectors of the contrasts without forming their [n, width] left factor.
+        values, vectors = np.linalg.eigh(left.T @ left)
+        w = vectors[:, np.argsort(values)[::-1][:n_within]].T
+        w = w * np.sign(w[np.arange(w.shape[0]), np.abs(w).argmax(axis=1)])[:, None]
+        w = _orthonormal_rows(w - (w @ a.T) @ a)  # rounding: exactly off the across span
+    else:
+        w = np.zeros((0, x.shape[1]))
+    components = np.vstack([a, w])
+    centred = x - mean.astype(np.float64)
+    across_total = float((centred ** 2).sum())
+    within_total = float((contrasts ** 2).sum())
+    return {
+        "components": np.vstack([a.astype(np.float32), w.astype(np.float32)]),
+        "mean": mean,
+        "explained_variance_ratio": ((centred @ components.T) ** 2).sum(axis=0) / max(across_total, 1e-300),
+        "within_variance_ratio": ((contrasts @ components.T) ** 2).sum(axis=0) / max(within_total, 1e-300),
+        "parts": {"across": int(n_across), "within": int(n_within)},
+    }
+
+
+def hybrid_reproducibility(
+    states: NDArray[np.floating],
+    groups: NDArray[Any],
+    halves: NDArray[np.bool_],
+    n_across: int,
+    n_within: int,
+    threshold: float = 0.9,
+) -> dict[str, Any]:
+    """How many directions of a :func:`fit_hybrid_basis` two disjoint halves of the samples
+    agree on: the :func:`determined_components` of each part, and of the whole basis.
+
+    ``halves`` marks the states of half B; the rest are half A. Split them by context (a
+    group never spans both halves), or the halves share their within-group structure and
+    the count is inflated.
+
+    Raises
+    ------
+    CalibrationFitError
+        When a group has states in both halves, or either half can't fit the basis.
+    """
+    g = np.asarray(groups)
+    b = np.asarray(halves, dtype=bool)
+    if b.shape != g.shape:
+        raise CalibrationFitError(f"{b.shape} half labels for {g.shape} states")
+    mixed = set(g[b].tolist()) & set(g[~b].tolist())
+    if mixed:
+        raise CalibrationFitError(f"{len(mixed)} groups have states in both halves")
+    x = np.asarray(states)
+    fit_a = fit_hybrid_basis(x[~b], g[~b], n_across, n_within)
+    fit_b = fit_hybrid_basis(x[b], g[b], n_across, n_within)
+    ca, cb = fit_a["components"], fit_b["components"]
+    out: dict[str, Any] = {"threshold": threshold, "n_a": int((~b).sum()), "n_b": int(b.sum())}
+    for part, rows in (("across", slice(0, n_across)), ("within", slice(n_across, n_across + n_within)),
+                       ("whole", slice(0, n_across + n_within))):
+        cos = principal_cosines(ca[rows], cb[rows]) if ca[rows].shape[0] else np.zeros(0)
+        out[part] = {"determined": determined_components(cos, threshold),
+                     "of": int(ca[rows].shape[0]),
+                     "cosines": [round(float(c), 4) for c in cos]}
+    return out
+
+
 def fit_calibration(
     states: Iterable[PromptStates],
     *,
