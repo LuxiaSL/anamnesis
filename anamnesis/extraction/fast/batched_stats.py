@@ -18,6 +18,14 @@ matrix products, because a batched GEMM may choose its algorithm from the batch 
 short-time spectrum of the operators is a direct DFT through :func:`row_dot` for the same
 reason. A row reduced alone and the same row inside any batch therefore have the same bytes.
 
+**Stacked passes.** The same property lets many series share one pass. The windowed
+operators and spectrum of every novelty, drift and alignment series, and the routing
+family's summaries, are each a function of one ``[B, m]`` series and its step counts.
+:func:`stacked` stacks the series that share their counts along the rows, tiles the counts
+to match, and splits the result. The rows are the same bytes as in a call of their own,
+and the passes take far fewer launches. Which series share a pass follows the lane and the
+counts, and a pass is cut in chunks by the batch's size; neither changes a byte.
+
 **Agreement with the per-row loop.** The arithmetic is the per-row loop's, operator for
 operator, with each reduction's order replaced by the primitives' fixed order and the FFT
 by its DFT. The features agree with :class:`ExternalStatsSpan`'s to rounding, not to the
@@ -45,7 +53,7 @@ import json
 import math
 import uuid
 import weakref
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -306,6 +314,15 @@ class Counts:
                                       self.dev.repeat_interleave(r), self.width, self.padded)
         return self._cache[key]
 
+    def tile(self, k: int) -> "Counts":
+        """These counts ``k`` times over, batch after batch (rows ``[B]`` to ``[k * B]``): the
+        counts of ``k`` same-shaped batches stacked along the rows, as :func:`stacked` does."""
+        key = ("tile", int(k))
+        if key not in self._cache:
+            self._cache[key] = Counts(self.host * int(k), self.dev.repeat(int(k)), self.width,
+                                      self.padded)
+        return self._cache[key]
+
     def memo(self, key: Any, build) -> Any:
         """A value derived from these counts, built once."""
         if key not in self._cache:
@@ -539,6 +556,68 @@ def _temporal_rows(x: Tensor, n_windows: int, include_stft: bool,
     return torch.cat((windowed, spectral), dim=1).float()
 
 
+def stacked(fn: Callable[[Tensor, "Counts | None"], Tensor], xs: Sequence[Tensor],
+            counts: "Counts | None", row_bytes: int) -> list[Tensor]:
+    """``fn(x, counts)`` for each ``x`` of ``xs`` (each ``[B, ...]`` of one shape), in few passes.
+
+    The ``xs`` are stacked along the rows, ``counts`` tiled to match (:meth:`Counts.tile`), and
+    each pass's result is split back into one ``[B, ...]`` per ``x``. A pass takes as many as
+    keep its working set (``row_bytes`` per stacked row) within :data:`WORKING_BYTES`, and at
+    least one. ``fn`` must be batchmate-invariant row by row, as every reduction here is: a
+    row's result is then the same bytes in a pass of many as in a call of its own."""
+    if not xs:
+        return []
+    if any(x.shape != xs[0].shape or x.dtype != xs[0].dtype for x in xs):
+        return [fn(x, counts) for x in xs]  # nothing to stack: one call each
+    batch = xs[0].shape[0]
+    per = max(1, WORKING_BYTES // max(1, batch * row_bytes))
+    out: list[Tensor] = []
+    for first in range(0, len(xs), per):
+        chunk = xs[first:first + per]
+        if len(chunk) == 1:
+            out.append(fn(chunk[0], counts))
+            continue
+        values = fn(torch.cat(list(chunk)), None if counts is None else counts.tile(len(chunk)))
+        out.extend(values[i * batch:(i + 1) * batch] for i in range(len(chunk)))
+    return out
+
+
+def _temporal_row_bytes(n: int, include_stft: bool) -> int:
+    """A bound on :func:`_temporal_rows`'s float64 working set per row of ``n`` values; the
+    spectrum's expanded frames and DFT bases dominate it."""
+    per_row = 16 * max(n, 1) * 8
+    if include_stft:
+        frames = (max(n, 64) + 95) // 32  # at least the spectrum's frame count
+        per_row += 4 * frames * 33 * 64 * 8
+    return per_row
+
+
+def _temporal_many(series: Sequence[tuple[Tensor, "Counts | None"]], n_windows: int,
+                   include_stft: bool) -> list[Tensor]:
+    """:func:`_temporal_rows` of each ``(x, counts)``, the same bytes as one call each: series
+    with the same counts (the same object, or none) and shape are reduced together by
+    :func:`stacked`, so they take one pass instead of one each."""
+    out: list[Tensor | None] = [None] * len(series)
+    groups: dict[tuple[Any, ...], list[int]] = {}
+    for i, (x, counts) in enumerate(series):
+        groups.setdefault((id(counts), tuple(x.shape), x.device), []).append(i)
+    for members in groups.values():
+        counts = series[members[0]][1]
+        n = series[members[0]][0].shape[1]
+        values = stacked(lambda x, c: _temporal_rows(x, n_windows, include_stft, c),
+                         [series[i][0].float() for i in members], counts,
+                         _temporal_row_bytes(n, include_stft))
+        for i, value in zip(members, values, strict=True):
+            out[i] = value
+    return [_resolved(value) for value in out]
+
+
+def _resolved(value: Tensor | None) -> Tensor:
+    if value is None:
+        raise RuntimeError("a deferred value was never computed")
+    return value
+
+
 def _operator_names(prefix: str, n_windows: int, include_stft: bool) -> list[str]:
     from anamnesis.extraction.feature_families.operators import _stft_names, _windowed_names
 
@@ -561,22 +640,88 @@ def _cos(a: Tensor, b: Tensor) -> Tensor:
     return torch.where((na < 1e-12) | (nb < 1e-12), torch.zeros_like(value), value)
 
 
+@dataclass(frozen=True)
+class _PendingOperators:
+    """A series :meth:`_Columns.operators` deferred: its first column and how many it fills."""
+
+    start: int
+    width: int
+    x: Tensor
+    counts: Counts | None
+    n_windows: int
+    include_stft: bool
+
+
 class _Columns:
-    """Named ``[B]`` columns, kept as views until one stack at the end."""
+    """Named ``[B]`` columns, kept as views until one stack at the end.
+
+    :meth:`operators` defers its series until the columns are read (:meth:`resolve`), and then
+    reduces every deferred series at once with :func:`_temporal_many`: the series that share
+    their counts and shape take one pass, not one each, and each column's bytes are the ones
+    an immediate reduction gives."""
 
     def __init__(self) -> None:
         self.names: list[str] = []
-        self.columns: list[Tensor] = []
+        self._columns: list[Tensor | None] = []
+        self._pending: list[_PendingOperators] = []
+
+    def __len__(self) -> int:
+        return len(self._columns)
 
     def put(self, name: str, value: Tensor) -> None:
         self.names.append(name)
-        self.columns.append(value)
+        self._columns.append(value)
 
     def block(self, names: Sequence[str], values: Tensor) -> None:
         """``values [B, len(names)]`` as one column per name; cast to float64 once."""
         values = values.double()
         for i, name in enumerate(names):
             self.put(name, values[:, i])
+
+    def operators(self, prefix: str, x: Tensor, n_windows: int, include_stft: bool,
+                  counts: Counts | None = None) -> None:
+        """``ops.temporal`` of each row of ``x [B, m]`` (:func:`_temporal_rows`) as the columns
+        of its operator names under ``prefix``, computed when the columns are read."""
+        names = _operator_names(prefix, n_windows, include_stft)
+        self._pending.append(_PendingOperators(len(self._columns), len(names), x, counts,
+                                               n_windows, include_stft))
+        self.names.extend(names)
+        self._columns.extend([None] * len(names))
+
+    def resolve(self) -> list[Tensor]:
+        """Every column, the deferred ones computed first."""
+        if self._pending:
+            configs: dict[tuple[int, bool], list[_PendingOperators]] = {}
+            for p in self._pending:
+                configs.setdefault((p.n_windows, p.include_stft), []).append(p)
+            for (n_windows, include_stft), group in configs.items():
+                blocks = _temporal_many([(p.x, p.counts) for p in group], n_windows, include_stft)
+                for p, values in zip(group, blocks, strict=True):
+                    values = values.double()
+                    if values.shape[1] != p.width:
+                        raise RuntimeError(f"{values.shape[1]} operator values for {p.width} names")
+                    for i in range(p.width):
+                        self._columns[p.start + i] = values[:, i]
+            self._pending.clear()
+        return [_resolved(c) for c in self._columns]
+
+    def where_since(self, start: int, rows: Tensor) -> None:
+        """Zero the columns from ``start`` on at the ``rows`` (a boolean ``[B]``).
+
+        Deferred columns before ``start`` stay deferred, so when the passes run never depends
+        on which rows needed zeroing (on the batchmates)."""
+        if any(p.start + p.width > start for p in self._pending):
+            self.resolve()
+        for c in range(start, len(self._columns)):
+            value = _resolved(self._columns[c])
+            self._columns[c] = torch.where(rows, value.new_zeros(()), value)
+
+    def stack(self, batch: int, device: torch.device | str) -> Tensor:
+        """``[B, columns]`` float64 (each column cast once), or ``[B, 0]`` with none."""
+        columns = self.resolve()
+        if not columns:
+            return torch.zeros(batch, 0, dtype=torch.float64, device=device)
+        return torch.stack([c.double() for c in columns], dim=1)
 
 
 def _residual_trajectory(cols: _Columns, layer: int, corrected: Tensor, raw_first_norm: Tensor,
@@ -753,9 +898,7 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
                     for ci in range(k):
                         cols.put(f"pca_L{layer}_t{ti}_c{ci}", projections[:, ti, ci])
         previous = corrected[:, :, -1:]
-    values = (torch.stack(cols.columns, dim=1) if cols.columns
-              else torch.zeros(batch, 0, dtype=torch.float64, device=device))
-    return BlockOutputs(tuple(cols.names), values)
+    return BlockOutputs(tuple(cols.names), cols.stack(batch, device))
 
 
 @dataclass(frozen=True)

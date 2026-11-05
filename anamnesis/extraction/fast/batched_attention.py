@@ -49,7 +49,7 @@ from anamnesis.extraction.fast.batched_stats import (
     Counts,
     _Columns,
     _operator_names,
-    _temporal_rows,
+    _temporal_many,
     canonical_size,
     per_row_index,
     take_steps,
@@ -357,8 +357,8 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
             out[f"{FLOW}region_{label}_std"] = row_std(series, lengths=live)
         out[FLOW + "head_diversity_prompt"] = row_mean(row_std(head_prompt.double()), lengths=live)
         out[FLOW + "head_diversity_recency"] = row_mean(row_std(head_recency.double()), lengths=live)
-        for name, series in (("prompt_mass", sys), ("recency_bias", rec)):
-            values = _temporal_rows(series, n_windows, include_stft, counts)
+        operators = _temporal_many([(sys, counts), (rec, counts)], n_windows, include_stft)
+        for name, values in zip(("prompt_mass", "recency_bias"), operators, strict=True):
             for i, suffix in enumerate(_operator_names("", n_windows, include_stft)):
                 out[f"{FLOW}{name}{suffix}"] = values[:, i]
     return out, steps, k_counts, normalized
@@ -466,7 +466,7 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
                                               lane.families.enable_stft)
                 cols.block(list(names), torch.zeros(batch, len(names), dtype=torch.float64,
                                                     device=device))
-    values = torch.stack([c.double() for c in cols.columns], dim=1)
+    values = cols.stack(batch, device)
     return AttentionFeatures(tuple(cols.names), values, laplacians, per_head, retained)
 
 
