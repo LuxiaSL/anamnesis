@@ -865,3 +865,64 @@ def test_rows_reduced_on_two_archs_never_share_a_lane_id(monkeypatch):
     assert first.lane_id != second.lane_id
     assert second.meta["receipt"]["batched"]["device_arch"] == "cpu-other-isa"
     assert first.meta["reducer_identity"] == second.meta["reducer_identity"]
+
+
+SYNC_ALLOWED = ("eigvalsh_rows", "validate_batch", "finish_rows")
+"""Where the batched reduction may make the host wait for the device: the eigensolver's
+status check, the batch's validation, and the final copies of the features to the host."""
+
+
+def _sync_sites(fn) -> list[str]:
+    """The innermost anamnesis function at each synchronizing CUDA call ``fn`` makes."""
+    import traceback
+    import warnings
+
+    sites: list[str] = []
+
+    def record(message, *args, **kwargs):
+        if "synchroniz" in str(message):
+            frames = [f for f in traceback.extract_stack()[:-1] if "anamnesis/extraction" in f.filename]
+            sites.append(frames[-1].name if frames else "(outside)")
+
+    with warnings.catch_warnings():  # restores showwarning and the filters on exit
+        warnings.simplefilter("always")
+        warnings.showwarning = record
+        torch.cuda.set_sync_debug_mode("warn")
+        try:
+            fn()
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+    return sites
+
+
+def _stray_syncs(fn) -> set[str]:
+    return {s for s in _sync_sites(fn) if s not in SYNC_ALLOWED}
+
+
+def _sync_free_reduce(hidden: int):
+    made = [signed_row(n, 3 + n % 7, 900 + n, hidden) for n in (9, 13, 16, 16, 11)]
+    return lambda: reduce("cuda", hidden, [r for r, _ in made], [i for _, i in made], batched=True)
+
+
+@CUDA
+def test_the_batched_reduction_syncs_the_host_only_where_it_must():
+    run = _sync_free_reduce(1536)
+    run()  # warm: compile, constants
+    stray = _stray_syncs(run)
+    assert not stray, sorted(stray)
+
+
+@CUDA
+def test_the_sync_check_bites_on_a_host_read(monkeypatch):
+    from anamnesis.extraction.fast import batched_stats
+
+    original = batched_stats._spectral_summary
+
+    def reads_host(power, freq, bands):
+        float(power.sum())
+        return original(power, freq, bands)
+
+    monkeypatch.setattr(batched_stats, "_spectral_summary", reads_host)
+    run = _sync_free_reduce(1536)
+    run()
+    assert _stray_syncs(run)

@@ -50,6 +50,7 @@ from anamnesis.extraction.fast.batched_stats import (
     _Columns,
     _operator_names,
     _temporal_many,
+    host_tensor,
     canonical_size,
     per_row_index,
     take_steps,
@@ -140,7 +141,7 @@ def eigvalsh_sized(lap: Tensor, k: Counts) -> Tensor:
     for r, n in enumerate(k.host):
         by_size.setdefault(n, []).append(r)
     for n, members in sorted(by_size.items()):
-        index = torch.as_tensor(members, dtype=torch.long, device=lap.device)
+        index = host_tensor(members, torch.long, lap.device)
         block = lap.index_select(0, index)[:, :n, :n].contiguous()
         out[index, :n] = eigvalsh_rows(block)
     return out
@@ -245,7 +246,7 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
     else:
         index, picked_counts = per_row_index(counts, "decay", _decay_steps)
         if isinstance(index, list):
-            index = torch.as_tensor(index, dtype=torch.long, device=device)[None].expand(rows, -1)
+            index = host_tensor(index, torch.long, device)[None].expand(rows, -1)
         picked = take_steps(mean, index)[:, :, 1:]  # [R, m, W]
         m = picked.shape[1]
         step_lengths = take_steps(lengths, index)  # [R, m]
@@ -323,8 +324,8 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
         median = torch.where(kn % 2 == 1, upper, (lower + upper) * 0.5)
         p = ev / energy.clamp_min(1e-30)[:, None] + 1e-12
         p = p / row_sum(p, lengths=lengths_k)[:, None]
-        log_k = torch.as_tensor([math.log(n) if n > 1 else 1.0 for n in k_counts.host],
-                                dtype=torch.float64, device=device)
+        log_k = host_tensor([math.log(n) if n > 1 else 1.0 for n in k_counts.host],
+                            torch.float64, device)
         spec = torch.where(kn > 1, -row_sum(p * p.log(), lengths=lengths_k) / log_k, zero)
         hfer = row_sum(ev, mask=(ev > median[:, None]) & inside) / energy.clamp_min(1e-30)
     out["spectral_fiedler"] = fiedler
@@ -417,7 +418,7 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
     cols = _Columns()
     _entropy_features(cols, head_entropy, mean_entropy, counts)
 
-    start_t = torch.as_tensor([int(s) for s in starts], dtype=torch.long, device=device)
+    start_t = host_tensor([int(s) for s in starts], torch.long, device)
     lengths = start_t[:, None] + torch.arange(1, t + 1, device=device)[None, :]  # [B, t]
     log_length = lengths.clamp_min(2).double().log()[:, :, None]
     per_layer = max(1, batch * t * (width + 1) * 8 * 6)
@@ -434,8 +435,9 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
             return x.movedim(2, 1).reshape(batch * n, *x.shape[1:2], *x.shape[3:]).contiguous()
 
         series, steps, k_counts, normalized = _sampled_chunk(
-            lane, per_row(mean_rows[:, :, js].to(device).float()),
-            per_row(head_scalars[:, :, js, 0]), per_row(head_scalars[:, :, js, 1]),
+            lane, per_row(mean_rows[:, :, js[0]:js[-1] + 1].to(device).float()),
+            per_row(head_scalars[:, :, js[0]:js[-1] + 1, 0]),
+            per_row(head_scalars[:, :, js[0]:js[-1] + 1, 1]),
             start_t.repeat_interleave(n), counts.repeat(n))
         normalized = normalized.reshape(batch, n, *normalized.shape[1:])
         if isinstance(steps, Tensor):
