@@ -972,10 +972,12 @@ def fit_hybrid_basis(
       first part leaves. A group is a set of states that share their content, such as
       the sibling continuations of one context at one point of the span. Each state's
       contrast is the state minus its group's mean. The contrasts are projected off the
-      across part's span and decomposed by the same exact SVD, so the within part is
+      across part's span and decomposed exactly, so the within part is
       orthogonal to the across part by construction. It holds the most within-group
       variance any ``n_within`` directions outside that span can: Gram-Schmidt applied to
-      an independent within-group fit spans no more of it.
+      an independent within-group fit spans no more of it. The directions are the leading
+      eigenvectors of the projected contrasts' ``width x width`` scatter, each signed so its
+      largest entry is positive.
 
     The rows are orthonormal, across first. ``mean`` is the across fit's, so a state
     projects as ``(state - mean) @ components.T``, as with any per-layer basis.
@@ -1011,11 +1013,11 @@ def fit_hybrid_basis(
         mean = x.mean(axis=0).astype(np.float32)
     left = contrasts - (contrasts @ a.T) @ a
     if n_within:
-        from sklearn.utils.extmath import svd_flip
-
-        u, s, vt = np.linalg.svd(left, full_matrices=False)
-        _, vt = svd_flip(u, vt)
-        w = vt[:n_within]
+        # The leading eigenvectors of the contrasts' width x width scatter: the top right
+        # singular vectors of the contrasts without forming their [n, width] left factor.
+        values, vectors = np.linalg.eigh(left.T @ left)
+        w = vectors[:, np.argsort(values)[::-1][:n_within]].T
+        w = w * np.sign(w[np.arange(w.shape[0]), np.abs(w).argmax(axis=1)])[:, None]
         w = _orthonormal_rows(w - (w @ a.T) @ a)  # rounding: exactly off the across span
     else:
         w = np.zeros((0, x.shape[1]))
