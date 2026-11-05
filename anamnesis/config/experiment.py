@@ -96,6 +96,12 @@ class ExtractionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    _head_disagreement: Literal["jsd", "spread"] = PrivateAttr(default="jsd")
+    """How the attention block reads the heads' disagreement: a preset's
+    ``head_disagreement``, carried from
+    :func:`~anamnesis.extraction.replay_config.native_replay_configs`. Private, so it is in no
+    dump and every configuration built before the setting existed keeps its bytes."""
+
     sampled_layers: list[int] = Field(
         min_length=1, description="Layers keys, attention and spectral features are read at"
     )
@@ -179,6 +185,7 @@ class ExtractionConfig(BaseModel):
         fields.update(overrides)
         config = cls(**fields)
         config.check_depth(row)
+        config._head_disagreement = row.head_disagreement
         return config
 
     def check_depth(self, preset: str | ModelPreset) -> None:

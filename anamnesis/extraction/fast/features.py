@@ -41,6 +41,7 @@ import torch
 import transformers
 from torch import Tensor
 
+from anamnesis.extraction.state_extractor import head_disagreement
 from anamnesis.config import ExtractionConfig, FeaturePipelineConfig
 from anamnesis.extraction.calibration import positions_calibrated
 from anamnesis.extraction.fast.batch_layout import ReplaySpan, pack_spans
@@ -330,6 +331,7 @@ class GpuFeatureLane:
             spectral_stride=self.config.spectral_subsample_step,
             n_windows=self.families.temporal_n_windows,
             include_stft=self.families.enable_stft,
+            head_disagreement=head_disagreement(self.config),
         )
         reducer = FamilyReducer(collector, self.config, self.families)
         ids = torch.tensor(
@@ -461,6 +463,7 @@ class GpuFeatureLane:
                 spectral_stride=self.config.spectral_subsample_step,
                 n_windows=self.families.temporal_n_windows,
                 include_stft=self.families.enable_stft,
+                head_disagreement=head_disagreement(self.config),
             )
             for c, s in zip(collectors, layout.spans, strict=True)
         ]

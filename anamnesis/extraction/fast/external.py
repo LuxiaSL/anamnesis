@@ -43,6 +43,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from anamnesis.extraction.state_extractor import head_disagreement
 from anamnesis.extraction.fast.attention import AttentionReducer
 from anamnesis.extraction.fast.attn_res import attn_res_features
 from anamnesis.extraction.fast.families import FamilyReducer
@@ -111,6 +112,7 @@ class ExternalSpan:
             spectral_stride=lane.config.spectral_subsample_step,
             n_windows=lane.families.temporal_n_windows,
             include_stft=lane.families.enable_stft,
+            head_disagreement=head_disagreement(lane.config),
         )
         self.reducer = FamilyReducer(self.collector, lane.config, lane.families)
         self.finished = False

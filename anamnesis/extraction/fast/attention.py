@@ -21,6 +21,13 @@ from anamnesis.extraction.fast.ops import (
 )
 
 
+def spread_of(norm: Tensor) -> Tensor:
+    """The heads' L2 spread around their mean row at each step: ``norm [t, H, W]`` (each head's
+    row summing to one) to ``mean_h |p_h - mean_g p_g|^2``, ``[t]`` float32."""
+    centred = norm - norm.mean(dim=1, keepdim=True)
+    return (centred * centred).sum(dim=-1).mean(dim=1).float()
+
+
 class AttentionReducer:
     def __init__(
         self,
@@ -32,7 +39,11 @@ class AttentionReducer:
         spectral_stride: int = 10,
         n_windows: int = 4,
         include_stft: bool = True,
+        head_disagreement: str = "jsd",
     ):
+        if head_disagreement not in ("jsd", "spread"):
+            raise ValueError(f"head_disagreement must be 'jsd' or 'spread', not {head_disagreement!r}")
+        self.head_disagreement = head_disagreement
         self.out = collector
         self.t = steps
         self.prefix = prefix_length
@@ -44,6 +55,17 @@ class AttentionReducer:
         self.per_head: dict[int, tuple[Tensor, Tensor]] = {}
         self.seen: set[int] = set()
         self.retained_bytes = 0
+
+    def put_spread(self, layer: int, spread: Tensor, head_entropies: Tensor) -> None:
+        """The spread reading of the heads' disagreement at the sampled steps: ``spread [t']``
+        and the per-head entropies ``[t', H]``, whose across-head (population) variance is
+        the second pair."""
+        variance = head_entropies.double().var(dim=1, unbiased=False).float()
+        spread = spread.float()
+        self.out.put(f"head_spread_mean_L{layer}", spread.mean())
+        self.out.put(f"head_spread_std_L{layer}", std(spread))
+        self.out.put(f"head_entropy_var_mean_L{layer}", variance.mean())
+        self.out.put(f"head_entropy_var_std_L{layer}", std(variance))
 
     def consume(self, layer: int, weights: Tensor) -> None:
         if layer in self.seen:
@@ -66,13 +88,16 @@ class AttentionReducer:
         selected = a[:: max(1, t // 30)] if t > 30 else a
         norm = selected.double()
         norm = norm / norm.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-        h_mean = entropy(norm.mean(dim=1)).double()
-        h_heads = entropy(norm).mean(dim=1).double()
-        agreement = (
-            1 - (h_mean - h_heads).clamp_min(0) / max(math.log(a.shape[1]), 1e-12)
-        ).float()
-        self.out.put(f"head_agreement_mean_L{layer}", agreement.mean())
-        self.out.put(f"head_agreement_std_L{layer}", std(agreement))
+        if self.head_disagreement == "spread":
+            self.put_spread(layer, spread_of(norm), entropy(norm).double())
+        else:
+            h_mean = entropy(norm.mean(dim=1)).double()
+            h_heads = entropy(norm).mean(dim=1).double()
+            agreement = (
+                1 - (h_mean - h_heads).clamp_min(0) / max(math.log(a.shape[1]), 1e-12)
+            ).float()
+            self.out.put(f"head_agreement_mean_L{layer}", agreement.mean())
+            self.out.put(f"head_agreement_std_L{layer}", std(agreement))
         if layer not in self.sampled:
             return
         mean = a.mean(dim=1).double()  # IMPORTANT: mean is float32 before promotion

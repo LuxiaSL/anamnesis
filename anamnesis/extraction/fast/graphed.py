@@ -74,6 +74,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_leaves, tree_unflatten
 
+from anamnesis.extraction.state_extractor import head_disagreement
 from anamnesis.extraction.fast.attention import AttentionReducer
 from anamnesis.extraction.fast.attn_res import attn_res_features
 from anamnesis.extraction.fast.external import (
@@ -156,6 +157,7 @@ def _attention_reducer(span: ExternalSpan, collector: FeatureCollector, deferred
         spectral_stride=lane.config.spectral_subsample_step,
         n_windows=lane.families.temporal_n_windows,
         include_stft=lane.families.enable_stft,
+        head_disagreement=head_disagreement(lane.config),
     )
 
 
@@ -235,6 +237,7 @@ def _reduce(lane: GpuFeatureLane, span: ExternalSpan, inputs: _Inputs, positiona
         spectral_stride=lane.config.spectral_subsample_step,
         n_windows=lane.families.temporal_n_windows,
         include_stft=lane.families.enable_stft,
+        head_disagreement=head_disagreement(lane.config),
     )
     attention.spectral = dict(inputs.spectral)
     attention.per_head = dict(inputs.per_head)
