@@ -438,10 +438,19 @@ def check_counts(counts: Counts, batch: int, steps: int) -> None:
         raise ExternalCaptureError(f"step counts {counts.host} for {batch} rows of {steps} steps")
 
 
-def positional_means_cover(pm: Tensor, starts: Sequence[int], counts: Counts) -> bool:
+def start_tensor(starts: Sequence[int] | Tensor, device: torch.device | str) -> Tensor:
+    """Each row's prompt length, a long tensor ``[B]`` on ``device``: host values are uploaded; a
+    tensor (a device-only reduction's, checked on the host before) is used as it is."""
+    if isinstance(starts, Tensor):
+        return starts.to(device=device, dtype=torch.long)
+    return host_tensor([int(s) for s in starts], torch.long, device)
+
+
+def positional_means_cover(pm: Tensor, starts: Sequence[int] | Tensor, counts: Counts) -> bool:
     """Whether the positional means ``pm [layers + 1, positions, width]`` reach every row's last
-    position (its start plus its count); device-only counts were checked before."""
-    if counts.is_device_only:
+    position (its start plus its count); device-only counts and device starts were checked
+    before."""
+    if counts.is_device_only or isinstance(starts, Tensor):
         return True
     return all(pm.shape[1] >= int(s) + n for s, n in zip(starts, counts.host, strict=True))
 
@@ -936,14 +945,14 @@ def spectral_smoothness(x: Tensor, index: Tensor | Sequence[int], k: Counts, lap
             / row_sumsq(signal, lengths=lengths).clamp_min(1e-12))
 
 
-def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence[int],
+def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence[int] | Tensor,
                           laplacians: Mapping[int, tuple],
                           counts: Counts | None = None) -> BlockOutputs:
     """The block-output family of ``B`` rows.
 
     ``hidden [B, steps, layers, width]`` is each row's block outputs in the engine's layout
     (the signed row's ``depth``); ``starts[b]`` is row ``b``'s prompt length, which selects
-    its positional means; ``counts`` is each row's own step count (default: every row fills
+    its positional means (host values, or a device tensor checked before); ``counts`` is each row's own step count (default: every row fills
     ``steps``), the rest of its steps being padding; ``laplacians[layer]`` is, at each sampled
     layer, the spectral steps (one list, or each row's ``[B, K]``), ``[B, K, K]``, each row's
     normalised Laplacian as its attention reduction left it, and how many spectral steps each
@@ -985,7 +994,7 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
     per_layer = max(1, batch * steps * width * 8 * 4)
     chunk = max(1, min(layers, WORKING_BYTES // per_layer))
     table = device_positional_means(pm, device)
-    start_t = host_tensor([int(s) for s in starts], torch.long, device)
+    start_t = start_tensor(starts, device)
     step_t = torch.arange(steps, device=device)[None, :]
     if not counts.uniform(steps):  # a padded step reads its row's last real position
         step_t = torch.minimum(step_t, (counts.dev - 1)[:, None])
@@ -1213,6 +1222,7 @@ __all__ = (
     "positional_means_cover",
     "row_backend",
     "spectral_smoothness",
+    "start_tensor",
     "take_steps",
     "uniform_counts",
     "window_steps",

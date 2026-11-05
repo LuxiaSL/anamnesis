@@ -167,3 +167,26 @@ def test_a_host_read_inside_a_family_raises_under_device_only_counts(monkeypatch
         assert all(not isinstance(r, Exception) for r in reduce("cpu", 8, batch))
     with host_free_counts(), pytest.raises(HostCountsError):
         reduce("cpu", 8, batch)
+
+
+def test_the_families_get_device_counts_and_starts_under_the_switch(monkeypatch):
+    """A graph replays whatever sits in its input buffers: the prompt lengths reach the families as one device tensor,
+    uploaded after the host checks, never as host values the launches would bake in."""
+    from anamnesis.extraction.fast import engine_reducer
+
+    seen = []
+    original = engine_reducer.attention_features
+
+    def spy(lane, head_entropy, mean_entropy, head_scalars, mean_rows, starts, counts=None):
+        seen.append((torch.Tensor if isinstance(starts, torch.Tensor) else type(starts),
+                     counts.is_device_only))
+        return original(lane, head_entropy, mean_entropy, head_scalars, mean_rows, starts, counts)
+    monkeypatch.setattr(engine_reducer, "attention_features", spy)
+    batch = [signed_row(n, 3, 700 + n, 8) for n in (9, 13, 1)]
+    with host_free_counts(False):
+        reduce("cpu", 8, batch)
+    with host_free_counts():
+        reduce("cpu", 8, batch)
+    host, free = seen[:len(seen) // 2], seen[len(seen) // 2:]
+    assert (list, False) in host and (torch.Tensor, True) in free
+    assert (list, False) in free  # the one-step row's exact group is not a padded bucket

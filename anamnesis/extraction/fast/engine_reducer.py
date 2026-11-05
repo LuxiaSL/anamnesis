@@ -101,6 +101,7 @@ from anamnesis.extraction.fast.batched_stats import (
     finish_rows,
     host_tensor,
     positional_means_cover,
+    start_tensor,
     take_steps,
 )
 from anamnesis.extraction.fast.external import ExternalCaptureError, RoutingPoint
@@ -432,12 +433,14 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
     committed = [_pad_stack([rows[b].surfaces["committed"][c] for b in keep], width, lane.device)
                  for c in range(len(first.surfaces["committed"]))]
     try:
+        family_starts: Sequence[int] | torch.Tensor = starts
         if host_free:
             counts = _device_only(lane, stacked, starts, counts)
+            family_starts = start_tensor(starts, lane.device)
         attention = attention_features(lane, stacked["head_entropy"], stacked[_mixture_name(lane)],
-                                       stacked["head_scalars"], stacked["mean_rows"], starts,
-                                       counts)
-        blocks = block_output_features(lane, stacked["depth"], starts, attention.laplacians,
+                                       stacked["head_scalars"], stacked["mean_rows"],
+                                       family_starts, counts)
+        blocks = block_output_features(lane, stacked["depth"], family_starts, attention.laplacians,
                                        counts)
         kvqg = kvqg_features(lane, stacked["k"], stacked["v"], stacked["q"], stacked["gate"],
                              attention.per_head, counts)
@@ -537,8 +540,9 @@ _HOST_FREE: ContextVar[bool] = ContextVar("anamnesis_host_free_counts", default=
 @contextmanager
 def host_free_counts(enabled: bool = True) -> Iterator[None]:
     """Within the block, a padded bucket's families reduce under device-only step counts
-    (:meth:`~anamnesis.extraction.fast.batched_stats.Counts.device_only`): no row's count is read
-    on the host between the batch's checks and its finish, so the reduction's launches are a
+    (:meth:`~anamnesis.extraction.fast.batched_stats.Counts.device_only`) and prompt lengths
+    uploaded once: no row's count or start is read on the host between the batch's checks and its
+    finish, so the reduction's launches are a
     function of its bucket and shapes alone, which a captured graph needs. It changes no byte; a
     host read of a count inside the families raises
     :class:`~anamnesis.extraction.fast.batched_stats.HostCountsError`."""

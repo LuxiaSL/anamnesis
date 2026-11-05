@@ -57,6 +57,7 @@ from anamnesis.extraction.fast.batched_stats import (
     host_tensor,
     canonical_size,
     per_row_index,
+    start_tensor,
     take_steps,
     uniform_counts,
     window_steps,
@@ -447,9 +448,12 @@ def _check(name: str, x: Tensor, shape: Sequence[int | None]) -> None:
         raise ExternalCaptureError(f"{name} must be floating point")
 
 
-def mean_rows_cover(width: int, starts: Sequence[int], counts: Counts) -> bool:
+def mean_rows_cover(width: int, starts: Sequence[int] | Tensor, counts: Counts) -> bool:
     """Whether head-mean rows of ``width`` columns cover every row's span (each start at least
-    one, and the start plus the count within the width); device-only counts were checked before."""
+    one, and the start plus the count within the width); device starts were checked before, and
+    device-only counts with them."""
+    if isinstance(starts, Tensor):
+        return True
     if any(int(s) < 1 for s in starts):
         return False
     if counts.is_device_only:
@@ -459,14 +463,15 @@ def mean_rows_cover(width: int, starts: Sequence[int], counts: Counts) -> bool:
 
 def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tensor,
                        head_scalars: Tensor, mean_rows: Tensor,
-                       starts: Sequence[int], counts: Counts | None = None) -> AttentionFeatures:
+                       starts: Sequence[int] | Tensor, counts: Counts | None = None
+                       ) -> AttentionFeatures:
     """The attention family of ``B`` rows.
 
     The tensors are the engine's statistics surfaces, stacked: ``head_entropy [B, steps,
     layers, heads]``, ``mean_entropy [B, steps, layers]``, ``head_scalars [B, steps, sampled,
     3, heads]`` (prompt mass, recency mass, sink) and ``mean_rows [B, steps, sampled, W]``,
     with ``W`` at least each row's span end less one; ``starts[b]`` is row ``b``'s prompt
-    length and ``counts`` each row's own step count (default: every row fills ``steps``), the
+    length (host values, or a device tensor checked before) and ``counts`` each row's own step count (default: every row fills ``steps``), the
     rest of its steps being padding. Each is read in float32, as the per-row reduction reads
     it.
 
@@ -504,7 +509,7 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
     cols = _Columns()
     _entropy_features(cols, head_entropy, mixture, counts, mode)
 
-    start_t = host_tensor([int(s) for s in starts], torch.long, device)
+    start_t = start_tensor(starts, device)
     lengths = start_t[:, None] + torch.arange(1, t + 1, device=device)[None, :]  # [B, t]
     log_length = lengths.clamp_min(2).double().log()[:, :, None]
     per_layer = max(1, batch * t * (width + 1) * 8 * 6)
