@@ -70,8 +70,8 @@ from anamnesis.extraction.fast.batched_stats import (
     _cos,
     _operator_names,
     _rowcos,
-    _temporal_rows,
     per_row_index,
+    stacked,
     take_steps,
     uniform_counts,
     window_steps,
@@ -133,9 +133,7 @@ class BatchedFeatures:
 
 
 def _stack(cols: _Columns, batch: int, device) -> BatchedFeatures:
-    values = (torch.stack(cols.columns, dim=1) if cols.columns
-              else torch.zeros(batch, 0, dtype=torch.float64, device=device))
-    return BatchedFeatures(tuple(cols.names), values)
+    return BatchedFeatures(tuple(cols.names), cols.stack(batch, device))
 
 
 def _zeros(cols: _Columns, names: Sequence[str], batch: int, device) -> None:
@@ -325,8 +323,7 @@ def _moments(cols: _Columns, prefix: str, x: Tensor, counts: Counts | None = Non
 
 def _operators(cols: _Columns, prefix: str, x: Tensor, n_windows: int, include_stft: bool,
                counts: Counts | None = None) -> None:
-    cols.block(_operator_names(prefix, n_windows, include_stft),
-               _temporal_rows(x, n_windows, include_stft, counts))
+    cols.operators(prefix, x, n_windows, include_stft, counts)
 
 
 def _surface(name: str, x: Tensor, ndim: int, batch: int, steps: int, sampled: int) -> None:
@@ -437,7 +434,7 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
         # Per-head keys: AttentionReducer.head_features (placeholders below four steps).
         prefix = f"ph_L{layer}"
         ent, sink = per_head[layer]
-        head_start = len(cols.columns)
+        head_start = len(cols)
         if counts.reach < 4:
             from anamnesis.extraction.feature_families.per_head import _per_head_names
 
@@ -461,10 +458,7 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
             cols.put(prefix + "_kv_key_spread_head_mean", row_mean(spread_h))
             cols.put(prefix + "_kv_key_spread_head_std", row_std(spread_h))
             if counts.lo < 4:  # rows below four steps take the placeholders
-                short_rows = counts.dev < 4
-                for c in range(head_start, len(cols.columns)):
-                    value = cols.columns[c]
-                    cols.columns[c] = torch.where(short_rows, value.new_zeros(()), value)
+                cols.where_since(head_start, counts.dev < 4)
 
         # Values: FamilyReducer.value.
         v_raw = values[:, :, j].to(device).float()
@@ -716,6 +710,11 @@ def _summaries(ts: Tensor, counts: Counts | None = None) -> Tensor:
                          - row_mean(b.contiguous(), lengths=cb.lengths(b))).abs()], dim=1)
 
 
+def _masked_mean(x: Tensor, counts: Counts | None) -> Tensor:
+    """The mean of each row of ``x [B, steps]`` over its first ``counts`` steps."""
+    return row_mean(x, lengths=counts.lengths(x) if counts is not None else None)
+
+
 def _front_blocks(series: Sequence[Tensor], counts: Counts) -> tuple[Tensor, Counts]:
     """Rows' ``[B, steps]`` series joined end to end along each row's own steps: the first
     ``counts`` of each, in order, at the front of ``[B, len(series) * steps]``."""
@@ -754,19 +753,31 @@ def routing_features(sampled_layers: Sequence[int], points: Sequence[tuple[str, 
     by_layer: dict[int, list[Tensor]] = {}
     stats: list[tuple[int, Tensor, Tensor, Tensor]] = []
     final_vec: Tensor | None = None
+    # Every point's quantities first; then their summaries and means, each in few passes.
+    summarized: list[tuple[str, int]] = []
+    summary_series: list[Tensor] = []
+    stat_layers: list[int] = []
+    stat_series: list[Tensor] = []
     for tag, layer, w in points:
         q = _point_quantities(w)
         if tag == "final" or int(layer) in sampled:
-            vec = torch.cat([_summaries(series, counts) for series in q], dim=1)  # [B, 18]
+            summarized.append((tag, int(layer)))
+            summary_series.extend(q)
             if tag == "final":
-                final_vec = vec
                 continue
-            by_layer.setdefault(int(layer), []).append(vec)
         named = dict(zip(QNAMES, q, strict=True))
-        lengths = counts.lengths(named["entropy"])
-        stats.append((int(layer), row_mean(named["entropy"], lengths=lengths),
-                      row_mean(named["anchor_w"], lengths=lengths),
-                      row_mean(named["partial_w"], lengths=lengths)))
+        stat_layers.append(int(layer))
+        stat_series.extend((named["entropy"], named["anchor_w"], named["partial_w"]))
+    summaries = stacked(_summaries, summary_series, counts, 8 * 8 * steps)
+    for p, (tag, layer) in enumerate(summarized):
+        vec = torch.cat(summaries[p * len(QNAMES):(p + 1) * len(QNAMES)], dim=1)  # [B, 18]
+        if tag == "final":
+            final_vec = vec
+        else:
+            by_layer.setdefault(layer, []).append(vec)
+    means = stacked(_masked_mean, stat_series, counts, 2 * 8 * steps)
+    for p, layer in enumerate(stat_layers):
+        stats.append((layer, means[3 * p], means[3 * p + 1], means[3 * p + 2]))
 
     zeros18 = torch.zeros(batch, len(QNAMES) * 3, dtype=torch.float64, device=device)
     for layer in sampled_layers:
