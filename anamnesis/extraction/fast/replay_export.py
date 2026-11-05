@@ -43,10 +43,14 @@ SURFACES = ("depth", "committed", "route", "route_final", "q", "k", "v", "gate",
             "mean_entropy", "head_scalars", "mean_rows", "logit_stats")
 """The signed surfaces an export of a head-agreement row holds."""
 
-MIXTURE_SURFACES = ("mean_entropy", "head_spread")
+MIXTURE_SURFACES = ("mean_entropy", "head_collision")
 """The per-layer mixture surfaces: an export holds exactly one, the one its row was signed with
-(``head_spread`` in place of ``mean_entropy`` for a lane whose ``head_disagreement`` is
+(``head_collision`` in place of ``mean_entropy`` for a lane whose ``head_disagreement`` is
 ``spread``)."""
+
+SAMPLED_WITH = {"head_collision": ("head_spread",)}
+"""The sampled-layer surfaces an export holds with its mixture surface: a ``spread`` row's
+``head_spread [kept, sampled]``."""
 
 
 def _surface_names(available) -> list[str]:
@@ -55,11 +59,16 @@ def _surface_names(available) -> list[str]:
     Raises
     ------
     ReplayExportError
-        When the names carry neither mixture surface, or both."""
+        When the names carry neither mixture surface, or both, or a ``spread`` row's mixture
+        without its sampled-layer surfaces."""
     mixture = [n for n in MIXTURE_SURFACES if n in available]
     if len(mixture) != 1:
         raise ReplayExportError(f"an export holds one of {list(MIXTURE_SURFACES)}, not {mixture}")
-    return [mixture[0] if n == "mean_entropy" else n for n in SURFACES]
+    extra = SAMPLED_WITH.get(mixture[0], ())
+    missing = [n for n in extra if n not in available]
+    if missing:
+        raise ReplayExportError(f"an export with {mixture[0]} holds {missing} too")
+    return [mixture[0] if n == "mean_entropy" else n for n in SURFACES] + list(extra)
 
 
 class ReplayExportError(ValueError):
@@ -196,5 +205,5 @@ def save_export(path: str | Path, row: Any, header: Mapping[str, Any], axes: Map
     return tensors_path, header_path
 
 
-__all__ = ["METADATA_KEY", "MIXTURE_SURFACES", "SCHEMA", "SURFACES", "ExportHeader", "ExportedRow", "ReplayExportError",
+__all__ = ["METADATA_KEY", "MIXTURE_SURFACES", "SAMPLED_WITH", "SCHEMA", "SURFACES", "ExportHeader", "ExportedRow", "ReplayExportError",
            "TensorSpec", "load_export", "save_export"]

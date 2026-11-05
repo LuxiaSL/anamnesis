@@ -15,9 +15,12 @@ is float32:
 
 * ``head_entropy [n, L, H]``: per query head, ``-sum(p ln p)`` over the row;
 * ``mean_entropy [n, L]``: the same entropy of the head-mean row ``m = mean_h p_h``; or, for a
-  lane whose ``head_disagreement`` is ``spread``, ``head_spread [n, L]``: the heads' L2 spread
-  around that row, ``mean_h |p_h - m|^2`` (:data:`CONTRACT_SPREAD`);
+  lane whose ``head_disagreement`` is ``spread``, ``head_collision [n, L]``: the heads' mean
+  collision mass ``mean_h sum(p_h^2)`` (:data:`CONTRACT_SPREAD`);
 * at the lane's sampled layers only, ``S`` of them in ``sampled_layers`` order:
+
+  * for a ``spread`` lane, ``head_spread [n, S]``: the heads' L2 spread around the head-mean
+    row, ``mean_h |p_h - m|^2``;
 
   * ``head_prompt_mass [n, S, H]``: per head, ``sum(p)`` over columns ``< start``;
   * ``head_recency_mass [n, S, H]``: per head, ``sum(p)`` over columns
@@ -78,7 +81,7 @@ import torch
 from torch import Tensor
 
 from anamnesis.extraction.state_extractor import head_disagreement
-from anamnesis.extraction.fast.attention import AttentionReducer, spread_of
+from anamnesis.extraction.fast.attention import AttentionReducer, collision_of, spread_of
 from anamnesis.extraction.fast.attn_res import _point_quantities, _slope, _summ
 from anamnesis.extraction.fast.external import (
     READOUT_SOURCE_SHA256,
@@ -112,15 +115,33 @@ CONTRACT = ("head_entropy", "mean_entropy", "head_prompt_mass", "head_recency_ma
             "head_sink", "mean_rows")
 """The contract's tensors, by name, in the order :meth:`ExternalStatsSpan.attention_stats` takes them."""
 
-CONTRACT_SPREAD = ("head_entropy", "head_spread") + CONTRACT[2:]
-"""The contract of a lane whose ``head_disagreement`` is ``spread``: ``head_spread [n, L]``, the
-heads' L2 spread around their mean row (``mean_h |p_h - mean_g p_g|^2``), in place of the
-head-mean row's entropy. Both its terms are running moments of the per-head rows."""
+CONTRACT_SPREAD = ("head_entropy", "head_collision") + CONTRACT[2:] + ("head_spread",)
+"""The contract of a lane whose ``head_disagreement`` is ``spread`` (one column set for every
+capture, fused attention or unfused): ``head_collision [n, L]``, the heads' mean collision mass ``mean_h sum(p_h^2)``, in place
+of the head-mean row's entropy at every layer, a running moment of each head's row; and
+``head_spread [n, S]`` at the sampled layers, the collision mass less the head-mean row's,
+which a capture forms there anyway."""
+
+MIXTURE = {"jsd": "mean_entropy", "spread": "head_collision"}
+"""Each reading's per-layer statistic ``[n, L]``."""
+
+SAMPLED_DISAGREEMENT = {"jsd": (), "spread": ("head_spread",)}
+"""Each reading's sampled-layer statistics ``[n, S]``."""
 
 
 def contract_for(config) -> tuple[str, ...]:
     """The contract a lane's extraction configuration reads."""
     return CONTRACT_SPREAD if head_disagreement(config) == "spread" else CONTRACT
+
+
+def mixture_name(config) -> str:
+    """The per-layer statistic a lane reads besides ``head_entropy``."""
+    return MIXTURE[head_disagreement(config)]
+
+
+def sampled_disagreement(config) -> tuple[str, ...]:
+    """The sampled-layer disagreement statistics a lane reads (none for ``jsd``)."""
+    return SAMPLED_DISAGREEMENT[head_disagreement(config)]
 
 
 def stats_lane_id(lane: GpuFeatureLane, capture_identity: Mapping[str, Any]) -> str:
@@ -145,7 +166,7 @@ def stats_from_weights(weights: Sequence[Tensor], start: int, end: int,
     if n < 1 or start < 1:
         raise ExternalCaptureError(f"invalid span start={start} end={end}")
     sampled = list(sampled_layers)
-    entropies: dict[str, list[Tensor]] = {"head_entropy": [], "mean_entropy": [], "head_spread": []}
+    entropies: dict[str, list[Tensor]] = {"head_entropy": [], "mean_entropy": [], "head_collision": []}
     at_sampled: dict[int, dict[str, Tensor]] = {}
     for layer, w in enumerate(weights):
         w = w if w.ndim == 4 else w.unsqueeze(0)
@@ -160,7 +181,7 @@ def stats_from_weights(weights: Sequence[Tensor], start: int, end: int,
         norm = a64 / a64.sum(dim=-1, keepdim=True).clamp_min(1e-12)
         entropies["head_entropy"].append(entropy(a))
         entropies["mean_entropy"].append(entropy(norm.mean(dim=1)))
-        entropies["head_spread"].append(spread_of(norm))
+        entropies["head_collision"].append(collision_of(norm))
         if layer in sampled:
             cutoff = (lengths.double() * 0.8).long().clamp_min(1)
             at_sampled[layer] = dict(
@@ -169,12 +190,13 @@ def stats_from_weights(weights: Sequence[Tensor], start: int, end: int,
                 .sum(dim=-1).float(),
                 head_sink=norm[:, :, 0].float(),
                 mean_rows=a.mean(dim=1)[:, :end - 1],
+                head_spread=spread_of(norm),
             )
     missing = [layer for layer in sampled if layer not in at_sampled]
     if missing:
         raise ExternalCaptureError(f"the weights do not cover sampled layers {missing}")
     stats = {name: torch.stack(tensors, dim=1) for name, tensors in entropies.items()}
-    for name in CONTRACT[2:]:
+    for name in CONTRACT[2:] + ("head_spread",):
         stats[name] = torch.stack([at_sampled[layer][name] for layer in sampled], dim=1)
     return stats
 
@@ -343,9 +365,9 @@ class StatsAttentionReducer(AttentionReducer):
     def consume_stats(self, layer: int, head_entropy: Tensor, mixture: Tensor,
                       sampled: dict[str, Tensor] | None) -> None:
         """One layer's attention features from its statistics: ``head_entropy [t, H]``, the
-        mixture statistic ``[t]`` the lane reads (``mean_entropy``, or ``head_spread`` for a
-        ``spread`` lane) and, at a sampled layer, the per-head masses ``[t, H]`` and the
-        mean rows ``[t, W]``."""
+        per-layer statistic ``[t]`` the lane reads (``mean_entropy``, or ``head_collision`` for a
+        ``spread`` lane) and, at a sampled layer, the per-head masses ``[t, H]``, the mean rows
+        ``[t, W]`` and, for a ``spread`` lane, ``head_spread [t]``."""
         if layer in self.seen:
             raise ValueError(f"attention layer {layer} captured twice in one replay")
         self.seen.add(layer)
@@ -358,7 +380,12 @@ class StatsAttentionReducer(AttentionReducer):
         self.out.put(f"attn_entropy_std_L{layer}", std(sample))
         stride = max(1, t // 30) if t > 30 else 1
         if self.head_disagreement == "spread":
-            self.put_spread(layer, mixture.float().contiguous()[::stride], ent[::stride])
+            spread = None
+            if layer in self.sampled:
+                if sampled is None or "head_spread" not in sampled:
+                    raise ExternalCaptureError(f"sampled layer {layer} has no head_spread")
+                spread = sampled["head_spread"].float().contiguous()[::stride]
+            self.put_spread(layer, mixture.float().contiguous()[::stride], ent[::stride], spread)
         else:
             h_mean = mixture.float().contiguous()[::stride].double()
             h_heads = ent[::stride].mean(dim=1).double()
@@ -552,12 +579,14 @@ class ExternalStatsSpan(ExternalSpan):
                         head_prompt_mass: Tensor, head_recency_mass: Tensor,
                         head_sink: Tensor, mean_rows: Tensor,
                         mean_entropy: Tensor | None = None,
+                        head_collision: Tensor | None = None,
                         head_spread: Tensor | None = None) -> None:
         """Reduce the span's attention statistics (the module's contract) for every layer.
 
-        The lane's ``head_disagreement`` names which per-layer mixture statistic it reads:
-        ``mean_entropy`` (``jsd``) or ``head_spread`` (``spread``). That one is required; the
-        other may be given, and is not read.
+        The lane's ``head_disagreement`` names the disagreement statistics it reads:
+        ``mean_entropy`` (``jsd``), or ``head_collision`` and, at the sampled layers,
+        ``head_spread`` (``spread``). Those are required; the others may be given, and are
+        not read.
 
         Raises
         ------
@@ -569,11 +598,14 @@ class ExternalStatsSpan(ExternalSpan):
             raise ExternalCaptureError("attention statistics after the span was finished")
         if self.attention_reducer.seen:
             raise ExternalCaptureError("a span's attention statistics are given once")
-        mixture_name = contract_for(self.lane.config)[1]
-        mixture = mean_entropy if mixture_name == "mean_entropy" else head_spread
-        if mixture is None:
-            raise ExternalCaptureError(f"{mixture_name} is missing; this lane reads it")
-        given = {"head_entropy": head_entropy, mixture_name: mixture,
+        offered = dict(mean_entropy=mean_entropy, head_collision=head_collision, head_spread=head_spread)
+        mixture = mixture_name(self.lane.config)
+        extra = sampled_disagreement(self.lane.config)
+        for name in (mixture, *extra):
+            if offered[name] is None:
+                raise ExternalCaptureError(f"{name} is missing; this lane reads it")
+        given = {"head_entropy": head_entropy, mixture: offered[mixture],
+                 **{name: offered[name] for name in extra},
                  "head_prompt_mass": head_prompt_mass, "head_recency_mass": head_recency_mass,
                  "head_sink": head_sink, "mean_rows": mean_rows}
         n, layers = self.steps, self.num_layers
@@ -584,7 +616,7 @@ class ExternalStatsSpan(ExternalSpan):
             raise ExternalCaptureError("head_entropy must be [steps, layers, heads]")
         heads = head_entropy.shape[2]
         expected = dict(head_entropy=(n, layers, heads), mean_entropy=(n, layers),
-                        head_spread=(n, layers),
+                        head_collision=(n, layers), head_spread=(n, len(sampled)),
                         head_prompt_mass=(n, len(sampled), heads),
                         head_recency_mass=(n, len(sampled), heads),
                         head_sink=(n, len(sampled), heads))
@@ -611,9 +643,9 @@ class ExternalStatsSpan(ExternalSpan):
             if layer in sampled:
                 s = sampled.index(layer)
                 at = {name: given[name][:, s] for name in
-                      ("head_prompt_mass", "head_recency_mass", "head_sink", "mean_rows")}
+                      ("head_prompt_mass", "head_recency_mass", "head_sink", "mean_rows", *extra)}
             self.attention_reducer.consume_stats(
-                layer, given["head_entropy"][:, layer], given[mixture_name][:, layer], at)
+                layer, given["head_entropy"][:, layer], given[mixture][:, layer], at)
 
     def finish(self, *, hidden: Tensor, keys: Mapping[int, Tensor],
                values: Mapping[int, Tensor], queries: Mapping[int, Tensor],

@@ -18,9 +18,10 @@ the final read's. ``surfaces`` maps names to tensors over the ``kept`` positions
 
 * ``depth [kept, layers, hidden]``: every layer's block output;
 * ``q``, ``k``, ``v``, ``gate`` ``[kept, sampled, ...]``: at the lane's sampled layers, in order;
-* ``head_entropy [kept, layers, heads]``, ``mean_entropy [kept, layers]`` (``head_spread
+* ``head_entropy [kept, layers, heads]``, ``mean_entropy [kept, layers]`` (``head_collision
   [kept, layers]`` instead, for a lane whose ``head_disagreement`` is ``spread``);
 * ``head_scalars [kept, sampled, 3, heads]``: prompt mass, recency mass, sink, per head;
+* for a ``spread`` lane, ``head_spread [kept, sampled]``: the heads' spread around their mean row;
 * ``mean_rows [kept, sampled, width]``: the head-mean rows at absolute columns;
 * ``logit_stats [kept, 6]``: the output reduction's per-step quantities;
 * ``route [kept, layers, 2, route width]`` and ``route_final [kept, route width]``: routing
@@ -81,7 +82,6 @@ from typing import Any
 import numpy as np
 import torch
 
-from anamnesis.extraction.state_extractor import head_disagreement
 from anamnesis.extraction.fast.batched_attention import attention_features, mean_rows_cover
 from anamnesis.extraction.fast.batched_families import (
     kvqg_features,
@@ -108,7 +108,9 @@ from anamnesis.extraction.fast.external import ExternalCaptureError, RoutingPoin
 from anamnesis.extraction.fast.external_stats import (
     STATS_SOURCE_SHA256,
     ExternalStatsSpan,
+    mixture_name,
     routing_stats_from_routing,
+    sampled_disagreement,
 )
 from anamnesis.extraction.fast.features import GpuFeatureLane
 from anamnesis.extraction.fast.lens import LensError, LensHead, lens_features
@@ -125,15 +127,22 @@ SURFACES = ("depth", "q", "k", "v", "gate", "head_entropy", "mean_entropy", "hea
 
 
 def _mixture_name(lane: GpuFeatureLane) -> str:
-    """The per-layer mixture surface a lane reads: ``mean_entropy``, or ``head_spread`` for a
-    lane whose ``head_disagreement`` is ``spread`` (:data:`~anamnesis.extraction.fast.external_stats.CONTRACT_SPREAD`)."""
-    return "head_spread" if head_disagreement(lane.config) == "spread" else "mean_entropy"
+    """The per-layer surface a lane reads besides ``head_entropy``: ``mean_entropy``, or
+    ``head_collision`` for a lane whose ``head_disagreement`` is ``spread``
+    (:data:`~anamnesis.extraction.fast.external_stats.CONTRACT_SPREAD`)."""
+    return mixture_name(lane.config)
+
+
+def _sampled_extra(lane: GpuFeatureLane) -> tuple[str, ...]:
+    """The sampled-layer disagreement surfaces a lane reads: ``head_spread [kept, sampled]`` for
+    a ``spread`` lane, none for ``jsd``."""
+    return sampled_disagreement(lane.config)
 
 
 def surfaces_for(lane: GpuFeatureLane) -> tuple[str, ...]:
     """The surfaces a signed row must carry for ``lane``."""
     mixture = _mixture_name(lane)
-    return tuple(mixture if name == "mean_entropy" else name for name in SURFACES)
+    return tuple(mixture if name == "mean_entropy" else name for name in SURFACES) + _sampled_extra(lane)
 
 
 @dataclass
@@ -187,6 +196,7 @@ def _begin_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]):
     mixture = _mixture_name(lane)
     span.attention_stats(head_entropy=s["head_entropy"].float(),
                          **{mixture: s[mixture].float()},
+                         **{name: s[name].float() for name in _sampled_extra(lane)},
                          head_prompt_mass=scalars[:, :, 0].float(),
                          head_recency_mass=scalars[:, :, 1].float(),
                          head_sink=scalars[:, :, 2].float(),
@@ -227,6 +237,7 @@ _NONFINITE = "the capture holds a nonfloating or nonfinite tensor"
 _FINITE_REFUSALS = dict(
     head_entropy="head_entropy holds a nonfinite value",
     mean_entropy="mean_entropy holds a nonfinite value",
+    head_collision="head_collision holds a nonfinite value",
     head_spread="head_spread holds a nonfinite value",
     head_scalars="head_scalars holds a nonfinite value",
     mean_rows="mean_rows holds a nonfinite value",
@@ -374,6 +385,7 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
     heads = int(he.shape[2])
     mixture = _mixture_name(lane)
     expected = {"head_entropy": (positions, layers, heads), mixture: (positions, layers),
+                **{name: (positions, len(sampled)) for name in _sampled_extra(lane)},
                 "head_scalars": (positions, len(sampled), 3, heads)}
     for name, shape in expected.items():
         if not isinstance(s[name], torch.Tensor) or tuple(s[name].shape) != shape:
@@ -395,7 +407,7 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
             raise ExternalCaptureError(
                 f"{name} must be [{positions}, {len(sampled)}, ...], got "
                 f"{tuple(getattr(x, 'shape', ()))}")
-    for name in ("depth", "k", "v", "q", "gate", "head_entropy", mixture,
+    for name in ("depth", "k", "v", "q", "gate", "head_entropy", mixture, *_sampled_extra(lane),
                  "head_scalars", "mean_rows"):
         if not s[name].is_floating_point():
             raise ExternalCaptureError(_NONFINITE)
@@ -439,7 +451,8 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
             family_starts = start_tensor(starts, lane.device)
         attention = attention_features(lane, stacked["head_entropy"], stacked[_mixture_name(lane)],
                                        stacked["head_scalars"], stacked["mean_rows"],
-                                       family_starts, counts)
+                                       family_starts, counts, head_spread=stacked.get("head_spread")
+                                       if _sampled_extra(lane) else None)
         blocks = block_output_features(lane, stacked["depth"], family_starts, attention.laplacians,
                                        counts)
         kvqg = kvqg_features(lane, stacked["k"], stacked["v"], stacked["q"], stacked["gate"],

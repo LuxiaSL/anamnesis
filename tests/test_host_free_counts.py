@@ -177,10 +177,10 @@ def test_the_families_get_device_counts_and_starts_under_the_switch(monkeypatch)
     seen = []
     original = engine_reducer.attention_features
 
-    def spy(lane, head_entropy, mean_entropy, head_scalars, mean_rows, starts, counts=None):
+    def spy(lane, head_entropy, mixture, head_scalars, mean_rows, starts, counts=None, **kwargs):
         seen.append((torch.Tensor if isinstance(starts, torch.Tensor) else type(starts),
                      counts.is_device_only))
-        return original(lane, head_entropy, mean_entropy, head_scalars, mean_rows, starts, counts)
+        return original(lane, head_entropy, mixture, head_scalars, mean_rows, starts, counts, **kwargs)
     monkeypatch.setattr(engine_reducer, "attention_features", spy)
     batch = [signed_row(n, 3, 700 + n, 8) for n in (9, 13, 1)]
     with host_free_counts(False):

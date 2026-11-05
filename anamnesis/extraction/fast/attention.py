@@ -21,6 +21,12 @@ from anamnesis.extraction.fast.ops import (
 )
 
 
+def collision_of(norm: Tensor) -> Tensor:
+    """The heads' mean collision mass at each step: ``norm [t, H, W]`` (each head's row summing
+    to one) to ``mean_h sum_c p_hc^2``, ``[t]`` float32. A running moment of each head's row."""
+    return (norm * norm).sum(dim=-1).mean(dim=1).float()
+
+
 def spread_of(norm: Tensor) -> Tensor:
     """The heads' L2 spread around their mean row at each step: ``norm [t, H, W]`` (each head's
     row summing to one) to ``mean_h |p_h - mean_g p_g|^2``, ``[t]`` float32."""
@@ -56,16 +62,24 @@ class AttentionReducer:
         self.seen: set[int] = set()
         self.retained_bytes = 0
 
-    def put_spread(self, layer: int, spread: Tensor, head_entropies: Tensor) -> None:
-        """The spread reading of the heads' disagreement at the sampled steps: ``spread [t']``
-        and the per-head entropies ``[t', H]``, whose across-head (population) variance is
-        the second pair."""
+    def put_spread(self, layer: int, collision: Tensor, head_entropies: Tensor,
+                   spread: Tensor | None = None) -> None:
+        """The spread reading of the heads' disagreement at the sampled steps: the heads'
+        collision mass ``collision [t']``, the per-head entropies ``[t', H]`` (whose across-head
+        population variance is the second pair) and, at a sampled layer, the heads' spread
+        around their mean row ``spread [t']``."""
+        if (spread is None) == (layer in self.sampled):
+            raise ValueError(f"layer {layer}: the spread is read at the sampled layers, and only there")
         variance = head_entropies.double().var(dim=1, unbiased=False).float()
-        spread = spread.float()
-        self.out.put(f"head_spread_mean_L{layer}", spread.mean())
-        self.out.put(f"head_spread_std_L{layer}", std(spread))
+        collision = collision.float()
+        self.out.put(f"head_collision_mean_L{layer}", collision.mean())
+        self.out.put(f"head_collision_std_L{layer}", std(collision))
         self.out.put(f"head_entropy_var_mean_L{layer}", variance.mean())
         self.out.put(f"head_entropy_var_std_L{layer}", std(variance))
+        if spread is not None:
+            spread = spread.float()
+            self.out.put(f"head_spread_mean_L{layer}", spread.mean())
+            self.out.put(f"head_spread_std_L{layer}", std(spread))
 
     def consume(self, layer: int, weights: Tensor) -> None:
         if layer in self.seen:
@@ -89,7 +103,8 @@ class AttentionReducer:
         norm = selected.double()
         norm = norm / norm.sum(dim=-1, keepdim=True).clamp_min(1e-12)
         if self.head_disagreement == "spread":
-            self.put_spread(layer, spread_of(norm), entropy(norm).double())
+            self.put_spread(layer, collision_of(norm), entropy(norm).double(),
+                            spread_of(norm) if layer in self.sampled else None)
         else:
             h_mean = entropy(norm.mean(dim=1)).double()
             h_heads = entropy(norm).mean(dim=1).double()

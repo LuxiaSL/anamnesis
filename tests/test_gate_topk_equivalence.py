@@ -30,7 +30,7 @@ from anamnesis.extraction.fast.ops import FeatureCollector
 IDENTITY_SOURCES = {
     "features.py": "171d38314caab6468103f56723c0d53f2f22f651d2e48a56ccac7efe21e40871",
     "ops.py": "e6920e84ef2713817071da67d3ef2f8eb4d2427c7cc961ad1c700951738ef536",
-    "attention.py": "b6224143ca83ac12cb171aaadf2e1d6f4ee31b35dad2bc5fc22c4afb8c0caaf9",
+    "attention.py": "4b05663bb05ba62df2bc7e1efab052aa587ad94b0ac415e5d6702196cc19683f",
     "families.py": "a9d80a60350e52f1c8c158c6b51fba1f4882f9a8f3669c86c032935bc07c5dea",
     "batch_layout.py": "018cdfe51ae55e766af787cdc14e95e286ec20183278f73920b7cf1ae2dd7a07",
 }

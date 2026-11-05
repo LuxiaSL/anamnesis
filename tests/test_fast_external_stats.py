@@ -177,7 +177,7 @@ def test_the_twin_was_written_against_this_attention_reducer():
     from anamnesis.extraction.fast import attention
 
     digest = hashlib.sha256(Path(attention.__file__).read_bytes()).hexdigest()
-    assert digest == "b6224143ca83ac12cb171aaadf2e1d6f4ee31b35dad2bc5fc22c4afb8c0caaf9"
+    assert digest == "4b05663bb05ba62df2bc7e1efab052aa587ad94b0ac415e5d6702196cc19683f"
 
 
 TWINS = {
