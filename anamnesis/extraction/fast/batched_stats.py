@@ -268,14 +268,15 @@ class Counts:
     the bucket guarantees: every row has at most ``width`` and at least ``floor`` (:meth:`below`).
     The batch is validated on the host before its counts are made device-only."""
 
-    __slots__ = ("_host", "dev", "width", "padded", "floor", "_lo", "_hi", "_cache")
+    __slots__ = ("_host", "dev", "width", "padded", "floor", "derived", "_lo", "_hi", "_cache")
 
     def __init__(self, host: Sequence[int] | None, dev: Tensor, width: int | None = None,
-                 padded: bool = False, floor: int = 0) -> None:
+                 padded: bool = False, floor: int = 0, derived: bool = False) -> None:
         self.dev = dev
         self.width = None if width is None else int(width)
         self.padded = bool(padded)
         self.floor = int(floor)
+        self.derived = bool(derived)  # computed by a map whose floor only its caller knows
         if host is None:
             if not self.padded:
                 raise ValueError("only a padded bucket's counts can be device-only")
@@ -338,25 +339,39 @@ class Counts:
     def below(self, k: int) -> bool:
         """Whether a row may have fewer than ``k``: exactly, from the host values; for
         device-only counts, unless the floor rules it out. A branch it guards must give a row
-        the same bytes either way (a placeholder ``torch.where`` that keeps every longer row)."""
+        the same bytes either way (a placeholder ``torch.where`` that keeps every longer row);
+        a refusal uses :meth:`refuses_below`."""
         if self._host is None:
             return self.floor < int(k)
         return self._lo < int(k)
+
+    def refuses_below(self, k: int) -> bool:
+        """:meth:`below` for a guard that refuses the batch, where a conservative answer would
+        refuse a good one. Device-only counts answer from their floor, so a derived count, whose
+        floor is only what its caller declared, may not be asked."""
+        if self._host is None and self.derived:
+            raise HostCountsError("a refusal asked a derived device-only count, whose floor is unknown")
+        return self.below(k)
 
     def uniform(self, width: int) -> bool:
         """Whether every row fills ``width`` and the rows are not a padded bucket."""
         return not self.padded and self._lo == self._hi == int(width)
 
-    def derive(self, dev: Tensor, of: Callable[[int], int], width: int | None = None) -> "Counts":
+    def derive(self, dev: Tensor, of: Callable[[int], int], width: int | None = None,
+               floor: int = 0) -> "Counts":
         """Counts computed from these on the device (``dev``); ``of(c)`` is the same for one
-        count on the host, evaluated only when these have host values."""
+        count on the host, evaluated only when these have host values. ``floor`` is what the
+        caller guarantees of every derived count (a map need not be monotone, so it is not
+        ``of(self.floor)``); the result is marked derived."""
         host = None if self._host is None else [of(c) for c in self._host]
-        return Counts(host, dev, width, self.padded)
+        return Counts(host, dev, width, self.padded, floor, derived=True)
 
     def every(self, first: int, step: int) -> "Counts":
-        """Rows ``first, first + step, ...``: one of ``step`` rows interleaved row-major."""
+        """Rows ``first, first + step, ...``: one of ``step`` rows interleaved row-major, with
+        these counts' floor (a subset of rows keeps it)."""
         host = None if self._host is None else self._host[first::step]
-        return Counts(host, self.dev.reshape(-1, step)[:, first], None, self.padded)
+        return Counts(host, self.dev.reshape(-1, step)[:, first], None, self.padded, self.floor,
+                      self.derived)
 
     def minus(self, k: int) -> "Counts":
         """Each count less ``k``, at least zero."""
@@ -365,7 +380,7 @@ class Counts:
             width = None if self.width is None else max(0, self.width - k)
             host = None if self._host is None else [max(0, c - k) for c in self._host]
             self._cache[key] = Counts(host, (self.dev - k).clamp_min(0), width, self.padded,
-                                      max(0, self.floor - k))
+                                      max(0, self.floor - k), self.derived)
         return self._cache[key]
 
     def repeat(self, r: int) -> "Counts":
@@ -374,7 +389,7 @@ class Counts:
         if key not in self._cache:
             host = None if self._host is None else [c for c in self._host for _ in range(r)]
             self._cache[key] = Counts(host, self.dev.repeat_interleave(r), self.width,
-                                      self.padded, self.floor)
+                                      self.padded, self.floor, self.derived)
         return self._cache[key]
 
     def tile(self, k: int) -> "Counts":
@@ -384,7 +399,7 @@ class Counts:
         if key not in self._cache:
             host = None if self._host is None else self._host * int(k)
             self._cache[key] = Counts(host, self.dev.repeat(int(k)), self.width, self.padded,
-                                      self.floor)
+                                      self.floor, self.derived)
         return self._cache[key]
 
     @staticmethod
@@ -399,7 +414,7 @@ class Counts:
         host = (None if any(p.is_device_only for p in parts)
                 else [c for p in parts for c in p.host])
         return Counts(host, torch.cat([p.dev for p in parts]), parts[0].width, parts[0].padded,
-                      min(p.floor for p in parts))
+                      min(p.floor for p in parts), any(p.derived for p in parts))
 
     def memo(self, key: Any, build) -> Any:
         """A value derived from these counts, built once."""

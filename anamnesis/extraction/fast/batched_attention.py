@@ -414,7 +414,7 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
                                  normalized.new_zeros(()))
 
     if counts.reach >= 2:
-        if counts.below(2):
+        if counts.refuses_below(2):
             raise ExternalCaptureError("rows below two steps share a batch with longer rows")
         sys = prompt / total
         out[FLOW + "prompt_mass_mean"] = row_mean(sys, lengths=live)

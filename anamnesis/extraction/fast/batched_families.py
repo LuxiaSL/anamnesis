@@ -727,7 +727,7 @@ def _summaries(ts: Tensor, counts: Counts | None = None) -> Tensor:
         return torch.stack([row_mean(ts), row_std(ts),
                             (row_mean(ts[:, :h].contiguous())
                              - row_mean(ts[:, h:].contiguous())).abs()], dim=1)
-    if counts.below(2):
+    if counts.refuses_below(2):
         raise ExternalCaptureError("rows below two steps share a batch with longer rows")
     lengths = counts.lengths(ts)
     a, ca, b, cb = _halves(ts, counts)

@@ -190,3 +190,21 @@ def test_the_families_get_device_counts_and_starts_under_the_switch(monkeypatch)
     host, free = seen[:len(seen) // 2], seen[len(seen) // 2:]
     assert (list, False) in host and (torch.Tensor, True) in free
     assert (list, False) in free  # the one-step row's exact group is not a padded bucket
+
+
+def test_floors_carry_where_they_hold_and_a_refusal_never_reads_an_unknown_one():
+    """A row subset (``every``), a repeat, a tile and ``minus`` know their floor; ``derive`` takes one from its caller (a
+    map need not be monotone: a quarter of 3 is 3, of 4 is 1). A refusal must not refuse a good batch on a guess, so it
+    refuses to read a derived device-only count; a placeholder guard may (its ``torch.where`` keeps every longer row)."""
+    counts = _bucket([3, 9, 16, 5]).device_only(2)
+    assert counts.every(1, 2).floor == 2 and counts.repeat(2).floor == 2 and counts.tile(3).floor == 2
+    assert counts.minus(1).floor == 1
+    derived = counts.derive(counts.dev // 2, lambda c: c // 2)
+    assert derived.derived and derived.floor == 0 and derived.every(0, 2).derived
+    assert counts.derive(counts.dev * 3, lambda c: c * 3, floor=6).floor == 6
+    assert not counts.refuses_below(2) and counts.refuses_below(3)
+    assert derived.below(2)  # a placeholder guard answers conservatively
+    with pytest.raises(HostCountsError, match="derived"):
+        derived.refuses_below(2)
+    host = _bucket([3, 9]).derive(torch.tensor([1, 4]), lambda c: c // 2)
+    assert host.refuses_below(2)  # host values: exact, derived or not
