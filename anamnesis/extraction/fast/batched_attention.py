@@ -40,6 +40,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -194,18 +195,99 @@ def _entropy_features(cols: _Columns, head_entropy: Tensor, mean_entropy: Tensor
         cols.put(f"head_agreement_std_L{layer}", ag_std[:, layer])
 
 
+SPECTRAL_FROM_EIGENVALUES = ("spectral_fiedler", "spectral_hfer", "spectral_spectral_entropy")
+"""The sampled-layer features read from the spectral Laplacian's eigenvalues."""
+
+SPECTRAL_PENDING = object()
+"""A series value standing for a feature that waits on its chunk's eigenvalues."""
+
+
+@dataclass(frozen=True)
+class _PendingSpectral:
+    """A chunk's Laplacians ``lap [R, K, K]`` and how many spectral steps each row has, to be
+    solved with every other chunk's (:func:`_solve_spectral`)."""
+
+    lap: Tensor
+    k_counts: Counts
+    k: int
+    sized: bool
+
+
+def _spectral_from_eigenvalues(ev: Tensor, pending: _PendingSpectral) -> dict[str, Tensor]:
+    """The fiedler value, high-frequency energy ratio and spectral entropy of each row, from
+    its Laplacian's ascending eigenvalues ``ev [R, K]`` (zero past its own size)."""
+    k_counts, k, sized = pending.k_counts, pending.k, pending.sized
+    rows, device = ev.shape[0], ev.device
+    zero = ev.new_zeros(rows)
+    if not sized:
+        energy = row_sum(ev)
+        radius = ev[:, -1]
+        fiedler = (torch.where(radius > 1e-12, ev[:, 1] / radius.clamp_min(1e-30), zero)
+                   if k > 1 else zero)
+        mid = k // 2
+        median = ev[:, mid] if k % 2 else (ev[:, mid - 1] + ev[:, mid]) * 0.5
+        p = ev / energy.clamp_min(1e-30)[:, None] + 1e-12
+        p = p / row_sum(p)[:, None]
+        spec = -row_sum(p * p.log()) / math.log(k) if k > 1 else zero
+        hfer = row_sum(ev, mask=ev > median[:, None]) / energy.clamp_min(1e-30)
+    else:
+        kn = k_counts.dev
+        lengths_k = k_counts.lengths(ev)
+        inside = k_counts.mask(k)
+        energy = row_sum(ev, lengths=lengths_k)
+        radius = take_steps(ev, (kn - 1)[:, None])[:, 0]
+        fiedler = torch.where((radius > 1e-12) & (kn > 1),
+                              ev[:, min(1, k - 1)] / radius.clamp_min(1e-30), zero)
+        mid = kn // 2
+        upper = take_steps(ev, mid[:, None])[:, 0]
+        lower = take_steps(ev, (mid - 1).clamp_min(0)[:, None])[:, 0]
+        median = torch.where(kn % 2 == 1, upper, (lower + upper) * 0.5)
+        p = ev / energy.clamp_min(1e-30)[:, None] + 1e-12
+        p = p / row_sum(p, lengths=lengths_k)[:, None]
+        log_k = host_tensor([math.log(n) if n > 1 else 1.0 for n in k_counts.host],
+                            torch.float64, device)
+        spec = torch.where(kn > 1, -row_sum(p * p.log(), lengths=lengths_k) / log_k, zero)
+        hfer = row_sum(ev, mask=(ev > median[:, None]) & inside) / energy.clamp_min(1e-30)
+    return {"spectral_fiedler": fiedler,
+            "spectral_hfer": torch.where(energy > 1e-12, hfer, zero),
+            "spectral_spectral_entropy": torch.where(energy > 1e-12, spec, zero)}
+
+
+def _solve_spectral(pending: Sequence[_PendingSpectral]) -> list[dict[str, Tensor]]:
+    """Every chunk's spectral features, its Laplacians solved together with every other
+    chunk's: :func:`eigvalsh_sized` over the stacked rows groups them by size across the
+    chunks, so each size is one solve, not one per chunk. The batched solver treats each matrix
+    alone, so a row's eigenvalues are the same bytes as in its own chunk's solve."""
+    if not pending:
+        return []
+    shapes = {p.lap.shape[1:] for p in pending}
+    if len(shapes) != 1 or len({p.sized for p in pending}) != 1:
+        return [_spectral_from_eigenvalues(eigvalsh_sized(p.lap, p.k_counts).clamp_min(0), p)
+                for p in pending]
+    ev = eigvalsh_sized(torch.cat([p.lap for p in pending]),
+                        Counts.concat([p.k_counts for p in pending])).clamp_min(0)
+    out, first = [], 0
+    for p in pending:
+        rows = p.lap.shape[0]
+        out.append(_spectral_from_eigenvalues(ev[first:first + rows], p))
+        first += rows
+    return out
+
+
 def _decay_steps(n: int) -> list[int]:
     return list(range(n // 4, n, max(1, n // 10)))[:10]
 
 
 def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
                    head_recency: Tensor, starts: Tensor, counts: Counts,
-                   ) -> tuple[dict[str, Tensor], Tensor | list[int], Counts, Tensor]:
+                   ) -> tuple[dict[str, Any], Tensor | list[int], Counts, Tensor, "_PendingSpectral"]:
     """The sampled-layer attention features of ``R`` rows, one per (row, sampled layer):
     ``mean_rows [R, t, W]`` float32, ``head_prompt`` and ``head_recency [R, t, H]``, each
     row's prompt length ``starts [R]`` and its own step count ``counts``. Returns the named
     ``[R]`` series, the spectral steps (one list, or ``[R, K]``), how many each row has, and
-    the normalised Laplacians ``[R, K, K]``, zero past each row's own size."""
+    the normalised Laplacians ``[R, K, K]``, zero past each row's own size, and the
+    Laplacians whose eigenvalues the spectral features need (:class:`_PendingSpectral`); those
+    features are :data:`SPECTRAL_PENDING` in the series until they are solved."""
     families = lane.families
     n_windows, include_stft = families.temporal_n_windows, families.enable_stft
     rows, t, width = mean_rows.shape
@@ -297,40 +379,9 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
     degrees = row_sum(graph, lengths=k_counts.lengths(graph))
     eye = torch.eye(k, device=device, dtype=torch.float64)
     lap = torch.diag_embed(degrees) - graph + eye * 1e-10
-    ev = eigvalsh_sized(lap, k_counts).clamp_min(0)  # [R, K], ascending, zero past the size
-    zero = ev.new_zeros(rows)
-    if not sized:
-        energy = row_sum(ev)
-        radius = ev[:, -1]
-        fiedler = (torch.where(radius > 1e-12, ev[:, 1] / radius.clamp_min(1e-30), zero)
-                   if k > 1 else zero)
-        mid = k // 2
-        median = ev[:, mid] if k % 2 else (ev[:, mid - 1] + ev[:, mid]) * 0.5
-        p = ev / energy.clamp_min(1e-30)[:, None] + 1e-12
-        p = p / row_sum(p)[:, None]
-        spec = -row_sum(p * p.log()) / math.log(k) if k > 1 else zero
-        hfer = row_sum(ev, mask=ev > median[:, None]) / energy.clamp_min(1e-30)
-    else:
-        kn = k_counts.dev
-        lengths_k = k_counts.lengths(ev)
-        inside = k_counts.mask(k)
-        energy = row_sum(ev, lengths=lengths_k)
-        radius = take_steps(ev, (kn - 1)[:, None])[:, 0]
-        fiedler = torch.where((radius > 1e-12) & (kn > 1),
-                              ev[:, min(1, k - 1)] / radius.clamp_min(1e-30), zero)
-        mid = kn // 2
-        upper = take_steps(ev, mid[:, None])[:, 0]
-        lower = take_steps(ev, (mid - 1).clamp_min(0)[:, None])[:, 0]
-        median = torch.where(kn % 2 == 1, upper, (lower + upper) * 0.5)
-        p = ev / energy.clamp_min(1e-30)[:, None] + 1e-12
-        p = p / row_sum(p, lengths=lengths_k)[:, None]
-        log_k = host_tensor([math.log(n) if n > 1 else 1.0 for n in k_counts.host],
-                            torch.float64, device)
-        spec = torch.where(kn > 1, -row_sum(p * p.log(), lengths=lengths_k) / log_k, zero)
-        hfer = row_sum(ev, mask=(ev > median[:, None]) & inside) / energy.clamp_min(1e-30)
-    out["spectral_fiedler"] = fiedler
-    out["spectral_hfer"] = torch.where(energy > 1e-12, hfer, zero)
-    out["spectral_spectral_entropy"] = torch.where(energy > 1e-12, spec, zero)
+    pending = _PendingSpectral(lap, k_counts, k, sized)
+    for name in SPECTRAL_FROM_EIGENVALUES:  # filled after every chunk's Laplacians are solved
+        out[name] = SPECTRAL_PENDING
     inv = degrees.clamp_min(1e-12).rsqrt()
     normalized = eye - inv[:, :, None] * graph * inv[:, None, :]
     if sized:
@@ -362,7 +413,7 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
         for name, values in zip(("prompt_mass", "recency_bias"), operators, strict=True):
             for i, suffix in enumerate(_operator_names("", n_windows, include_stft)):
                 out[f"{FLOW}{name}{suffix}"] = values[:, i]
-    return out, steps, k_counts, normalized
+    return out, steps, k_counts, normalized, pending
 
 
 def _check(name: str, x: Tensor, shape: Sequence[int | None]) -> None:
@@ -426,6 +477,8 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
     laplacians: dict[int, tuple[Tensor | list[int], Tensor, Counts]] = {}
     per_head: dict[int, tuple[Tensor, Tensor]] = {}
     retained = [0] * batch
+    pending: list[_PendingSpectral] = []
+    slots: list[tuple[int, str, int, int, int]] = []  # (chunk, feature, layer in chunk, layers, column)
     for first in range(0, len(sampled), chunk):
         js = list(range(first, min(len(sampled), first + chunk)))
         n = len(js)
@@ -434,11 +487,12 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
             """``[B, t, n, ...]`` -> ``[B * n, t, ...]``, row-major over (row, layer)."""
             return x.movedim(2, 1).reshape(batch * n, *x.shape[1:2], *x.shape[3:]).contiguous()
 
-        series, steps, k_counts, normalized = _sampled_chunk(
+        series, steps, k_counts, normalized, chunk_pending = _sampled_chunk(
             lane, per_row(mean_rows[:, :, js[0]:js[-1] + 1].to(device).float()),
             per_row(head_scalars[:, :, js[0]:js[-1] + 1, 0]),
             per_row(head_scalars[:, :, js[0]:js[-1] + 1, 1]),
             start_t.repeat_interleave(n), counts.repeat(n))
+        pending.append(chunk_pending)
         normalized = normalized.reshape(batch, n, *normalized.shape[1:])
         if isinstance(steps, Tensor):
             steps = steps.reshape(batch, n, -1)
@@ -447,11 +501,15 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
         for i, j in enumerate(js):
             layer = sampled[j]
             for name, value in series.items():
+                key = name
                 if name.startswith(FLOW):
                     name = f"attn_flow_L{layer}_{name[len(FLOW):]}"
                 else:
                     name = f"{name}_L{layer}"
-                cols.put(name, value.reshape(batch, n)[:, i])
+                if value is SPECTRAL_PENDING:
+                    slots.append((len(pending) - 1, key, i, n, cols.reserve(name)))
+                else:
+                    cols.put(name, value.reshape(batch, n)[:, i])
             layer_k = k_counts.derive(sizes[i::n], size_dev[:, i])
             laplacians[layer] = (steps[:, i] if isinstance(steps, Tensor) else steps,
                                  normalized[:, i], layer_k)
@@ -468,6 +526,9 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mean_entropy:
                                               lane.families.enable_stft)
                 cols.block(list(names), torch.zeros(batch, len(names), dtype=torch.float64,
                                                     device=device))
+    solved = _solve_spectral(pending)
+    for c, key, i, n, index in slots:
+        cols.fill(index, solved[c][key].reshape(batch, n)[:, i])
     values = cols.stack(batch, device)
     return AttentionFeatures(tuple(cols.names), values, laplacians, per_head, retained)
 

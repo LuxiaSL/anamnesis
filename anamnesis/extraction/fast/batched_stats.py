@@ -323,6 +323,18 @@ class Counts:
                                       self.padded)
         return self._cache[key]
 
+    @staticmethod
+    def concat(parts: Sequence["Counts"]) -> "Counts":
+        """Counts of batches stacked along the rows, in order; their widths and bucket must agree."""
+        if not parts:
+            raise ValueError("no counts to concatenate")
+        if len({(p.width, p.padded) for p in parts}) != 1:
+            raise ValueError("counts of different widths or buckets do not stack")
+        if len(parts) == 1:
+            return parts[0]
+        return Counts([c for p in parts for c in p.host], torch.cat([p.dev for p in parts]),
+                      parts[0].width, parts[0].padded)
+
     def memo(self, key: Any, build) -> Any:
         """A value derived from these counts, built once."""
         if key not in self._cache:
@@ -706,6 +718,18 @@ class _Columns:
                                                n_windows, include_stft))
         self.names.extend(names)
         self._columns.extend([None] * len(names))
+
+    def reserve(self, name: str) -> int:
+        """A column named now and given its value later (:meth:`fill`), in its place among the
+        names; returns its index."""
+        self.names.append(name)
+        self._columns.append(None)
+        return len(self._columns) - 1
+
+    def fill(self, index: int, value: Tensor) -> None:
+        if self._columns[index] is not None:
+            raise RuntimeError(f"column {self.names[index]} is already filled")
+        self._columns[index] = value
 
     def resolve(self) -> list[Tensor]:
         """Every column, the deferred ones computed first."""
