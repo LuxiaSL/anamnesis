@@ -903,8 +903,16 @@ def _sync_sites(fn) -> list[str]:
     return sites
 
 
+SYNC_ALLOWED_HOST_FREE = SYNC_ALLOWED + ("eigvalsh_sized",)
+"""Under device-only counts (``host_free_counts``) the spectral solve reads its rows' sizes where it
+runs: the solver is a cut in a captured reduction, and checks its status there anyway."""
+
+
 def _stray_syncs(fn) -> set[str]:
-    return {s for s in _sync_sites(fn) if s not in SYNC_ALLOWED}
+    from anamnesis.extraction.fast.engine_reducer import _HOST_FREE
+
+    allowed = SYNC_ALLOWED_HOST_FREE if _HOST_FREE.get() else SYNC_ALLOWED
+    return {s for s in _sync_sites(fn) if s not in allowed}
 
 
 def _on_gpu(row):
