@@ -395,20 +395,47 @@ def window_steps(x: Tensor, start: Tensor, width: int, dim: int = 1) -> Tensor:
     return take_steps(x, index, dim)
 
 
+_INDEX_TABLES: dict[tuple[Any, ...], tuple[Tensor, Tensor, tuple[int, ...]]] = {}
+
+
+def index_table(key: Any, width: int, canonical: int, picks, device: torch.device
+                ) -> tuple[Tensor, Tensor, tuple[int, ...]]:
+    """``picks(n)`` for every count ``0 <= n <= width``, built once per bucket: ``[width + 1, canonical]`` long on
+    ``device`` (row ``n`` padded with its last position, or 0 when empty), the sizes ``[width + 1]`` on ``device``,
+    and the same sizes on the host. A batch then gathers its rows by count on the device, with nothing uploaded per
+    batch."""
+    cache_key = (key, int(width), int(canonical), str(device))
+    hit = _INDEX_TABLES.get(cache_key)
+    if hit is None:
+        lists = [list(picks(n)) for n in range(int(width) + 1)]
+        rows = [p + [p[-1] if p else 0] * (canonical - len(p)) for p in lists]
+        sizes = tuple(len(p) for p in lists)
+        hit = (host_tensor(rows, torch.long, device).reshape(len(rows), canonical),
+               host_tensor(list(sizes), torch.long, device), sizes)
+        _INDEX_TABLES[cache_key] = hit
+    return hit
+
+
 def per_row_index(counts: Counts, key: Any, picks) -> tuple[Tensor | list[int], Counts]:
     """Each row's positions ``picks(n)`` for its count ``n``: one list when every row has the
     same count outside a bucket, else ``[rows, m]`` (padded with the last position, ``m`` the
-    canonical width for padded counts); and how many each row has."""
+    canonical width for padded counts); and how many each row has.
+
+    For padded counts the rows are gathered by count from the bucket's :func:`index_table` on the device, so the
+    index never passes through the host per batch."""
     def build():
-        lists = [list(picks(n)) for n in counts.host]
-        sizes = [len(p) for p in lists]
         device = counts.dev.device
-        if not counts.padded and len(set(counts.host)) <= 1:
-            return lists[0] if lists else [], Counts.of(sizes, device, len(lists[0]) if lists else 0)
         if counts.padded and counts.width is not None:
             width = canonical_size(("index", key), counts.width, lambda n: len(list(picks(n))))
-        else:
-            width = max(1, max(sizes))
+            table, size_table, sizes = index_table(key, counts.width, width, picks, device)
+            return (table.index_select(0, counts.dev),
+                    Counts([sizes[n] for n in counts.host], size_table.index_select(0, counts.dev),
+                           width, counts.padded))
+        lists = [list(picks(n)) for n in counts.host]
+        sizes = [len(p) for p in lists]
+        if not counts.padded and len(set(counts.host)) <= 1:
+            return lists[0] if lists else [], Counts.of(sizes, device, len(lists[0]) if lists else 0)
+        width = max(1, max(sizes))
         padded = [p + [p[-1] if p else 0] * (width - len(p)) for p in lists]
         return (host_tensor(padded, torch.long, device).reshape(len(lists), width),
                 Counts.of(sizes, device, width, counts.padded))
@@ -1090,6 +1117,7 @@ __all__ = (
     "eigvalsh_path",
     "finish_rows",
     "hybrid_lane_id",
+    "index_table",
     "per_row_index",
     "row_backend",
     "spectral_smoothness",
