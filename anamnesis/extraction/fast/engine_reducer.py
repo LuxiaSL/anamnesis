@@ -71,6 +71,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -81,7 +82,7 @@ import numpy as np
 import torch
 
 from anamnesis.extraction.state_extractor import head_disagreement
-from anamnesis.extraction.fast.batched_attention import attention_features
+from anamnesis.extraction.fast.batched_attention import attention_features, mean_rows_cover
 from anamnesis.extraction.fast.batched_families import (
     kvqg_features,
     outputs_features,
@@ -95,9 +96,11 @@ from anamnesis.extraction.fast.batched_stats import (
     RowSpan,
     batched_receipt,
     block_output_features,
+    check_counts,
     bucket_width,
     finish_rows,
     host_tensor,
+    positional_means_cover,
     take_steps,
 )
 from anamnesis.extraction.fast.external import ExternalCaptureError, RoutingPoint
@@ -425,9 +428,12 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
     steps = int(stacked["depth"].shape[1])
     padded = width is not None and bucket_rule != "exact-steps" and steps >= BUCKET_FLOOR
     counts = Counts.of([int(rows[b].positions) for b in keep], lane.device, steps, padded)
+    host_free = padded and _HOST_FREE.get()
     committed = [_pad_stack([rows[b].surfaces["committed"][c] for b in keep], width, lane.device)
                  for c in range(len(first.surfaces["committed"]))]
     try:
+        if host_free:
+            counts = _device_only(lane, stacked, starts, counts)
         attention = attention_features(lane, stacked["head_entropy"], stacked[_mixture_name(lane)],
                                        stacked["head_scalars"], stacked["mean_rows"], starts,
                                        counts)
@@ -523,6 +529,39 @@ def uninitialized_fill(enabled: bool) -> Iterator[None]:
         yield
     finally:
         det.fill_uninitialized_memory = previous
+
+
+_HOST_FREE: ContextVar[bool] = ContextVar("anamnesis_host_free_counts", default=False)
+
+
+@contextmanager
+def host_free_counts(enabled: bool = True) -> Iterator[None]:
+    """Within the block, a padded bucket's families reduce under device-only step counts
+    (:meth:`~anamnesis.extraction.fast.batched_stats.Counts.device_only`): no row's count is read
+    on the host between the batch's checks and its finish, so the reduction's launches are a
+    function of its bucket and shapes alone, which a captured graph needs. It changes no byte; a
+    host read of a count inside the families raises
+    :class:`~anamnesis.extraction.fast.batched_stats.HostCountsError`."""
+    token = _HOST_FREE.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _HOST_FREE.reset(token)
+
+
+def _device_only(lane: GpuFeatureLane, stacked: Mapping[str, torch.Tensor], starts: Sequence[int],
+                 counts: Counts) -> Counts:
+    """``counts`` made device-only after the checks the families would run on their host values,
+    with the families' refusals."""
+    check_counts(counts, len(starts), int(stacked["depth"].shape[1]))
+    if counts.lo < BUCKET_FLOOR:
+        raise ExternalCaptureError("rows below two steps share a batch with longer rows")
+    width = int(stacked["mean_rows"].shape[3])
+    if not mean_rows_cover(width, starts, counts):
+        raise ExternalCaptureError(f"mean_rows of width {width} do not cover every row's span")
+    if not positional_means_cover(lane.pm, starts, counts):
+        raise ExternalCaptureError("the lane's positional means do not cover this capture")
+    return counts.device_only(BUCKET_FLOOR)
 
 
 def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],

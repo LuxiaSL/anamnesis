@@ -241,6 +241,10 @@ def batched_receipt(device: torch.device | str, bucket_rule: str = BUCKET_RULE) 
                 topk_ties=TOPK_TIES, eigvalsh=eigvalsh_path(device), per_row=list(PER_ROW_EXCEPTIONS))
 
 
+class HostCountsError(RuntimeError):
+    """A device-only :class:`Counts`' per-row values were read on the host."""
+
+
 class Counts:
     """Each row's length along one axis of a padded batch: ``host`` (a tuple of ints, one per
     row), ``dev`` (the same, a long tensor on the batch's device), ``width`` (the axis's
@@ -255,18 +259,31 @@ class Counts:
     canonical width (the largest any count up to ``width`` needs), so the kernels a row's
     values pass through are a function of its own count and its bucket, never of its
     batchmates. Derived counts (:meth:`minus`, :meth:`repeat`, :meth:`derive`) are computed
-    on the device, never copied to it."""
+    on the device, never copied to it.
 
-    __slots__ = ("host", "dev", "width", "padded", "_lo", "_hi", "_cache")
+    A padded bucket's counts can be **device-only** (:meth:`device_only`): ``host``, ``lo`` and
+    ``hi`` raise :class:`HostCountsError`, and every count derived from them is device-only too.
+    A reduction under device-only counts reads no row's count on the host, so its launches are a
+    function of the bucket alone, which is what a captured graph needs. Its decisions use what
+    the bucket guarantees: every row has at most ``width`` and at least ``floor`` (:meth:`below`).
+    The batch is validated on the host before its counts are made device-only."""
 
-    def __init__(self, host: Sequence[int], dev: Tensor, width: int | None = None,
-                 padded: bool = False) -> None:
-        self.host = tuple(int(c) for c in host)
+    __slots__ = ("_host", "dev", "width", "padded", "floor", "_lo", "_hi", "_cache")
+
+    def __init__(self, host: Sequence[int] | None, dev: Tensor, width: int | None = None,
+                 padded: bool = False, floor: int = 0) -> None:
         self.dev = dev
         self.width = None if width is None else int(width)
         self.padded = bool(padded)
-        self._lo = min(self.host) if self.host else 0
-        self._hi = max(self.host) if self.host else 0
+        self.floor = int(floor)
+        if host is None:
+            if not self.padded:
+                raise ValueError("only a padded bucket's counts can be device-only")
+            self._host = self._lo = self._hi = None
+        else:
+            self._host = tuple(int(c) for c in host)
+            self._lo = min(self._host) if self._host else 0
+            self._hi = max(self._host) if self._host else 0
         self._cache: dict[Any, Any] = {}
 
     @classmethod
@@ -275,43 +292,89 @@ class Counts:
         host = tuple(int(c) for c in host)
         return cls(host, host_tensor(host, torch.long, device), width, padded)
 
+    def device_only(self, floor: int = BUCKET_FLOOR) -> "Counts":
+        """These padded counts without their host values, every row known to have at least
+        ``floor`` (the bucket's guarantee: :data:`BUCKET_FLOOR` for an engine bucket)."""
+        if not self.padded or self.width is None:
+            raise ValueError("only a padded bucket of known width can be device-only")
+        if self._host is not None and self._host and self._lo < floor:
+            raise ValueError(f"a row of {self._lo} steps is below the floor {floor}")
+        return Counts(None, self.dev, self.width, True, floor)
+
+    @property
+    def is_device_only(self) -> bool:
+        return self._host is None
+
+    def _read(self) -> None:
+        if self._host is None:
+            raise HostCountsError("a device-only batch's counts were read on the host")
+
+    @property
+    def host(self) -> tuple[int, ...]:
+        self._read()
+        return self._host  # type: ignore[return-value]
+
+    @property
+    def rows(self) -> int:
+        return int(self.dev.shape[0])
+
     @property
     def lo(self) -> int:
-        return self._lo
+        self._read()
+        return self._lo  # type: ignore[return-value]
 
     @property
     def hi(self) -> int:
-        return self._hi
+        self._read()
+        return self._hi  # type: ignore[return-value]
 
     @property
     def reach(self) -> int:
         """The largest count the rows' reduction provides for: the canonical width for padded
         counts that know it (so a bucket's branches are its own, never its batchmates'), else
         the largest count."""
-        return self.width if self.padded and self.width is not None else self._hi
+        return self.width if self.padded and self.width is not None else self.hi
+
+    def below(self, k: int) -> bool:
+        """Whether a row may have fewer than ``k``: exactly, from the host values; for
+        device-only counts, unless the floor rules it out. A branch it guards must give a row
+        the same bytes either way (a placeholder ``torch.where`` that keeps every longer row)."""
+        if self._host is None:
+            return self.floor < int(k)
+        return self._lo < int(k)
 
     def uniform(self, width: int) -> bool:
         """Whether every row fills ``width`` and the rows are not a padded bucket."""
         return not self.padded and self._lo == self._hi == int(width)
 
-    def derive(self, host: Sequence[int], dev: Tensor, width: int | None = None) -> "Counts":
+    def derive(self, dev: Tensor, of: Callable[[int], int], width: int | None = None) -> "Counts":
+        """Counts computed from these on the device (``dev``); ``of(c)`` is the same for one
+        count on the host, evaluated only when these have host values."""
+        host = None if self._host is None else [of(c) for c in self._host]
         return Counts(host, dev, width, self.padded)
+
+    def every(self, first: int, step: int) -> "Counts":
+        """Rows ``first, first + step, ...``: one of ``step`` rows interleaved row-major."""
+        host = None if self._host is None else self._host[first::step]
+        return Counts(host, self.dev.reshape(-1, step)[:, first], None, self.padded)
 
     def minus(self, k: int) -> "Counts":
         """Each count less ``k``, at least zero."""
         key = ("minus", int(k))
         if key not in self._cache:
             width = None if self.width is None else max(0, self.width - k)
-            self._cache[key] = Counts([max(0, c - k) for c in self.host],
-                                      (self.dev - k).clamp_min(0), width, self.padded)
+            host = None if self._host is None else [max(0, c - k) for c in self._host]
+            self._cache[key] = Counts(host, (self.dev - k).clamp_min(0), width, self.padded,
+                                      max(0, self.floor - k))
         return self._cache[key]
 
     def repeat(self, r: int) -> "Counts":
         """Each count repeated ``r`` times in place (rows ``[B]`` to ``[B * r]``, row-major)."""
         key = ("repeat", int(r))
         if key not in self._cache:
-            self._cache[key] = Counts([c for c in self.host for _ in range(r)],
-                                      self.dev.repeat_interleave(r), self.width, self.padded)
+            host = None if self._host is None else [c for c in self._host for _ in range(r)]
+            self._cache[key] = Counts(host, self.dev.repeat_interleave(r), self.width,
+                                      self.padded, self.floor)
         return self._cache[key]
 
     def tile(self, k: int) -> "Counts":
@@ -319,8 +382,9 @@ class Counts:
         counts of ``k`` same-shaped batches stacked along the rows, as :func:`stacked` does."""
         key = ("tile", int(k))
         if key not in self._cache:
-            self._cache[key] = Counts(self.host * int(k), self.dev.repeat(int(k)), self.width,
-                                      self.padded)
+            host = None if self._host is None else self._host * int(k)
+            self._cache[key] = Counts(host, self.dev.repeat(int(k)), self.width, self.padded,
+                                      self.floor)
         return self._cache[key]
 
     @staticmethod
@@ -332,8 +396,10 @@ class Counts:
             raise ValueError("counts of different widths or buckets do not stack")
         if len(parts) == 1:
             return parts[0]
-        return Counts([c for p in parts for c in p.host], torch.cat([p.dev for p in parts]),
-                      parts[0].width, parts[0].padded)
+        host = (None if any(p.is_device_only for p in parts)
+                else [c for p in parts for c in p.host])
+        return Counts(host, torch.cat([p.dev for p in parts]), parts[0].width, parts[0].padded,
+                      min(p.floor for p in parts))
 
     def memo(self, key: Any, build) -> Any:
         """A value derived from these counts, built once."""
@@ -346,8 +412,8 @@ class Counts:
         first dimension is the rows; ``None`` when every row fills it outside a bucket."""
         if self.uniform(x.shape[-1]):
             return None
-        if x.shape[0] != len(self.host):
-            raise ValueError(f"{len(self.host)} counts for a batch of {x.shape[0]} rows")
+        if x.shape[0] != self.rows:
+            raise ValueError(f"{self.rows} counts for a batch of {x.shape[0]} rows")
         return self.dev.view(-1, *([1] * (x.ndim - 2))).expand(x.shape[:-1])
 
     def mask(self, width: int) -> Tensor:
@@ -357,6 +423,27 @@ class Counts:
             cols = torch.arange(width, device=self.dev.device)
             self._cache[key] = cols[None, :] < self.dev[:, None]
         return self._cache[key]
+
+
+def check_counts(counts: Counts, batch: int, steps: int) -> None:
+    """Refuse counts that do not describe ``batch`` rows of at most ``steps`` steps, each at
+    least one. Device-only counts were checked on the host before they were made so; only their
+    shape is checked here."""
+    if counts.is_device_only:
+        if counts.rows != batch or counts.width > steps:
+            raise ExternalCaptureError(f"{counts.rows} step counts of width {counts.width} for {batch} rows "
+                                       f"of {steps} steps")
+        return
+    if len(counts.host) != batch or counts.hi > steps or counts.lo < 1:
+        raise ExternalCaptureError(f"step counts {counts.host} for {batch} rows of {steps} steps")
+
+
+def positional_means_cover(pm: Tensor, starts: Sequence[int], counts: Counts) -> bool:
+    """Whether the positional means ``pm [layers + 1, positions, width]`` reach every row's last
+    position (its start plus its count); device-only counts were checked before."""
+    if counts.is_device_only:
+        return True
+    return all(pm.shape[1] >= int(s) + n for s, n in zip(starts, counts.host, strict=True))
 
 
 _CANONICAL: dict[tuple[Any, int], int] = {}
@@ -429,8 +516,7 @@ def per_row_index(counts: Counts, key: Any, picks) -> tuple[Tensor | list[int], 
             width = canonical_size(("index", key), counts.width, lambda n: len(list(picks(n))))
             table, size_table, sizes = index_table(key, counts.width, width, picks, device)
             return (table.index_select(0, counts.dev),
-                    Counts([sizes[n] for n in counts.host], size_table.index_select(0, counts.dev),
-                           width, counts.padded))
+                    counts.derive(size_table.index_select(0, counts.dev), lambda n: sizes[n], width))
         lists = [list(picks(n)) for n in counts.host]
         sizes = [len(p) for p in lists]
         if not counts.padded and len(set(counts.host)) <= 1:
@@ -525,17 +611,18 @@ def _windowed_rows(x: Tensor, n_windows: int, counts: Counts) -> Tensor:
     each window gathered to the front of its own buffer; zero for a row below four."""
     n = counts.dev
     width = n // n_windows
-    widths = [c // n_windows for c in counts.host]
     pieces = []
     for i in range(n_windows):
         last = i == n_windows - 1
-        sizes = [c - i * w if last else w for c, w in zip(counts.host, widths, strict=True)]
+
+        def size_of(c: int, i: int = i, last: bool = last) -> int:
+            return c - i * (c // n_windows) if last else c // n_windows
         size_dev = n - i * width if last else width
         canonical = canonical_size(("window", n_windows, last), x.shape[1],
                                    lambda c: c - (n_windows - 1) * (c // n_windows) if last
                                    else c // n_windows)
         segment = window_steps(x, width * i, canonical)
-        seg_counts = counts.derive(sizes, size_dev, canonical)
+        seg_counts = counts.derive(size_dev, size_of, canonical)
         lengths = seg_counts.lengths(segment)
         pieces.extend((row_mean(segment, lengths=lengths), row_std(segment, lengths=lengths),
                        _slope_rows(segment, seg_counts)))
@@ -828,7 +915,7 @@ def _residual_trajectory(cols: _Columns, layer: int, corrected: Tensor, raw_firs
                        _temporal_rows(vn, n_windows, include_stft, one).double(),
                        _temporal_rows(angles, n_windows, include_stft, two).double()], dim=1)
     block = torch.where((raw_first_norm < 1e-6)[:, None], block.new_zeros(()), block)
-    if counts.lo < 3:  # rows below three steps take the placeholder
+    if counts.below(3):  # rows below three steps take the placeholder
         block = torch.where((counts.dev < 3)[:, None], block.new_zeros(()), block)
     cols.block(names, block)
 
@@ -875,11 +962,10 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
         raise ExternalCaptureError(f"{batch} rows but {len(starts)} starts")
     device = lane.device
     counts = counts if counts is not None else uniform_counts(batch, steps, device)
-    if len(counts.host) != batch or counts.hi > steps or counts.lo < 1:
-        raise ExternalCaptureError(f"step counts {counts.host} for {batch} rows of {steps} steps")
+    check_counts(counts, batch, steps)
     pm = lane.pm
-    if pm.ndim != 3 or pm.shape[0] < layers + 1 or pm.shape[2] != width or any(
-            pm.shape[1] < int(s) + n for s, n in zip(starts, counts.host, strict=True)):
+    if pm.ndim != 3 or pm.shape[0] < layers + 1 or pm.shape[2] != width or not positional_means_cover(
+            pm, starts, counts):
         raise ExternalCaptureError("the lane's positional means do not cover this capture")
     if not hidden.is_floating_point():
         raise ExternalCaptureError("hidden must be floating point")
@@ -1006,7 +1092,7 @@ def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str
                 values: Tensor, mean_logprob: Tensor, knnlm: Tensor | None,
                 capture_identity: Mapping[str, Any], *, num_layers: int,
                 routing_names: Sequence[str] | None = None, routing_values: Tensor | None = None,
-                retained_attention_summary_bytes: int | Sequence[int] = 0,
+                retained_attention_summary_bytes: int | Sequence[int] | Tensor = 0,
                 bucket_rule: str = BUCKET_RULE,
                 bucket_width: int | None = None) -> list[GpuFeatureResult | ExternalCaptureError]:
     """Each row's ``GpuFeatureResult``, assembled for the whole batch at once.
@@ -1067,9 +1153,12 @@ def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str
         bucket_width=int(bucket_width) if bucket_width is not None else None,
         routing_family=routed,
     )
-    retained = ([int(retained_attention_summary_bytes)] * batch
-                if isinstance(retained_attention_summary_bytes, int)
-                else [int(r) for r in retained_attention_summary_bytes])
+    if isinstance(retained_attention_summary_bytes, int):
+        retained = [int(retained_attention_summary_bytes)] * batch
+    elif isinstance(retained_attention_summary_bytes, Tensor):  # a device-only reduction's
+        retained = [int(r) for r in retained_attention_summary_bytes.tolist()]
+    else:
+        retained = [int(r) for r in retained_attention_summary_bytes]
     if len(retained) != batch:
         raise ExternalCaptureError(f"{len(retained)} retained-summary sizes for {batch} rows")
     results: list[GpuFeatureResult | ExternalCaptureError] = []
@@ -1105,6 +1194,7 @@ __all__ = (
     "EFF_DIM",
     "FAMILIES_SOURCE_SHA256",
     "HYBRID_LANE_PREFIX",
+    "HostCountsError",
     "INVARIANT_OPS_SOURCE_SHA256",
     "PER_ROW_EXCEPTIONS",
     "RowSpan",
@@ -1113,12 +1203,14 @@ __all__ = (
     "block_output_features",
     "bucket_width",
     "canonical_size",
+    "check_counts",
     "device_arch",
     "eigvalsh_path",
     "finish_rows",
     "hybrid_lane_id",
     "index_table",
     "per_row_index",
+    "positional_means_cover",
     "row_backend",
     "spectral_smoothness",
     "take_steps",

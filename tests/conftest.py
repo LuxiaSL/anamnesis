@@ -23,3 +23,16 @@ def pytest_configure(config) -> None:
         except ImportError:
             return
         torch.set_num_threads(1)
+
+
+if os.environ.get("ANAMNESIS_TEST_HOST_FREE") == "1":
+    import pytest
+
+    @pytest.fixture(autouse=True)
+    def _host_free_counts():
+        """``ANAMNESIS_TEST_HOST_FREE=1``: every test reduces padded buckets under device-only counts, so a host read
+        of a count anywhere in the batched families fails the suite (graph step 2's guard)."""
+        from anamnesis.extraction.fast.engine_reducer import host_free_counts
+
+        with host_free_counts():
+            yield
