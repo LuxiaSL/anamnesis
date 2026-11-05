@@ -18,7 +18,8 @@ the final read's. ``surfaces`` maps names to tensors over the ``kept`` positions
 
 * ``depth [kept, layers, hidden]``: every layer's block output;
 * ``q``, ``k``, ``v``, ``gate`` ``[kept, sampled, ...]``: at the lane's sampled layers, in order;
-* ``head_entropy [kept, layers, heads]``, ``mean_entropy [kept, layers]``;
+* ``head_entropy [kept, layers, heads]``, ``mean_entropy [kept, layers]`` (``head_spread
+  [kept, layers]`` instead, for a lane whose ``head_disagreement`` is ``spread``);
 * ``head_scalars [kept, sampled, 3, heads]``: prompt mass, recency mass, sink, per head;
 * ``mean_rows [kept, sampled, width]``: the head-mean rows at absolute columns;
 * ``logit_stats [kept, 6]``: the output reduction's per-step quantities;
@@ -79,6 +80,7 @@ from typing import Any
 import numpy as np
 import torch
 
+from anamnesis.extraction.state_extractor import head_disagreement
 from anamnesis.extraction.fast.batched_attention import attention_features
 from anamnesis.extraction.fast.batched_families import (
     kvqg_features,
@@ -115,7 +117,19 @@ SCHEMA_STEP_CAP = 8
 
 SURFACES = ("depth", "q", "k", "v", "gate", "head_entropy", "mean_entropy", "head_scalars",
             "mean_rows", "logit_stats", "route", "route_final", "committed")
-"""The surfaces a signed row must carry."""
+"""The surfaces a signed row must carry for a lane that reads the head agreement."""
+
+
+def _mixture_name(lane: GpuFeatureLane) -> str:
+    """The per-layer mixture surface a lane reads: ``mean_entropy``, or ``head_spread`` for a
+    lane whose ``head_disagreement`` is ``spread`` (:data:`~anamnesis.extraction.fast.external_stats.CONTRACT_SPREAD`)."""
+    return "head_spread" if head_disagreement(lane.config) == "spread" else "mean_entropy"
+
+
+def surfaces_for(lane: GpuFeatureLane) -> tuple[str, ...]:
+    """The surfaces a signed row must carry for ``lane``."""
+    mixture = _mixture_name(lane)
+    return tuple(mixture if name == "mean_entropy" else name for name in SURFACES)
 
 
 @dataclass
@@ -160,14 +174,15 @@ def _begin_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]):
         raise ExternalCaptureError(
             f"the row has {positions} steps but its token ids give {len(seq) - start - 1}")
     s = row.surfaces
-    missing = [name for name in SURFACES if name not in s]
+    missing = [name for name in surfaces_for(lane) if name not in s]
     if missing:
         raise ExternalCaptureError(f"the signed row lacks surfaces {missing}")
     depth = s["depth"]
     span = ExternalStatsSpan(lane, start=start, end=len(seq), num_layers=int(depth.shape[1]))
     scalars = s["head_scalars"]
+    mixture = _mixture_name(lane)
     span.attention_stats(head_entropy=s["head_entropy"].float(),
-                         mean_entropy=s["mean_entropy"].float(),
+                         **{mixture: s[mixture].float()},
                          head_prompt_mass=scalars[:, :, 0].float(),
                          head_recency_mass=scalars[:, :, 1].float(),
                          head_sink=scalars[:, :, 2].float(),
@@ -208,6 +223,7 @@ _NONFINITE = "the capture holds a nonfloating or nonfinite tensor"
 _FINITE_REFUSALS = dict(
     head_entropy="head_entropy holds a nonfinite value",
     mean_entropy="mean_entropy holds a nonfinite value",
+    head_spread="head_spread holds a nonfinite value",
     head_scalars="head_scalars holds a nonfinite value",
     mean_rows="mean_rows holds a nonfinite value",
     depth=_NONFINITE,
@@ -226,6 +242,11 @@ _SCALARS = ("head_prompt_mass", "head_recency_mass", "head_sink")
 """The per-row statistics contract's names of ``head_scalars``' three columns."""
 
 
+def _finite_names(row: Any) -> list[str]:
+    """The surfaces a batch checks for finiteness that ``row`` carries (one mixture surface)."""
+    return [name for name in _FINITE_REFUSALS if name in row.surfaces]
+
+
 def _shape_key(row: Any, width: int | None = None) -> tuple:
     """What rows must share to be reduced in one batch: every stacked surface's shape (its
     steps padded to ``width``, when given) and the routing plan."""
@@ -235,7 +256,7 @@ def _shape_key(row: Any, width: int | None = None) -> tuple:
         dims = tuple(x.shape)
         return dims if width is None or not dims else (int(width),) + dims[1:]
 
-    return (tuple((name, shape(s[name])) for name in _FINITE_REFUSALS),
+    return (tuple((name, shape(s[name])) for name in _finite_names(row)),
             tuple(shape(c) for c in s["committed"]),
             tuple(tuple(int(n) for n in pair) for pair in row.route_sources),
             int(row.final_sources))
@@ -273,7 +294,7 @@ def validate_batch(rows: Sequence[Any], device,
     steps zero-padded to ``width``, when given), and the indices of rows holding a nonfinite
     value (:func:`finite_rows`), found with one device-to-host copy for the whole batch."""
     stacked = {name: _pad_stack([row.surfaces[name] for row in rows], width, device)
-               for name in _FINITE_REFUSALS}
+               for name in _finite_names(rows[0])}
     flags = torch.stack([finite_rows(x) for x in stacked.values()]).cpu()
     return stacked, [b for b in range(len(rows)) if not bool(flags[:, b].all())]
 
@@ -281,7 +302,8 @@ def validate_batch(rows: Sequence[Any], device,
 def _first_refusal(row: Any) -> str:
     """The refusal of a row :func:`validate_batch` found nonfinite, as the per-row reduction
     words it."""
-    for name, message in _FINITE_REFUSALS.items():
+    for name in _finite_names(row):
+        message = _FINITE_REFUSALS[name]
         x = row.surfaces[name]
         if bool(torch.isfinite(x).all()):
             continue
@@ -324,7 +346,7 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
         raise ExternalCaptureError(
             f"the row has {positions} steps but its token ids give {len(seq) - start - 1}")
     s = row.surfaces
-    missing = [name for name in SURFACES if name not in s]
+    missing = [name for name in surfaces_for(lane) if name not in s]
     if missing:
         raise ExternalCaptureError(f"the signed row lacks surfaces {missing}")
     if start < 1 or positions < 1:
@@ -346,8 +368,9 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
     if not isinstance(he, torch.Tensor) or he.ndim != 3:
         raise ExternalCaptureError("head_entropy must be [steps, layers, heads]")
     heads = int(he.shape[2])
-    expected = dict(head_entropy=(positions, layers, heads), mean_entropy=(positions, layers),
-                    head_scalars=(positions, len(sampled), 3, heads))
+    mixture = _mixture_name(lane)
+    expected = {"head_entropy": (positions, layers, heads), mixture: (positions, layers),
+                "head_scalars": (positions, len(sampled), 3, heads)}
     for name, shape in expected.items():
         if not isinstance(s[name], torch.Tensor) or tuple(s[name].shape) != shape:
             raise ExternalCaptureError(
@@ -368,7 +391,7 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
             raise ExternalCaptureError(
                 f"{name} must be [{positions}, {len(sampled)}, ...], got "
                 f"{tuple(getattr(x, 'shape', ()))}")
-    for name in ("depth", "k", "v", "q", "gate", "head_entropy", "mean_entropy",
+    for name in ("depth", "k", "v", "q", "gate", "head_entropy", mixture,
                  "head_scalars", "mean_rows"):
         if not s[name].is_floating_point():
             raise ExternalCaptureError(_NONFINITE)
@@ -405,7 +428,7 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
     committed = [_pad_stack([rows[b].surfaces["committed"][c] for b in keep], width, lane.device)
                  for c in range(len(first.surfaces["committed"]))]
     try:
-        attention = attention_features(lane, stacked["head_entropy"], stacked["mean_entropy"],
+        attention = attention_features(lane, stacked["head_entropy"], stacked[_mixture_name(lane)],
                                        stacked["head_scalars"], stacked["mean_rows"], starts,
                                        counts)
         blocks = block_output_features(lane, stacked["depth"], starts, attention.laplacians,

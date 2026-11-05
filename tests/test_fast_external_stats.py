@@ -177,16 +177,16 @@ def test_the_twin_was_written_against_this_attention_reducer():
     from anamnesis.extraction.fast import attention
 
     digest = hashlib.sha256(Path(attention.__file__).read_bytes()).hexdigest()
-    assert digest == "57b7607c5be249080cf3fe395fc1182d5bf0b1904183f34d03e6b2d7691f6a8b"
+    assert digest == "b6224143ca83ac12cb171aaadf2e1d6f4ee31b35dad2bc5fc22c4afb8c0caaf9"
 
 
 TWINS = {
     # the output reduction after its per-step quantities
-    "features.py": "2e5d89b0aff1043307fb2d1d2bde6d2424f8687a0f53a238ffb67dc1e0a4327a",
+    "features.py": "171d38314caab6468103f56723c0d53f2f22f651d2e48a56ccac7efe21e40871",
     # the routing family's assembly
     "attn_res.py": "2dc0fa45320ffc8d67c5f90ffa8a872ef093c9c8fc4bbb36f3638e033865f546",
     # the block-output, key, value, query and gate reduction
-    "external.py": "a707670ad44a6b51ee2344974bd5242b4a5341eaec767fb329f79f96cc9c50c0",
+    "external.py": "53bbdd28b1af8b54f8025e0a8311af60146970c1f0814bdb4482a36afbfa6eec",
 }
 
 

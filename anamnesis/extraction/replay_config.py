@@ -37,4 +37,5 @@ def native_replay_configs(
         contrastive_layers=preset.contrastive_layers,
     )
     family_config._fast_lane_eff_dim = preset.eff_dim
+    extraction_config._head_disagreement = preset.head_disagreement
     return extraction_config, family_config

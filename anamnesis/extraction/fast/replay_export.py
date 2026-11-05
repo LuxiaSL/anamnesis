@@ -41,7 +41,25 @@ METADATA_KEY = "anamnesis_replay"
 
 SURFACES = ("depth", "committed", "route", "route_final", "q", "k", "v", "gate", "head_entropy",
             "mean_entropy", "head_scalars", "mean_rows", "logit_stats")
-"""The signed surfaces an export holds."""
+"""The signed surfaces an export of a head-agreement row holds."""
+
+MIXTURE_SURFACES = ("mean_entropy", "head_spread")
+"""The per-layer mixture surfaces: an export holds exactly one, the one its row was signed with
+(``head_spread`` in place of ``mean_entropy`` for a lane whose ``head_disagreement`` is
+``spread``)."""
+
+
+def _surface_names(available) -> list[str]:
+    """The surfaces an export holds, given the names a row or header carries.
+
+    Raises
+    ------
+    ReplayExportError
+        When the names carry neither mixture surface, or both."""
+    mixture = [n for n in MIXTURE_SURFACES if n in available]
+    if len(mixture) != 1:
+        raise ReplayExportError(f"an export holds one of {list(MIXTURE_SURFACES)}, not {mixture}")
+    return [mixture[0] if n == "mean_entropy" else n for n in SURFACES]
 
 
 class ReplayExportError(ValueError):
@@ -128,12 +146,16 @@ def load_export(path: str | Path, device: str | torch.device = "cpu") -> tuple[E
     if not header.replayed_bitwise:
         raise ReplayExportError(
             f"{header.sign_id}: the replay did not reproduce its signed row; its surfaces describe some other pass")
-    missing = [n for n in SURFACES if n not in header.tensors]
+    try:
+        names = _surface_names(header.tensors)
+    except ReplayExportError as err:
+        raise ReplayExportError(f"{header.sign_id}: {err}") from err
+    missing = [n for n in names if n not in header.tensors]
     if missing:
         raise ReplayExportError(f"{header.sign_id}: the header names no {missing}")
     loaded = load_file(str(tensors_path), device=str(device))
     surfaces: dict[str, Any] = {}
-    for name in SURFACES:
+    for name in names:
         if name not in loaded:
             raise ReplayExportError(f"{header.sign_id}: {tensors_path.name} holds no {name!r}")
         t, spec = loaded[name], header.tensors[name]
@@ -159,7 +181,7 @@ def save_export(path: str | Path, row: Any, header: Mapping[str, Any], axes: Map
     from safetensors.torch import save_file
 
     tensors: dict[str, torch.Tensor] = {}
-    for name in SURFACES:
+    for name in _surface_names(row.surfaces):
         x = row.surfaces[name]
         t = torch.stack(list(x)) if name == "committed" else x
         tensors[name] = t.detach().contiguous().cpu()
@@ -174,5 +196,5 @@ def save_export(path: str | Path, row: Any, header: Mapping[str, Any], axes: Map
     return tensors_path, header_path
 
 
-__all__ = ["METADATA_KEY", "SCHEMA", "SURFACES", "ExportHeader", "ExportedRow", "ReplayExportError",
+__all__ = ["METADATA_KEY", "MIXTURE_SURFACES", "SCHEMA", "SURFACES", "ExportHeader", "ExportedRow", "ReplayExportError",
            "TensorSpec", "load_export", "save_export"]
