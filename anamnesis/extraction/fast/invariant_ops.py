@@ -120,7 +120,8 @@ if HAVE_TRITON:
         else:
             return tl.sqrt_rn(a)
 
-    @triton.jit
+    @triton.jit(do_not_specialize=["D1", "D2", "SX0", "SX1", "SX2", "SY0", "SY1", "SY2",
+                                   "SL0", "SL1", "SL2", "SM0", "SM1", "SM2"])
     def _row_reduce_kernel(
         x_ptr,
         y_ptr,
@@ -130,25 +131,29 @@ if HAVE_TRITON:
         W,
         D1,
         D2,
-        SX0, SX1, SX2, SXW,
-        SY0, SY1, SY2, SYW,
+        SX0, SX1, SX2,
+        SY0, SY1, SY2,
         SL0, SL1, SL2,
-        SM0, SM1, SM2, SMW,
+        SM0, SM1, SM2,
         OP: tl.constexpr,
         MASK_KIND: tl.constexpr,
         BLOCK_W: tl.constexpr,
         IS_FP64: tl.constexpr,
+        ROW_ALIGN: tl.constexpr,
     ):
         # Row ``row`` of the [D0, D1, D2] leading index, each operand read through its own
-        # strides (a stride of zero repeats it along that dimension); the values a row reads,
-        # and the order it adds them in, are those of the same row laid out contiguously.
+        # strides over the leading dimensions (a stride of zero repeats it) and contiguously
+        # along the row; the values a row reads, and the order it adds them in, are those of
+        # the same row laid out contiguously. The strides are not specialised on: the
+        # compiler's knowledge of a row's alignment is ROW_ALIGN, a function of W alone, so
+        # the kernel (and with it the fold tree) is the same for every layout of one width.
         row = tl.program_id(0).to(tl.int64)
         i2 = row % D2
         i1 = (row // D2) % D1
         i0 = row // (D1 * D2)
-        x_row = i0 * SX0 + i1 * SX1 + i2 * SX2
-        y_row = i0 * SY0 + i1 * SY1 + i2 * SY2
-        m_row = i0 * SM0 + i1 * SM1 + i2 * SM2
+        x_row = tl.multiple_of(i0 * SX0 + i1 * SX1 + i2 * SX2, ROW_ALIGN)
+        y_row = tl.multiple_of(i0 * SY0 + i1 * SY1 + i2 * SY2, ROW_ALIGN)
+        m_row = tl.multiple_of(i0 * SM0 + i1 * SM1 + i2 * SM2, ROW_ALIGN)
         offs = tl.arange(0, BLOCK_W)
         if MASK_KIND == 1:
             n = tl.load(len_ptr + i0 * SL0 + i1 * SL1 + i2 * SL2).to(tl.int64)
@@ -162,10 +167,10 @@ if HAVE_TRITON:
             cols = start + offs
             keep = cols < limit
             if MASK_KIND == 2:
-                keep = keep & (tl.load(mask_ptr + m_row + cols * SMW, mask=cols < W, other=0) != 0)
-            x = tl.load(x_ptr + x_row + cols * SXW, mask=keep, other=0.0)
+                keep = keep & (tl.load(mask_ptr + m_row + cols, mask=cols < W, other=0) != 0)
+            x = tl.load(x_ptr + x_row + cols, mask=keep, other=0.0)
             if OP == 2:
-                y = tl.load(y_ptr + y_row + cols * SYW, mask=keep, other=0.0)
+                y = tl.load(y_ptr + y_row + cols, mask=keep, other=0.0)
                 acc += x * y
             elif OP == 1 or OP == 4:
                 acc += x * x
@@ -187,9 +192,9 @@ if HAVE_TRITON:
                 keep = cols < limit
                 if MASK_KIND == 2:
                     keep = keep & (
-                        tl.load(mask_ptr + m_row + cols * SMW, mask=cols < W, other=0) != 0
+                        tl.load(mask_ptr + m_row + cols, mask=cols < W, other=0) != 0
                     )
-                x = tl.load(x_ptr + x_row + cols * SXW, mask=keep, other=0.0)
+                x = tl.load(x_ptr + x_row + cols, mask=keep, other=0.0)
                 d = tl.where(keep, x - mean, 0.0)
                 acc += d * d
             total = _sqrt(_div(tl.sum(acc, axis=0), n, IS_FP64), IS_FP64)
@@ -279,6 +284,16 @@ def _collapsed_layout(shape: tuple[int, ...], operands: list[tuple[int, ...]]
 
 def _aligned(t: Tensor) -> bool:
     return t.numel() == 0 or t.data_ptr() % _ALIGN_BYTES == 0
+
+
+_ROW_ALIGN_ELEMENTS = 16
+
+
+def _row_align(width: int) -> int:
+    """What the kernel is told every row's first element is a multiple of (in elements): 16
+    when the width is, else 1. A function of the width alone, so one width compiles one
+    kernel whatever the operands' layout, as a contiguous ``[rows, W]`` buffer does."""
+    return _ROW_ALIGN_ELEMENTS if width % _ROW_ALIGN_ELEMENTS == 0 else 1
 
 
 def _check(x: Tensor, y: Tensor | None, lengths: Tensor | None, mask: Tensor | None) -> None:
@@ -403,6 +418,11 @@ def _triton_strided(
     operands = [x] + ([y] if y is not None else []) + ([mask] if mask is not None else [])
     if not all(_aligned(t) for t in operands + ([lengths] if lengths is not None else [])):
         return None
+    if width > 1 and any(t.stride(-1) != 1 for t in operands):
+        return None
+    align = _row_align(width)
+    if any(st % align for t in operands for st in t.stride()[:-1]):
+        return None
     strides = [tuple(t.stride()[:-1]) for t in operands]
     if lengths is not None:
         strides.append(tuple(lengths.stride()))
@@ -418,17 +438,17 @@ def _triton_strided(
         return out.reshape(lead)
     if width == 0:
         return out.zero_().reshape(lead)
-    sx = lead_strides[0] + (x.stride(-1),)
+    sx = lead_strides[0]
     k = 1
     if y is not None:
-        sy, k = lead_strides[k] + (y.stride(-1),), k + 1
+        sy, k = lead_strides[k], k + 1
     else:
         sy = sx
     if mask is not None:
-        sm, k = lead_strides[k] + (mask.stride(-1),), k + 1
+        sm, k = lead_strides[k], k + 1
         kind = _MASK_BOOL
     else:
-        sm = (0, 0, 0, 0)
+        sm = (0, 0, 0)
         kind = _MASK_LENGTHS if lengths is not None else _MASK_NONE
     sl = lead_strides[k] if lengths is not None else (0, 0, 0)
     with torch.cuda.device(x.device):
@@ -449,6 +469,7 @@ def _triton_strided(
             MASK_KIND=kind,
             BLOCK_W=BLOCK,
             IS_FP64=x.dtype == torch.float64,
+            ROW_ALIGN=align,
             num_warps=NUM_WARPS,
             num_stages=NUM_STAGES,
         )
@@ -487,14 +508,15 @@ def _triton_reduce(
             width,
             1,
             1,
-            width, 0, 0, 1,
-            width, 0, 0, 1,
+            width, 0, 0,
+            width, 0, 0,
             1, 0, 0,
-            width, 0, 0, 1,
+            width, 0, 0,
             OP=op,
             MASK_KIND=kind,
             BLOCK_W=BLOCK,
             IS_FP64=rows.dtype == torch.float64,
+            ROW_ALIGN=_row_align(width),
             num_warps=NUM_WARPS,
             num_stages=NUM_STAGES,
         )

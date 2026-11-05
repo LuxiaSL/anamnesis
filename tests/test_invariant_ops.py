@@ -448,3 +448,28 @@ def test_gpu_broadcast_operands_launch_only_the_reduction():
         torch.cuda.synchronize()
     kernels = [e.name for e in prof.events() if e.device_type == torch.autograd.DeviceType.CUDA]
     assert len(kernels) == 1 and "_row_reduce_kernel" in kernels[0], kernels
+
+
+@needs_gpu
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64], ids=["fp32", "fp64"])
+@pytest.mark.parametrize("width", WIDTHS + (64, 48))
+def test_gpu_a_row_has_its_bytes_through_any_leading_shape(dtype, width):
+    """One row read alone (leading dimensions of one), inside its batch, from a transposed
+    batch, and broadcast across a batch: one width compiles one kernel, so the bytes agree.
+    The strides differ in which of them are 1 or multiples of 16; a kernel specialised on
+    them would fold the row in another order."""
+    gen = torch.Generator().manual_seed(width + 3)
+    x = torch.randn(8, 6, width, generator=gen, dtype=torch.float64).to(dtype).cuda()
+    lengths = torch.randint(0, width + 1, (8, 6), generator=gen).cuda()
+    for prim_name, prim in PRIMITIVES.items():
+        def run(v, n):
+            return prim(v, v, lengths=n) if prim_name == "row_dot" else prim(v, lengths=n)
+        whole = run(x, lengths)
+        flipped = run(x.transpose(0, 1).contiguous().transpose(0, 1), lengths)
+        assert flipped.cpu().numpy().tobytes() == whole.cpu().numpy().tobytes(), prim_name
+        for r, j in ((0, 0), (5, 3), (7, 5)):
+            alone = run(x[r:r + 1, j:j + 1], lengths[r:r + 1, j:j + 1])
+            wide = run(x[r:r + 1, j:j + 1].expand(4, 3, width), lengths[r:r + 1, j:j + 1].expand(4, 3))
+            want = whole[r, j].cpu().numpy().tobytes()
+            assert alone.reshape(-1).cpu().numpy().tobytes() == want, (prim_name, r, j)
+            assert all(v.cpu().numpy().tobytes() == want for v in wide.reshape(-1)), (prim_name, r, j)
