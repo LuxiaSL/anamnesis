@@ -38,6 +38,7 @@ decay fit below ten steps, the attention-flow family below two) are the per-row 
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -228,6 +229,13 @@ class _PendingSpectral:
     sized: bool
 
 
+@lru_cache(maxsize=None)
+def _log_table(width: int, device: torch.device) -> Tensor:
+    """``log n`` for every ``0 <= n <= width`` (1 below two), float64 on ``device``: the values Python's ``math.log``
+    gives, built once."""
+    return host_tensor([math.log(n) if n > 1 else 1.0 for n in range(int(width) + 1)], torch.float64, device)
+
+
 def _spectral_from_eigenvalues(ev: Tensor, pending: _PendingSpectral) -> dict[str, Tensor]:
     """The fiedler value, high-frequency energy ratio and spectral entropy of each row, from
     its Laplacian's ascending eigenvalues ``ev [R, K]`` (zero past its own size)."""
@@ -259,8 +267,7 @@ def _spectral_from_eigenvalues(ev: Tensor, pending: _PendingSpectral) -> dict[st
         median = torch.where(kn % 2 == 1, upper, (lower + upper) * 0.5)
         p = ev / energy.clamp_min(1e-30)[:, None] + 1e-12
         p = p / row_sum(p, lengths=lengths_k)[:, None]
-        log_k = host_tensor([math.log(n) if n > 1 else 1.0 for n in k_counts.host],
-                            torch.float64, device)
+        log_k = _log_table(k, device).index_select(0, kn)  # log n per row, 1 below two
         spec = torch.where(kn > 1, -row_sum(p * p.log(), lengths=lengths_k) / log_k, zero)
         hfer = row_sum(ev, mask=(ev > median[:, None]) & inside) / energy.clamp_min(1e-30)
     return {"spectral_fiedler": fiedler,
