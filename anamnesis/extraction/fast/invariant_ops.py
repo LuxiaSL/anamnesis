@@ -26,9 +26,14 @@ Two implementations carry the order:
   ``num_stages`` fixed (:data:`BLOCK`, :data:`NUM_WARPS`, :data:`NUM_STAGES`),
   never autotuned, so every process compiles the same kernel for a given
   ``(W, dtype)``. The fold in step 3 is ``tl.sum`` over the accumulator, whose tree
-  is fixed by that compiled layout. The launcher hands the kernel contiguous,
-  16-byte-aligned buffers, so the compiler's alignment specialisation is the same
-  for every call with the same ``W``.
+  is fixed by that compiled layout. The kernel reads each operand (``x``, ``y``,
+  ``lengths``, ``mask``) through its own strides over up to three leading
+  dimensions, so an expanded, sliced or transposed view is reduced where it lies,
+  with no copy to lay it out; a row reads the same values at the same positions as
+  it would from a contiguous copy, so its bytes are the same. An operand whose
+  address is not 16-byte aligned, or whose leading dimensions do not merge into
+  three, is copied to an aligned contiguous buffer first, so the compiler's
+  alignment specialisation never follows a caller's view.
 * **torch**: the same tiles and the same accumulator in plain elementwise torch,
   with step 3 a pairwise halving fold (``acc[:half] + acc[half:]`` until one value
   is left). Every operation is elementwise across rows, so it is invariant on any
@@ -123,16 +128,31 @@ if HAVE_TRITON:
         mask_ptr,
         out_ptr,
         W,
+        D1,
+        D2,
+        SX0, SX1, SX2, SXW,
+        SY0, SY1, SY2, SYW,
+        SL0, SL1, SL2,
+        SM0, SM1, SM2, SMW,
         OP: tl.constexpr,
         MASK_KIND: tl.constexpr,
         BLOCK_W: tl.constexpr,
         IS_FP64: tl.constexpr,
     ):
+        # Row ``row`` of the [D0, D1, D2] leading index, each operand read through its own
+        # strides (a stride of zero repeats it along that dimension); the values a row reads,
+        # and the order it adds them in, are those of the same row laid out contiguously.
         row = tl.program_id(0).to(tl.int64)
-        base = row * W
+        i2 = row % D2
+        i1 = (row // D2) % D1
+        i0 = row // (D1 * D2)
+        x_row = i0 * SX0 + i1 * SX1 + i2 * SX2
+        y_row = i0 * SY0 + i1 * SY1 + i2 * SY2
+        m_row = i0 * SM0 + i1 * SM1 + i2 * SM2
         offs = tl.arange(0, BLOCK_W)
         if MASK_KIND == 1:
-            limit = tl.minimum(tl.maximum(tl.load(len_ptr + row), 0), W)
+            n = tl.load(len_ptr + i0 * SL0 + i1 * SL1 + i2 * SL2).to(tl.int64)
+            limit = tl.minimum(tl.maximum(n, 0), W)
         else:
             limit = W
 
@@ -142,10 +162,10 @@ if HAVE_TRITON:
             cols = start + offs
             keep = cols < limit
             if MASK_KIND == 2:
-                keep = keep & (tl.load(mask_ptr + base + cols, mask=cols < W, other=0) != 0)
-            x = tl.load(x_ptr + base + cols, mask=keep, other=0.0)
+                keep = keep & (tl.load(mask_ptr + m_row + cols * SMW, mask=cols < W, other=0) != 0)
+            x = tl.load(x_ptr + x_row + cols * SXW, mask=keep, other=0.0)
             if OP == 2:
-                y = tl.load(y_ptr + base + cols, mask=keep, other=0.0)
+                y = tl.load(y_ptr + y_row + cols * SYW, mask=keep, other=0.0)
                 acc += x * y
             elif OP == 1 or OP == 4:
                 acc += x * x
@@ -167,9 +187,9 @@ if HAVE_TRITON:
                 keep = cols < limit
                 if MASK_KIND == 2:
                     keep = keep & (
-                        tl.load(mask_ptr + base + cols, mask=cols < W, other=0) != 0
+                        tl.load(mask_ptr + m_row + cols * SMW, mask=cols < W, other=0) != 0
                     )
-                x = tl.load(x_ptr + base + cols, mask=keep, other=0.0)
+                x = tl.load(x_ptr + x_row + cols * SXW, mask=keep, other=0.0)
                 d = tl.where(keep, x - mean, 0.0)
                 acc += d * d
             total = _sqrt(_div(tl.sum(acc, axis=0), n, IS_FP64), IS_FP64)
@@ -236,9 +256,33 @@ def _aligned_contiguous(t: Tensor) -> Tensor:
     return t
 
 
-def _prepare(
-    x: Tensor, y: Tensor | None, lengths: Tensor | None, mask: Tensor | None
-) -> tuple[Tensor, Tensor | None, Tensor | None, Tensor | None, int]:
+def _collapsed_layout(shape: tuple[int, ...], operands: list[tuple[int, ...]]
+                      ) -> tuple[tuple[int, ...], list[tuple[int, ...]]] | None:
+    """``shape`` (the leading dimensions) and each operand's strides over it, with adjacent
+    dimensions merged where every operand allows, padded at the front to three; ``None`` when
+    more than three remain."""
+    dims = [(size, [st[i] for st in operands]) for i, size in enumerate(shape) if size != 1]
+    merged: list[tuple[int, list[int]]] = []
+    for size, strides in dims:
+        if merged:
+            prev_size, prev = merged[-1]
+            if all(p == st * size for p, st in zip(prev, strides, strict=True)):
+                merged[-1] = (prev_size * size, strides)
+                continue
+        merged.append((size, strides))
+    if len(merged) > 3:
+        return None
+    merged = [(1, [0] * len(operands))] * (3 - len(merged)) + merged
+    return (tuple(m[0] for m in merged),
+            [tuple(m[1][k] for m in merged) for k in range(len(operands))])
+
+
+def _aligned(t: Tensor) -> bool:
+    return t.numel() == 0 or t.data_ptr() % _ALIGN_BYTES == 0
+
+
+def _check(x: Tensor, y: Tensor | None, lengths: Tensor | None, mask: Tensor | None) -> None:
+    """Refuse operands the primitives do not take; nothing is copied."""
     if x.dtype not in SUPPORTED_DTYPES:
         raise TypeError(f"row reductions take float32 or float64, not {x.dtype}")
     if x.dim() < 1:
@@ -251,9 +295,6 @@ def _prepare(
             )
     if lengths is not None and mask is not None:
         raise ValueError("pass at most one of lengths and mask")
-    width = x.shape[-1]
-    rows = x.reshape(-1, width)
-    other = y.reshape(-1, width) if y is not None else None
     if lengths is not None:
         if lengths.shape != x.shape[:-1]:
             raise ValueError(
@@ -261,12 +302,24 @@ def _prepare(
             )
         if lengths.dtype.is_floating_point or lengths.dtype == torch.bool:
             raise TypeError(f"lengths must be an integer tensor, not {lengths.dtype}")
-        lengths = lengths.reshape(-1).to(device=x.device, dtype=torch.int64)
     if mask is not None:
         if mask.shape != x.shape:
             raise ValueError(f"mask must have shape {tuple(x.shape)}, not {tuple(mask.shape)}")
         if mask.dtype != torch.bool:
             raise TypeError(f"mask must be boolean, not {mask.dtype}")
+
+
+def _prepare(
+    x: Tensor, y: Tensor | None, lengths: Tensor | None, mask: Tensor | None
+) -> tuple[Tensor, Tensor | None, Tensor | None, Tensor | None, int]:
+    """The operands as ``[rows, W]`` (copied where a view cannot be), after :func:`_check`."""
+    _check(x, y, lengths, mask)
+    width = x.shape[-1]
+    rows = x.reshape(-1, width)
+    other = y.reshape(-1, width) if y is not None else None
+    if lengths is not None:
+        lengths = lengths.reshape(-1).to(device=x.device, dtype=torch.int64)
+    if mask is not None:
         mask = mask.reshape(-1, width).to(device=x.device)
     return rows, other, lengths, mask, width
 
@@ -333,6 +386,75 @@ def _torch_reduce(
     return (_tiled_sum(d * d) / n).sqrt()
 
 
+def _triton_strided(
+    op: int, x: Tensor, y: Tensor | None, lengths: Tensor | None, mask: Tensor | None
+) -> Tensor | None:
+    """The reduction launched on the operands as they are laid out (expanded, sliced or
+    transposed views included), or ``None`` when their layout needs the contiguous path:
+    more than three leading dimensions after merging, or an operand not 16-byte aligned."""
+    width = x.shape[-1]
+    lead = tuple(x.shape[:-1])
+    if lengths is not None:
+        lengths = lengths.to(device=x.device)
+        if lengths.dtype not in (torch.int32, torch.int64):
+            lengths = lengths.to(torch.int64)
+    if mask is not None:
+        mask = mask.to(device=x.device).view(torch.int8)
+    operands = [x] + ([y] if y is not None else []) + ([mask] if mask is not None else [])
+    if not all(_aligned(t) for t in operands + ([lengths] if lengths is not None else [])):
+        return None
+    strides = [tuple(t.stride()[:-1]) for t in operands]
+    if lengths is not None:
+        strides.append(tuple(lengths.stride()))
+    layout = _collapsed_layout(lead, strides)
+    if layout is None:
+        return None
+    (_, d1, d2), lead_strides = layout
+    count = 1
+    for size in lead:
+        count *= size
+    out = torch.empty(count, dtype=x.dtype, device=x.device)
+    if count == 0:
+        return out.reshape(lead)
+    if width == 0:
+        return out.zero_().reshape(lead)
+    sx = lead_strides[0] + (x.stride(-1),)
+    k = 1
+    if y is not None:
+        sy, k = lead_strides[k] + (y.stride(-1),), k + 1
+    else:
+        sy = sx
+    if mask is not None:
+        sm, k = lead_strides[k] + (mask.stride(-1),), k + 1
+        kind = _MASK_BOOL
+    else:
+        sm = (0, 0, 0, 0)
+        kind = _MASK_LENGTHS if lengths is not None else _MASK_NONE
+    sl = lead_strides[k] if lengths is not None else (0, 0, 0)
+    with torch.cuda.device(x.device):
+        _row_reduce_kernel[(count,)](
+            x,
+            y if y is not None else x,
+            lengths if lengths is not None else x,
+            mask if mask is not None else x,
+            out,
+            width,
+            d1,
+            d2,
+            *sx,
+            *sy,
+            *sl,
+            *sm,
+            OP=op,
+            MASK_KIND=kind,
+            BLOCK_W=BLOCK,
+            IS_FP64=x.dtype == torch.float64,
+            num_warps=NUM_WARPS,
+            num_stages=NUM_STAGES,
+        )
+    return out.reshape(lead)
+
+
 def _triton_reduce(
     op: int,
     rows: Tensor,
@@ -363,6 +485,12 @@ def _triton_reduce(
             mask_arg,
             out,
             width,
+            1,
+            1,
+            width, 0, 0, 1,
+            width, 0, 0, 1,
+            1, 0, 0,
+            width, 0, 0, 1,
             OP=op,
             MASK_KIND=kind,
             BLOCK_W=BLOCK,
@@ -381,7 +509,6 @@ def _reduce(
     mask: Tensor | None,
     backend: Backend,
 ) -> Tensor:
-    rows, other, lengths, mask, width = _prepare(x, y, lengths, mask)
     use_triton = backend == "triton" or (
         backend == "auto" and x.is_cuda and HAVE_TRITON
     )
@@ -390,6 +517,12 @@ def _reduce(
             raise RuntimeError("backend='triton' needs triton importable")
         if not x.is_cuda:
             raise RuntimeError("backend='triton' needs a CUDA tensor")
+        _check(x, y, lengths, mask)
+        strided = _triton_strided(op, x, y, lengths, mask)
+        if strided is not None:
+            return strided
+    rows, other, lengths, mask, width = _prepare(x, y, lengths, mask)
+    if use_triton:
         out = _triton_reduce(op, rows, other, lengths, mask, width)
     elif backend in ("auto", "torch"):
         out = _torch_reduce(op, rows, other, lengths, mask)

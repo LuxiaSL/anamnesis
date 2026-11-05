@@ -385,3 +385,66 @@ def test_gpu_one_launch_per_batch_and_speed():
     )
     assert batched < separate / 10
 
+
+
+def test_collapsed_layout_merges_what_every_operand_allows():
+    collapse = invariant_ops._collapsed_layout
+    # [4, 5, 6] contiguous over a width of 7, and the same shape broadcast along the middle.
+    assert collapse((4, 5, 6), [(210, 42, 7)]) == ((1, 1, 120), [(0, 0, 7)])
+    assert collapse((4, 5, 6), [(210, 42, 7), (6, 0, 1)]) == ((4, 5, 6), [(210, 42, 7), (6, 0, 1)])
+    # Unit dimensions drop out; fewer than three dimensions pad at the front.
+    assert collapse((3, 1, 2), [(2, 99, 1)]) == ((1, 1, 6), [(0, 0, 1)])
+    assert collapse((), []) == ((1, 1, 1), [])
+    # Four dimensions that no operand lets merge.
+    assert collapse((2, 3, 4, 5), [(1, 2, 6, 24)]) is None
+
+
+def _layouts(x: torch.Tensor, gen: torch.Generator) -> list[tuple[str, torch.Tensor]]:
+    """``x [8, 6, W]`` read through other layouts that hold the same values: a transposed copy
+    read back as a view, a slice of a wider buffer, and a broadcast of one row."""
+    wide = torch.randn(8, 6, x.shape[-1] + 16, generator=gen, dtype=torch.float64).to(x.dtype).to(x.device)
+    wide[:, :, :x.shape[-1]] = x
+    return [("transposed", x.transpose(0, 1).contiguous().transpose(0, 1)),
+            ("sliced", wide[:, :, :x.shape[-1]]),
+            ("broadcast", x[:, :1].expand(8, 6, x.shape[-1]))]
+
+
+@needs_gpu
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64], ids=["fp32", "fp64"])
+@pytest.mark.parametrize("width", WIDTHS)
+@pytest.mark.parametrize("kind", MASK_KINDS)
+def test_gpu_strided_operands_give_the_contiguous_bytes(dtype, width, kind):
+    """Every primitive reads an operand through its strides; a row's bytes are those of the
+    same values laid out contiguously, for each mask kind, including lengths and masks that are
+    themselves broadcast views."""
+    gen = torch.Generator().manual_seed(width + 7)
+    x = torch.randn(8, 6, width, generator=gen, dtype=torch.float64).to(dtype).cuda()
+    y = torch.randn(8, 6, width, generator=gen, dtype=torch.float64).to(dtype).cuda()
+    lengths = torch.randint(0, width + 1, (8, 1), generator=gen).cuda().expand(8, 6)
+    mask = (torch.rand(1, 6, width, generator=gen) < 0.7).cuda().expand(8, 6, width)
+    for name, view in _layouts(x, gen):
+        for prim_name, prim in PRIMITIVES.items():
+            kw = {"lengths": lengths} if kind == "lengths" else {"mask": mask} if kind == "mask" else {}
+            args = (view, y) if prim_name == "row_dot" else (view,)
+            plain = (view.contiguous(), y) if prim_name == "row_dot" else (view.contiguous(),)
+            plain_kw = {k: v.contiguous() for k, v in kw.items()}
+            got = prim(*args, **kw).cpu().numpy().tobytes()
+            want = prim(*plain, **plain_kw).cpu().numpy().tobytes()
+            assert got == want, (name, prim_name, kind)
+
+
+@needs_gpu
+def test_gpu_broadcast_operands_launch_only_the_reduction():
+    """A dot product of a broadcast row with a broadcast basis under broadcast lengths is one
+    kernel launch: nothing is copied to lay the operands out."""
+    frames = torch.randn(16, 9, 1, 64, dtype=torch.float64, device="cuda")
+    basis = torch.randn(33, 64, dtype=torch.float64, device="cuda")
+    shape = (16, 9, 33, 64)
+    lengths = torch.randint(0, 65, (16, 1, 1), device="cuda").expand(16, 9, 33)
+    row_dot(frames.expand(shape), basis.expand(shape), lengths=lengths)
+    torch.cuda.synchronize()
+    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+        row_dot(frames.expand(shape), basis.expand(shape), lengths=lengths)
+        torch.cuda.synchronize()
+    kernels = [e.name for e in prof.events() if e.device_type == torch.autograd.DeviceType.CUDA]
+    assert len(kernels) == 1 and "_row_reduce_kernel" in kernels[0], kernels
