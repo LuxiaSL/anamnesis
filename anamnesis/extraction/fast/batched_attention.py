@@ -51,11 +51,13 @@ from anamnesis.extraction.fast.batched_stats import (
     WORKING_BYTES,
     Counts,
     _Columns,
+    check_counts,
     _operator_names,
     _temporal_many,
     host_tensor,
     canonical_size,
     per_row_index,
+    start_tensor,
     take_steps,
     uniform_counts,
     window_steps,
@@ -75,13 +77,14 @@ class AttentionFeatures:
     ``[B, K]``; each row's normalised Laplacian ``[B, K, K]``, zero-padded past its own size,
     which the smoothness feature reads; and how many spectral steps each row has) and
     ``per_head[layer]`` (each row's per-head entropy and sink, ``[B, steps, heads]``, which
-    the per-head family reads); and ``retained_bytes``, the bytes of those summaries, per row."""
+    the per-head family reads); and ``retained_bytes``, the bytes of those summaries, per row (a
+    list, or a long tensor ``[B]`` when the counts are device-only)."""
 
     names: tuple[str, ...]
     values: Tensor
     laplacians: dict[int, tuple[Tensor | list[int], Tensor, Counts]]
     per_head: dict[int, tuple[Tensor, Tensor]]
-    retained_bytes: list[int]
+    retained_bytes: list[int] | Tensor
 
 
 def _masked_slope(y: Tensor, x: Tensor, mask: Tensor) -> Tensor:
@@ -141,7 +144,10 @@ def eigvalsh_sized(lap: Tensor, k: Counts) -> Tensor:
         return eigvalsh_rows(lap)
     out = lap.new_zeros(lap.shape[:2])
     by_size: dict[int, list[int]] = {}
-    for r, n in enumerate(k.host):
+    # The solver checks its status on the host, so it is a cut in a captured reduction; it reads
+    # device-only sizes there.
+    sizes = k.dev.tolist() if k.is_device_only else k.host
+    for r, n in enumerate(sizes):
         by_size.setdefault(n, []).append(r)
     for n, members in sorted(by_size.items()):
         index = host_tensor(members, torch.long, lap.device)
@@ -174,7 +180,7 @@ def _entropy_features(cols: _Columns, head_entropy: Tensor, mixture: Tensor,
         index, picked = _strided(counts, "entropy-sample",
                                  lambda n: max(1, n // 60) if n > 60 else 1)
         sample = take_steps(ent, index)
-        flat_counts = picked.derive([c * heads for c in picked.host], picked.dev * heads)
+        flat_counts = picked.derive(picked.dev * heads, lambda c: c * heads)
     flat = sample.permute(0, 2, 1, 3).reshape(batch, layers, -1).contiguous()  # [B, L, t' * H]
     lengths = flat_counts.lengths(flat) if flat_counts is not None else None
     ent_mean, ent_std = row_mean(flat, lengths=lengths), row_std(flat, lengths=lengths)
@@ -369,22 +375,19 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
     else:
         n = counts.dev
         quarter = torch.where(n >= 4, n // 4, n.new_zeros(()))
-        quarters = [q // 4 if q >= 4 else 0 for q in counts.host]
         for i in range(4):
-            sizes = [(q if i < 3 else c - 3 * q) if c >= 4 else c
-                     for q, c in zip(quarters, counts.host, strict=True)]
+            def size_of(c: int, i: int = i) -> int:
+                return (c // 4 if i < 3 else c - 3 * (c // 4)) if c >= 4 else c
             size_dev = torch.where(n >= 4, quarter if i < 3 else n - 3 * quarter, n)
-            canonical = canonical_size(("quarter", i == 3), t,
-                                       lambda c: (c // 4 if i < 3 else c - 3 * (c // 4))
-                                       if c >= 4 else c)
+            canonical = canonical_size(("quarter", i == 3), t, size_of)
             series = window_steps(rec, quarter * i, canonical)
             out[f"cache_recency_traj{i}"] = row_mean(
-                series, lengths=counts.derive(sizes, size_dev).lengths(series))
+                series, lengths=counts.derive(size_dev, size_of).lengths(series))
 
     stride = lane.config.spectral_subsample_step
     if not ragged:
         steps: Tensor | list[int] = _spectral_steps(t, stride)
-        k_counts = counts.derive([len(steps)] * rows, torch.full_like(counts.dev, len(steps)))
+        k_counts = counts.derive(torch.full_like(counts.dev, len(steps)), lambda c: len(steps))
     else:
         steps, k_counts = per_row_index(counts, ("spectral", stride),
                                         lambda n: _spectral_steps(n, stride))
@@ -411,7 +414,7 @@ def _sampled_chunk(lane: GpuFeatureLane, mean_rows: Tensor, head_prompt: Tensor,
                                  normalized.new_zeros(()))
 
     if counts.reach >= 2:
-        if counts.lo < 2:
+        if counts.refuses_below(2):
             raise ExternalCaptureError("rows below two steps share a batch with longer rows")
         sys = prompt / total
         out[FLOW + "prompt_mass_mean"] = row_mean(sys, lengths=live)
@@ -445,16 +448,30 @@ def _check(name: str, x: Tensor, shape: Sequence[int | None]) -> None:
         raise ExternalCaptureError(f"{name} must be floating point")
 
 
+def mean_rows_cover(width: int, starts: Sequence[int] | Tensor, counts: Counts) -> bool:
+    """Whether head-mean rows of ``width`` columns cover every row's span (each start at least
+    one, and the start plus the count within the width); device starts were checked before, and
+    device-only counts with them."""
+    if isinstance(starts, Tensor):
+        return True
+    if any(int(s) < 1 for s in starts):
+        return False
+    if counts.is_device_only:
+        return True
+    return all(width >= int(s) + n for s, n in zip(starts, counts.host, strict=True))
+
+
 def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tensor,
                        head_scalars: Tensor, mean_rows: Tensor,
-                       starts: Sequence[int], counts: Counts | None = None) -> AttentionFeatures:
+                       starts: Sequence[int] | Tensor, counts: Counts | None = None
+                       ) -> AttentionFeatures:
     """The attention family of ``B`` rows.
 
     The tensors are the engine's statistics surfaces, stacked: ``head_entropy [B, steps,
     layers, heads]``, ``mean_entropy [B, steps, layers]``, ``head_scalars [B, steps, sampled,
     3, heads]`` (prompt mass, recency mass, sink) and ``mean_rows [B, steps, sampled, W]``,
     with ``W`` at least each row's span end less one; ``starts[b]`` is row ``b``'s prompt
-    length and ``counts`` each row's own step count (default: every row fills ``steps``), the
+    length (host values, or a device tensor checked before) and ``counts`` each row's own step count (default: every row fills ``steps``), the
     rest of its steps being padding. Each is read in float32, as the per-row reduction reads
     it.
 
@@ -482,10 +499,9 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
     _check("mean_rows", mean_rows, (batch, t, len(sampled), None))
     device = lane.device
     counts = counts if counts is not None else uniform_counts(batch, t, device)
-    if len(counts.host) != batch or counts.hi > t or counts.lo < 1:
-        raise ExternalCaptureError(f"step counts {counts.host} for {batch} rows of {t} steps")
+    check_counts(counts, batch, t)
     width = mean_rows.shape[3]
-    if any(int(s) < 1 or width < int(s) + n for s, n in zip(starts, counts.host, strict=True)):
+    if not mean_rows_cover(width, starts, counts):
         raise ExternalCaptureError(f"mean_rows of width {width} do not cover every row's span")
     head_entropy = head_entropy.to(device).float()
     mixture = mixture.to(device).float()
@@ -493,14 +509,15 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
     cols = _Columns()
     _entropy_features(cols, head_entropy, mixture, counts, mode)
 
-    start_t = host_tensor([int(s) for s in starts], torch.long, device)
+    start_t = start_tensor(starts, device)
     lengths = start_t[:, None] + torch.arange(1, t + 1, device=device)[None, :]  # [B, t]
     log_length = lengths.clamp_min(2).double().log()[:, :, None]
     per_layer = max(1, batch * t * (width + 1) * 8 * 6)
     chunk = max(1, min(len(sampled), WORKING_BYTES // per_layer))
     laplacians: dict[int, tuple[Tensor | list[int], Tensor, Counts]] = {}
     per_head: dict[int, tuple[Tensor, Tensor]] = {}
-    retained = [0] * batch
+    retained: list[int] | Tensor = (counts.dev.new_zeros(batch) if counts.is_device_only
+                                    else [0] * batch)
     pending: list[_PendingSpectral] = []
     slots: list[tuple[int, str, int, int, int]] = []  # (chunk, feature, layer in chunk, layers, column)
     for first in range(0, len(sampled), chunk):
@@ -520,8 +537,6 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
         normalized = normalized.reshape(batch, n, *normalized.shape[1:])
         if isinstance(steps, Tensor):
             steps = steps.reshape(batch, n, -1)
-        sizes = k_counts.host
-        size_dev = k_counts.dev.reshape(batch, n)
         for i, j in enumerate(js):
             layer = sampled[j]
             for name, value in series.items():
@@ -534,14 +549,17 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
                     slots.append((len(pending) - 1, key, i, n, cols.reserve(name)))
                 else:
                     cols.put(name, value.reshape(batch, n)[:, i])
-            layer_k = k_counts.derive(sizes[i::n], size_dev[:, i])
+            layer_k = k_counts.every(i, n)
             laplacians[layer] = (steps[:, i] if isinstance(steps, Tensor) else steps,
                                  normalized[:, i], layer_k)
             per_ent = head_entropy[:, :, layer].double() / log_length
             per_sink = head_scalars[:, :, j, 2].double()
             per_head[layer] = (per_ent, per_sink)
-            for b in range(batch):
-                retained[b] += (layer_k.host[b] ** 2 + 2 * counts.host[b] * heads) * 8
+            if isinstance(retained, Tensor):
+                retained += (layer_k.dev * layer_k.dev + 2 * heads * counts.dev) * 8
+            else:
+                for b in range(batch):
+                    retained[b] += (layer_k.host[b] ** 2 + 2 * counts.host[b] * heads) * 8
         if counts.reach < 2:
             from anamnesis.extraction.feature_families.attention_flow import _attention_flow_names
 

@@ -66,6 +66,7 @@ from anamnesis.extraction.fast.batched_stats import (
     TOPK_TIES,
     WORKING_BYTES,
     Counts,
+    check_counts,
     _Columns,
     _cos,
     _operator_names,
@@ -192,12 +193,11 @@ def _halves(x: Tensor, counts: Counts) -> tuple[Tensor, Counts, Tensor, Counts]:
     steps = x.shape[1]
     if counts.uniform(steps):
         mid = steps // 2
-        return (x[:, :mid], counts.derive([mid] * len(counts.host), counts.dev // 2),
-                x[:, mid:], counts.derive([steps - mid] * len(counts.host), counts.dev - counts.dev // 2))
+        return (x[:, :mid], counts.derive(counts.dev // 2, lambda n: n // 2),
+                x[:, mid:], counts.derive(counts.dev - counts.dev // 2, lambda n: n - n // 2))
     mid = counts.dev // 2
-    first = counts.derive([n // 2 for n in counts.host], mid, steps)
-    second = counts.derive([n - n // 2 for n in counts.host], counts.dev - mid,
-                           max(1, steps - steps // 2))
+    first = counts.derive(mid, lambda n: n // 2, steps)
+    second = counts.derive(counts.dev - mid, lambda n: n - n // 2, max(1, steps - steps // 2))
     return x, first, window_steps(x, mid, max(1, steps - steps // 2)), second
 
 
@@ -241,15 +241,14 @@ def _gram(x: Tensor, counts: Counts | None = None) -> Tensor:
     batch, m, n = x.shape
     lengths = None
     if counts is not None and not counts.uniform(n):
-        if batch != len(counts.host):
-            raise ValueError(f"{len(counts.host)} counts for a batch of {batch} rows")
+        if batch != counts.rows:
+            raise ValueError(f"{counts.rows} counts for a batch of {batch} rows")
         lengths = counts.dev
     return row_gram(x, lengths=lengths, chunk_bytes=WORKING_BYTES)
 
 
 def _square_counts(counts: Counts) -> Counts:
-    return counts.memo("square", lambda: counts.derive([c * c for c in counts.host],
-                                                       counts.dev * counts.dev))
+    return counts.memo("square", lambda: counts.derive(counts.dev * counts.dev, lambda c: c * c))
 
 
 def _front_square(gram: Tensor, counts: Counts) -> Tensor:
@@ -281,9 +280,21 @@ def _eff_dims(x: Tensor, counts: Counts | None = None) -> Tensor:
         return torch.where(total > 1e-12, total.square() / fourth.clamp_min(1e-30) / min(m, n),
                            total.new_zeros(()))
     flat = x.reshape(batch, m * n)
-    total = row_sumsq(flat, lengths=counts.derive([c * n for c in counts.host],
-                                                  counts.dev * n).lengths(flat))
-    fourth = total.new_zeros(batch)
+    total = row_sumsq(flat, lengths=counts.derive(counts.dev * n, lambda c: c * n).lengths(flat))
+    if counts.is_device_only:
+        fourth = _fourth_masked(x, counts)
+    else:
+        fourth = _fourth_split(x, counts)
+    smaller = torch.minimum(counts.dev, torch.full_like(counts.dev, n)).double()
+    return torch.where(total > 1e-12, total.square() / fourth.clamp_min(1e-30) / smaller,
+                       total.new_zeros(()))
+
+
+def _fourth_split(x: Tensor, counts: Counts) -> Tensor:
+    """``|G|_F**2`` of each row's smaller Gram matrix, the rows split on the host by which one
+    it is (:func:`_gram_split`)."""
+    batch, m, n = x.shape
+    fourth = x.new_zeros(batch, dtype=torch.float64)
     for columns, (index, sub) in zip((True, False), _gram_split(counts, n), strict=True):
         if index is None:
             continue
@@ -294,9 +305,25 @@ def _eff_dims(x: Tensor, counts: Counts | None = None) -> Tensor:
         else:  # the Gram matrix over the row's own steps
             front = _front_square(_gram(part), sub)
             fourth[index] = row_sumsq(front, lengths=_square_counts(sub).lengths(front))
-    smaller = torch.minimum(counts.dev, torch.full_like(counts.dev, n)).double()
-    return torch.where(total > 1e-12, total.square() / fourth.clamp_min(1e-30) / smaller,
-                       total.new_zeros(()))
+    return fourth
+
+
+def _fourth_masked(x: Tensor, counts: Counts) -> Tensor:
+    """:func:`_fourth_split` without reading a count on the host: each Gram matrix the bucket
+    may need is formed for every row, and each row keeps its own. The Gram reductions are
+    batchmate-invariant, so a row's value is the bytes it has among the rows of its split."""
+    batch, m, n = x.shape
+    over_columns = None if counts.width is not None and counts.width < n else row_sumsq(
+        _gram(x.transpose(1, 2).contiguous(), counts).reshape(batch, -1))
+    over_steps = None
+    if counts.below(n):
+        front = _front_square(_gram(x), counts)
+        over_steps = row_sumsq(front, lengths=_square_counts(counts).lengths(front))
+    if over_columns is None:
+        return over_steps
+    if over_steps is None:
+        return over_columns
+    return torch.where(counts.dev >= n, over_columns, over_steps)
 
 
 def _gram_split(counts: Counts, n: int):
@@ -310,8 +337,8 @@ def _gram_split(counts: Counts, n: int):
                 out.append((None, None))
                 continue
             index = host_tensor(members, torch.long, counts.dev.device)
-            out.append((index, counts.derive([counts.host[b] for b in members],
-                                             counts.dev.index_select(0, index))))
+            out.append((index, Counts([counts.host[b] for b in members],
+                                      counts.dev.index_select(0, index), None, counts.padded)))
         return tuple(out)
     return counts.memo(("gram-split", int(n)), build)
 
@@ -364,9 +391,8 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
     if missing:
         raise ExternalCaptureError(f"no per-head summaries for sampled layers {missing}")
     counts = counts if counts is not None else uniform_counts(batch, steps, device)
-    if len(counts.host) != batch or counts.hi > steps or counts.lo < 1:
-        raise ExternalCaptureError(f"step counts {counts.host} for {batch} rows of {steps} steps")
-    if counts.lo < 2 <= counts.hi:
+    check_counts(counts, batch, steps)
+    if not counts.is_device_only and counts.lo < 2 <= counts.hi:
         raise ExternalCaptureError("rows below two steps share a batch with longer rows")
     short = counts.reach < 2  # placeholders below two steps (and, below four, per head)
     n_windows, include_stft = families.temporal_n_windows, families.enable_stft
@@ -458,7 +484,7 @@ def kvqg_features(lane: GpuFeatureLane, keys: Tensor, values: Tensor, queries: T
             spread_h = _time_mean(1 - sims, counts)  # [B, kv heads]
             cols.put(prefix + "_kv_key_spread_head_mean", row_mean(spread_h))
             cols.put(prefix + "_kv_key_spread_head_std", row_std(spread_h))
-            if counts.lo < 4:  # rows below four steps take the placeholders
+            if counts.below(4):  # rows below four steps take the placeholders
                 cols.where_since(head_start, counts.dev < 4)
 
         # Values: FamilyReducer.value.
@@ -609,10 +635,9 @@ def _epoch_counts(counts: Counts, window: int, stride: int) -> Counts:
     """Each row's epoch boundaries: one fewer than its ``(n - window) // stride + 1`` epochs
     (zero for a row without epochs)."""
     def build() -> Counts:
-        host = [max(0, (c - window) // stride) if c >= window else 0 for c in counts.host]
         dev = torch.where(counts.dev >= window, (counts.dev - window) // stride,
                           counts.dev.new_zeros(()))
-        return counts.derive(host, dev)
+        return counts.derive(dev, lambda c: max(0, (c - window) // stride) if c >= window else 0)
     return counts.memo(("epoch-edges", window, stride), build)
 
 
@@ -702,7 +727,7 @@ def _summaries(ts: Tensor, counts: Counts | None = None) -> Tensor:
         return torch.stack([row_mean(ts), row_std(ts),
                             (row_mean(ts[:, :h].contiguous())
                              - row_mean(ts[:, h:].contiguous())).abs()], dim=1)
-    if counts.lo < 2:
+    if counts.refuses_below(2):
         raise ExternalCaptureError("rows below two steps share a batch with longer rows")
     lengths = counts.lengths(ts)
     a, ca, b, cb = _halves(ts, counts)
@@ -721,7 +746,7 @@ def _front_blocks(series: Sequence[Tensor], counts: Counts) -> tuple[Tensor, Cou
     ``counts`` of each, in order, at the front of ``[B, len(series) * steps]``."""
     joined = torch.cat(list(series), dim=1)
     blocks, steps = len(series), series[0].shape[1]
-    total = counts.derive([blocks * c for c in counts.host], counts.dev * blocks)
+    total = counts.derive(counts.dev * blocks, lambda c: blocks * c)
     if counts.uniform(steps):
         return joined, total
 
