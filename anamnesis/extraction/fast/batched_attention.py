@@ -136,24 +136,51 @@ def eigvalsh_rows(lap: Tensor) -> Tensor:
     return torch.linalg.eigvalsh(torch.cat([lap, pad]))[: lap.shape[0]]
 
 
-def eigvalsh_sized(lap: Tensor, k: Counts) -> Tensor:
-    """The ascending eigenvalues of each row's leading ``k x k`` block of ``lap [R, K, K]``,
-    zero-padded to ``[R, K]``: rows of one size are solved together by :func:`eigvalsh_rows`."""
-    size = lap.shape[-1]
-    if k.uniform(size):
-        return eigvalsh_rows(lap)
+def _eigvalsh_by_size(lap: Tensor, sizes: Sequence[int]) -> Tensor:
+    """:func:`eigvalsh_sized` given each row's size on the host."""
     out = lap.new_zeros(lap.shape[:2])
     by_size: dict[int, list[int]] = {}
-    # The solver checks its status on the host, so it is a cut in a captured reduction; it reads
-    # device-only sizes there.
-    sizes = k.dev.tolist() if k.is_device_only else k.host
     for r, n in enumerate(sizes):
-        by_size.setdefault(n, []).append(r)
+        by_size.setdefault(int(n), []).append(r)
     for n, members in sorted(by_size.items()):
         index = host_tensor(members, torch.long, lap.device)
         block = lap.index_select(0, index)[:, :n, :n].contiguous()
         out[index, :n] = eigvalsh_rows(block)
     return out
+
+
+@torch.library.custom_op("anamnesis::eigvalsh_sized", mutates_args=())
+def eigvalsh_sized_op(lap: Tensor, sizes: Tensor) -> Tensor:
+    """:func:`eigvalsh_sized` for device-only sizes ``sizes [R]``, as one operator.
+
+    The solver checks its status on the host, so a captured reduction cuts its graph around it.
+    As one operator, the size grouping, the reads of the sizes and every per-size solve sit
+    inside that one cut: a capture records two graph segments with this operator run eagerly
+    between them, on the first segment's outputs, at every replay. Eagerly it is the same
+    function, so the bytes are the host path's."""
+    return _eigvalsh_by_size(lap, sizes.tolist())
+
+
+@eigvalsh_sized_op.register_fake
+def _(lap: Tensor, sizes: Tensor) -> Tensor:
+    return lap.new_empty(lap.shape[:2])
+
+
+EIGVALSH_SIZED_OP = torch.ops.anamnesis.eigvalsh_sized.default
+"""The operator a graph capture cuts around (with the dense solvers)."""
+
+
+def eigvalsh_sized(lap: Tensor, k: Counts) -> Tensor:
+    """The ascending eigenvalues of each row's leading ``k x k`` block of ``lap [R, K, K]``,
+    zero-padded to ``[R, K]``: rows of one size are solved together by :func:`eigvalsh_rows`.
+    Device-only counts go through :func:`eigvalsh_sized_op`, the one operator a captured
+    reduction cuts around."""
+    size = lap.shape[-1]
+    if k.uniform(size):
+        return eigvalsh_rows(lap)
+    if k.is_device_only:
+        return EIGVALSH_SIZED_OP(lap, k.dev)
+    return _eigvalsh_by_size(lap, k.host)
 
 
 def _spectral_steps(steps: int, stride: int) -> list[int]:
@@ -591,4 +618,5 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
     return AttentionFeatures(tuple(cols.names), values, laplacians, per_head, retained)
 
 
-__all__ = ("AttentionFeatures", "attention_features", "eigvalsh_rows", "eigvalsh_sized")
+__all__ = ("EIGVALSH_SIZED_OP", "AttentionFeatures", "attention_features", "eigvalsh_rows", "eigvalsh_sized",
+           "eigvalsh_sized_op")

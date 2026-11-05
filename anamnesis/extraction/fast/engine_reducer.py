@@ -418,11 +418,73 @@ def _check_signed_row(lane: GpuFeatureLane, row: Any, token_ids: Sequence[int]) 
     return RowSpan(start=start, end=len(seq), token_ids=seq)
 
 
+@dataclass
+class FamilyCore:
+    """What a batch's families compute on the device, before the host finishes its rows: the feature ``names`` (a
+    function of the lane, the bucket and the routing plan) and ``values [B, names]``, each row's mean log probability,
+    its kNN-LM state (when the lane reads one), the routing family's names and values, and the retained attention
+    summary bytes per row. A captured graph rewrites these tensors at every replay."""
+
+    names: tuple[str, ...]
+    values: torch.Tensor
+    logprob: torch.Tensor
+    knnlm: torch.Tensor | None
+    routing_names: tuple[str, ...]
+    routing_values: torch.Tensor
+    retained: Any
+
+    def tensors(self) -> list[torch.Tensor]:
+        out = [self.values, self.logprob, self.routing_values]
+        if self.knnlm is not None:
+            out.append(self.knnlm)
+        if isinstance(self.retained, torch.Tensor):
+            out.append(self.retained)
+        return out
+
+    def rows(self, n: int) -> "FamilyCore":
+        """The first ``n`` rows (a padded batch's own rows, its fillers dropped), copied out of any graph's buffers."""
+        retained = self.retained[:n].clone() if isinstance(self.retained, torch.Tensor) else list(self.retained)[:n]
+        return FamilyCore(self.names, self.values[:n].clone(), self.logprob[:n].clone(),
+                          None if self.knnlm is None else self.knnlm[:n].clone(), self.routing_names,
+                          self.routing_values[:n].clone(), retained)
+
+
+def _families(lane: GpuFeatureLane, stacked: Mapping[str, torch.Tensor], counts: Counts,
+              starts: Sequence[int] | torch.Tensor, committed: Sequence[torch.Tensor], first: Any) -> FamilyCore:
+    """Every batched family of one bucket group, on the device: the part of :func:`_reduce_uniform` a graph captures.
+    ``first`` is the group's first row, read only for its routing plan (shared by the group)."""
+    sampled = list(lane.config.sampled_layers)
+    attention = attention_features(lane, stacked["head_entropy"], stacked[_mixture_name(lane)],
+                                   stacked["head_scalars"], stacked["mean_rows"],
+                                   starts, counts, head_spread=stacked.get("head_spread")
+                                   if _sampled_extra(lane) else None)
+    blocks = block_output_features(lane, stacked["depth"], starts, attention.laplacians, counts)
+    kvqg = kvqg_features(lane, stacked["k"], stacked["v"], stacked["q"], stacked["gate"],
+                         attention.per_head, counts)
+    outputs, logprob = outputs_features(lane, stacked["logit_stats"], counts)
+    routing_names, routing_values = routing_features(sampled, _batched_points(stacked, first), committed, counts)
+    depth = stacked["depth"]
+    steps = int(depth.shape[1])
+    knnlm = None
+    if lane.config.enable_knnlm_baseline:
+        final = depth[:, :, depth.shape[2] - 1]  # [B, steps, hidden]: the last layer
+        knnlm = (final[:, steps - 1] if counts.uniform(steps)
+                 else take_steps(final, (counts.dev - 1)[:, None])[:, 0])
+    return FamilyCore(
+        names=tuple(attention.names + blocks.names + kvqg.names + outputs.names),
+        values=torch.cat([attention.values, blocks.values, kvqg.values, outputs.values], dim=1),
+        logprob=logprob, knnlm=knnlm, routing_names=tuple(routing_names), routing_values=routing_values,
+        retained=attention.retained_bytes)
+
+
 def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[RowSpan],
                     engine: Mapping[str, Any], width: int | None = None,
-                    bucket_rule: str = BUCKET_RULE, lens: LensHead | None = None) -> list[Any]:
+                    bucket_rule: str = BUCKET_RULE, lens: LensHead | None = None,
+                    graphs: Any = None) -> list[Any]:
     """Rows that share a :func:`_shape_key` (padded to ``width``), every family batched; with
-    ``lens``, the lens family after them."""
+    ``lens``, the lens family after them. With ``graphs`` (a
+    :class:`~anamnesis.extraction.fast.graphed_batched.BatchedGraphCache`), a padded bucket's families replay as
+    CUDA graphs under device-only counts; the bytes are the eager reduction's."""
     results: list[Any] = [None] * len(rows)
     stacked, bad = validate_batch(rows, lane.device, width)
     for b in bad:
@@ -446,26 +508,15 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
                  for c in range(len(first.surfaces["committed"]))]
     try:
         family_starts: Sequence[int] | torch.Tensor = starts
-        if host_free:
+        graphed = graphs is not None and padded and lane.device.type == "cuda"
+        if host_free or graphed:
             counts = _device_only(lane, stacked, starts, counts)
             family_starts = start_tensor(starts, lane.device)
-        attention = attention_features(lane, stacked["head_entropy"], stacked[_mixture_name(lane)],
-                                       stacked["head_scalars"], stacked["mean_rows"],
-                                       family_starts, counts, head_spread=stacked.get("head_spread")
-                                       if _sampled_extra(lane) else None)
-        blocks = block_output_features(lane, stacked["depth"], family_starts, attention.laplacians,
-                                       counts)
-        kvqg = kvqg_features(lane, stacked["k"], stacked["v"], stacked["q"], stacked["gate"],
-                             attention.per_head, counts)
-        outputs, logprob = outputs_features(lane, stacked["logit_stats"], counts)
-        routing_names, routing_values = routing_features(
-            sampled, _batched_points(stacked, first), committed, counts)
+        if graphed:
+            core = graphs.reduce(lane, stacked, counts, family_starts, committed, first)
+        else:
+            core = _families(lane, stacked, counts, family_starts, committed, first)
         depth = stacked["depth"]
-        knnlm = None
-        if lane.config.enable_knnlm_baseline:
-            final = depth[:, :, depth.shape[2] - 1]  # [B, steps, hidden]: the last layer
-            knnlm = (final[:, steps - 1] if counts.uniform(steps)
-                     else take_steps(final, (counts.dev - 1)[:, None])[:, 0])
         lensed = None
         if lens is not None:
             chosen = torch.zeros(len(keep), steps, dtype=torch.long)
@@ -479,12 +530,9 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
                                    counts.lengths(step_entropy))
             engine = dict(engine, lens=lens.identity())
         finished = finish_rows(
-            lane, [spans[b] for b in keep], attention.names + blocks.names + kvqg.names
-            + outputs.names,
-            torch.cat([attention.values, blocks.values, kvqg.values, outputs.values], dim=1),
-            logprob, knnlm, engine, num_layers=int(depth.shape[2]),
-            routing_names=tuple(routing_names), routing_values=routing_values,
-            retained_attention_summary_bytes=attention.retained_bytes,
+            lane, [spans[b] for b in keep], core.names, core.values, core.logprob, core.knnlm, engine,
+            num_layers=int(depth.shape[2]), routing_names=core.routing_names,
+            routing_values=core.routing_values, retained_attention_summary_bytes=core.retained,
             bucket_rule=bucket_rule, bucket_width=steps)
         if lensed is not None:
             finished = _with_lens(finished, lensed)
@@ -588,7 +636,8 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                               width: int | None = None,
                               max_group_rows: int | None = None,
                               lens: LensHead | None = None,
-                              fill_uninitialized: bool = False) -> list[Any]:
+                              fill_uninitialized: bool = False,
+                              graphs: Any = None) -> list[Any]:
     """Signed rows of one lane, every family batched across the rows of one step-count
     bucket (:func:`attention_features`, :func:`block_output_features`, :func:`kvqg_features`,
     :func:`outputs_features`, :func:`routing_features`) and assembled by
@@ -628,7 +677,7 @@ def reduce_signed_rows_hybrid(lane: GpuFeatureLane, rows: Sequence[Any],
                 members = group[lo:lo + step]
                 reduced = _reduce_uniform(lane, [rows[i] for i in members],
                                           [spans[i] for i in members], engine, padded_to,
-                                          bucket_rule, lens)
+                                          bucket_rule, lens, graphs)
                 for i, result in zip(members, reduced, strict=True):
                     results[i] = result
     return results
@@ -670,7 +719,7 @@ class EngineReducer:
                  expected_weights: str | None = None, batched: bool = True,
                  buckets: str = BUCKET_RULE, max_group_rows: int | None = None,
                  lens: LensHead | None = None, lens_checkpoint: str | Path | None = None,
-                 fill_uninitialized: bool = False) -> None:
+                 fill_uninitialized: bool = False, graphs: Any = None) -> None:
         if (lane_for is None) == (preset is None):
             raise ValueError("give a preset (with calib_dir) or lane_for, one of the two")
         if buckets not in BUCKET_RULES:
@@ -682,6 +731,9 @@ class EngineReducer:
             raise ValueError(f"max_group_rows must be at least 1, not {max_group_rows}")
         self.max_group_rows = None if max_group_rows is None else int(max_group_rows)
         self.fill_uninitialized = bool(fill_uninitialized)
+        self.graphs = graphs  # a BatchedGraphCache: padded buckets replay as CUDA graphs (changes no byte)
+        if graphs is not None and not batched:
+            raise ValueError("graphs need the batched reduction")
         if lane_for is not None:
             self._lane_for = lane_for
             self.expected_weights = expected_weights
@@ -798,7 +850,7 @@ class EngineReducer:
                 self.lane(width), [rows[i] for i in members],
                 [token_ids[i] for i in members], engine, self.buckets, width,
                 max_group_rows=self.max_group_rows, lens=self.lens,
-                fill_uninitialized=self.fill_uninitialized)
+                fill_uninitialized=self.fill_uninitialized, graphs=self.graphs)
             for i, result in zip(members, reduced, strict=True):
                 results[i] = result
         for i, result in enumerate(results):

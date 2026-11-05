@@ -326,16 +326,17 @@ class _Recording(TorchDispatchMode):
     """An eager run that records the host's reads of device values and the solvers'
     output layouts."""
 
-    def __init__(self, record: _Record):
+    def __init__(self, record: _Record, solvers: frozenset = _SOLVERS):
         super().__init__()
         self.record = record
+        self.solvers = solvers
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         out = func(*args, **kwargs)
         if func is _HOST_READ and args[0].is_cuda:
             self.record.host_reads.append((tuple(args[0].shape), args[0].dtype, out))
-        elif func in _SOLVERS:
+        elif func in self.solvers:
             leaves, spec = tree_flatten(out)
             self.record.solver_outputs.append(
                 (spec, [(tuple(t.shape), tuple(t.stride()), t.dtype) for t in leaves]))
@@ -380,13 +381,14 @@ class _Capturing(TorchDispatchMode):
     """
 
     def __init__(self, tape: _Tape, record: _Record, data: set[int], side: torch.cuda.Stream,
-                 replay_stream: torch.cuda.Stream):
+                 replay_stream: torch.cuda.Stream, solvers: frozenset = _SOLVERS):
         super().__init__()
         self.tape, self.record, self.data = tape, record, data
+        self.solvers = solvers
         self.side, self.replay_stream = side, replay_stream
         self.created: set[int] = set()
         self.reads = 0
-        self.solvers = 0
+        self.solver_count = 0
         self.graph: torch.cuda.CUDAGraph | None = None
 
     def begin(self) -> None:
@@ -428,11 +430,11 @@ class _Capturing(TorchDispatchMode):
                     f"the reduction reads a value derived from the span's data on the host "
                     f"({tuple(args[0].shape)} {args[0].dtype})")
             return value
-        if func in _SOLVERS:
-            if self.solvers >= len(self.record.solver_outputs):
+        if func in self.solvers:
+            if self.solver_count >= len(self.record.solver_outputs):
                 raise GraphCaptureRefused("the capture ran more solvers than the eager run")
-            spec, layouts = self.record.solver_outputs[self.solvers]
-            self.solvers += 1
+            spec, layouts = self.record.solver_outputs[self.solver_count]
+            self.solver_count += 1
             self.end()
             with torch.cuda.stream(self.replay_stream):
                 outputs = [torch.empty_strided(shape, stride, dtype=dtype, device=self.side.device)
@@ -497,7 +499,8 @@ class _HostConstants(TorchFunctionMode):
 
 
 def _record_tape(device: torch.device, side: torch.cuda.Stream, pool, data: set[int],
-                 warm: Callable[[], Any], run: Callable[[], Any]) -> tuple[_Tape, Any]:
+                 warm: Callable[[], Any], run: Callable[[], Any],
+                 solvers: frozenset = _SOLVERS) -> tuple[_Tape, Any]:
     """``warm()`` run eagerly and recorded, then ``run()`` (the same reduction on fresh
     reducers) captured on ``side`` into a tape that replays on the current stream;
     returns the tape and what ``run`` returned. The tape has not been replayed.
@@ -509,11 +512,11 @@ def _record_tape(device: torch.device, side: torch.cuda.Stream, pool, data: set[
     side.wait_stream(replay_stream)
     record = _Record()
     with torch.cuda.stream(side):
-        with _Recording(record):
+        with _Recording(record, solvers):
             warm()
     torch.cuda.synchronize(device)
     tape = _Tape(pool, replay_stream)
-    capturing = _Capturing(tape, record, set(data), side, replay_stream)
+    capturing = _Capturing(tape, record, set(data), side, replay_stream, solvers)
     with torch.cuda.stream(side):
         try:
             with _HostConstants(device, tape.keep), capturing:
@@ -523,7 +526,7 @@ def _record_tape(device: torch.device, side: torch.cuda.Stream, pool, data: set[
         except BaseException:
             capturing.abandon()
             raise
-    if capturing.reads != len(record.host_reads) or capturing.solvers != len(record.solver_outputs):
+    if capturing.reads != len(record.host_reads) or capturing.solver_count != len(record.solver_outputs):
         raise GraphCaptureRefused("the capture and the eager run read the host differently")
     replay_stream.wait_stream(side)
     torch.cuda.synchronize(device)

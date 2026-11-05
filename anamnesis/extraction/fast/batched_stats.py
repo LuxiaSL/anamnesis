@@ -241,6 +241,11 @@ def batched_receipt(device: torch.device | str, bucket_rule: str = BUCKET_RULE) 
                 topk_ties=TOPK_TIES, eigvalsh=eigvalsh_path(device), per_row=list(PER_ROW_EXCEPTIONS))
 
 
+class HostUploadInCapture(RuntimeError):
+    """:func:`host_tensor` called while a CUDA graph is being captured: the upload would replay from a staging buffer
+    nothing holds. Tables a batch needs are built once and cached, outside any capture."""
+
+
 class HostCountsError(RuntimeError):
     """A device-only :class:`Counts`' per-row values were read on the host."""
 
@@ -569,10 +574,12 @@ def host_tensor(values: Any, dtype: torch.dtype, device: torch.device | str) -> 
     """Host data (a list, a tuple) as a tensor on ``device``, without making the host wait for
     the device: on CUDA the data is staged in pinned memory and copied asynchronously, in
     stream order. A plain copy from pageable memory would block until the stream drains."""
-    t = torch.tensor(values, dtype=dtype)
     if torch.device(device).type == "cuda":
-        return t.pin_memory().to(device, non_blocking=True)
-    return t.to(device)
+        if torch.cuda.is_current_stream_capturing():
+            # A captured copy from a pinned buffer nothing keeps would read freed memory at every replay.
+            raise HostUploadInCapture("host data uploaded during a graph capture; build it before the capture")
+        return torch.tensor(values, dtype=dtype).pin_memory().to(device, non_blocking=True)
+    return torch.tensor(values, dtype=dtype).to(device)
 
 
 @lru_cache(maxsize=None)
@@ -1219,6 +1226,7 @@ __all__ = (
     "FAMILIES_SOURCE_SHA256",
     "HYBRID_LANE_PREFIX",
     "HostCountsError",
+    "HostUploadInCapture",
     "INVARIANT_OPS_SOURCE_SHA256",
     "PER_ROW_EXCEPTIONS",
     "RowSpan",
