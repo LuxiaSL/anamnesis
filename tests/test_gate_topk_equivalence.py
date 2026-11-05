@@ -28,9 +28,9 @@ from anamnesis.extraction.fast.ops import FeatureCollector
 
 # The digests the lane identity hashes; every current file canonicalizes to them.
 IDENTITY_SOURCES = {
-    "features.py": "dd59f0cec50c827de5a70d04930c1ba4000d37624c18f0529b97d6c295ff0815",
+    "features.py": "171d38314caab6468103f56723c0d53f2f22f651d2e48a56ccac7efe21e40871",
     "ops.py": "e6920e84ef2713817071da67d3ef2f8eb4d2427c7cc961ad1c700951738ef536",
-    "attention.py": "4ea56d87439a0e8979ea9f1935a9746e30232ab1a899623bc3ed34ff2c031a8c",
+    "attention.py": "b6224143ca83ac12cb171aaadf2e1d6f4ee31b35dad2bc5fc22c4afb8c0caaf9",
     "families.py": "a9d80a60350e52f1c8c158c6b51fba1f4882f9a8f3669c86c032935bc07c5dea",
     "batch_layout.py": "018cdfe51ae55e766af787cdc14e95e286ec20183278f73920b7cf1ae2dd7a07",
 }
