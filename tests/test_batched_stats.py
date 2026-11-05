@@ -865,3 +865,86 @@ def test_rows_reduced_on_two_archs_never_share_a_lane_id(monkeypatch):
     assert first.lane_id != second.lane_id
     assert second.meta["receipt"]["batched"]["device_arch"] == "cpu-other-isa"
     assert first.meta["reducer_identity"] == second.meta["reducer_identity"]
+
+
+SYNC_ALLOWED = ("eigvalsh_rows", "validate_batch", "finish_rows")
+"""Where the batched reduction may make the host wait for the device: the eigensolver's
+status check, the batch's validation, and the final copies of the features to the host."""
+
+
+def _sync_sites(fn) -> list[str]:
+    """The innermost anamnesis function at each synchronizing CUDA call ``fn`` makes (or, for a
+    call with no anamnesis frame, the innermost frame's file and function)."""
+    import traceback
+    import warnings
+
+    sites: list[str] = []
+
+    def record(message, *args, **kwargs):
+        if "synchroniz" in str(message):
+            stack = traceback.extract_stack()[:-1]
+            frames = [f for f in stack if "anamnesis/extraction" in f.filename]
+            if any(f.name == "set_sync_debug_mode" for f in stack[-3:]):
+                return  # this helper turning the check off
+            if frames:
+                sites.append(frames[-1].name)
+            else:
+                f = next((f for f in reversed(stack) if "warnings" not in f.filename), stack[-1])
+                sites.append(f"(outside) {Path(f.filename).name}:{f.name}")
+
+    with warnings.catch_warnings():  # restores showwarning and the filters on exit
+        warnings.simplefilter("always")
+        warnings.showwarning = record
+        torch.cuda.set_sync_debug_mode("warn")
+        try:
+            fn()
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+    return sites
+
+
+def _stray_syncs(fn) -> set[str]:
+    return {s for s in _sync_sites(fn) if s not in SYNC_ALLOWED}
+
+
+def _on_gpu(row):
+    """A signed row with its surfaces on the GPU, as an engine hands them over."""
+    surfaces = {k: ([t.cuda() for t in v] if isinstance(v, list) else v.cuda())
+                for k, v in row.surfaces.items()}
+    return row.__class__(**{**row.__dict__, "surfaces": surfaces})
+
+
+def _sync_free_reduce(hidden: int):
+    """A warm reducer over rows already on the GPU: what the reduction does per batch, without
+    the one-off uploads of building a lane or moving host rows."""
+    made = [signed_row(n, 3 + n % 7, 900 + n, hidden) for n in (9, 13, 16, 16, 11)]
+    rows, ids = [_on_gpu(r) for r, _ in made], [i for _, i in made]
+    reducer = EngineReducer(lane_for=lanes("cuda", hidden), batched=True,
+                            expected_weights=ENGINE["weights"])
+
+    def run():
+        reducer.reduce(rows, token_ids=ids, engine=ENGINE)  # ends with the copies to the host
+    run()  # builds and uploads the lane's constants once
+    return run
+
+
+@CUDA
+def test_the_batched_reduction_syncs_the_host_only_where_it_must():
+    run = _sync_free_reduce(1536)
+    stray = _stray_syncs(run)
+    assert not stray, sorted(stray)
+
+
+@CUDA
+def test_the_sync_check_bites_on_a_host_read(monkeypatch):
+    from anamnesis.extraction.fast import batched_stats
+
+    original = batched_stats._spectral_summary
+
+    def reads_host(power, freq, bands):
+        float(power.sum())
+        return original(power, freq, bands)
+
+    monkeypatch.setattr(batched_stats, "_spectral_summary", reads_host)
+    run = _sync_free_reduce(1536)
+    assert _stray_syncs(run)

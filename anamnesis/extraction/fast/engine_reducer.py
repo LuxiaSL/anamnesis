@@ -95,6 +95,7 @@ from anamnesis.extraction.fast.batched_stats import (
     block_output_features,
     bucket_width,
     finish_rows,
+    host_tensor,
     take_steps,
 )
 from anamnesis.extraction.fast.external import ExternalCaptureError, RoutingPoint
@@ -391,7 +392,7 @@ def _reduce_uniform(lane: GpuFeatureLane, rows: Sequence[Any], spans: Sequence[R
         keep = [b for b in range(len(rows)) if b not in set(bad)]
         if not keep:
             return results
-        index = torch.as_tensor(keep, device=lane.device)
+        index = host_tensor(keep, torch.long, lane.device)
         stacked = {name: x.index_select(0, index) for name, x in stacked.items()}
     else:
         keep = list(range(len(rows)))

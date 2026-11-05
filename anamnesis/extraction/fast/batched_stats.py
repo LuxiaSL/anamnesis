@@ -273,7 +273,7 @@ class Counts:
     def of(cls, host: Sequence[int], device: torch.device | str, width: int | None = None,
            padded: bool = False) -> "Counts":
         host = tuple(int(c) for c in host)
-        return cls(host, torch.as_tensor(host, dtype=torch.long, device=device), width, padded)
+        return cls(host, host_tensor(host, torch.long, device), width, padded)
 
     @property
     def lo(self) -> int:
@@ -398,7 +398,7 @@ def per_row_index(counts: Counts, key: Any, picks) -> tuple[Tensor | list[int], 
         else:
             width = max(1, max(sizes))
         padded = [p + [p[-1] if p else 0] * (width - len(p)) for p in lists]
-        return (torch.as_tensor(padded, dtype=torch.long, device=device).reshape(len(lists), width),
+        return (host_tensor(padded, torch.long, device).reshape(len(lists), width),
                 Counts.of(sizes, device, width, counts.padded))
     return counts.memo(("index", key), build)
 
@@ -414,6 +414,25 @@ class BlockOutputs:
 
     def row(self, index: int) -> Tensor:
         return self.values[index]
+
+
+def host_tensor(values: Any, dtype: torch.dtype, device: torch.device | str) -> Tensor:
+    """Host data (a list, a tuple) as a tensor on ``device``, without making the host wait for
+    the device: on CUDA the data is staged in pinned memory and copied asynchronously, in
+    stream order. A plain copy from pageable memory would block until the stream drains."""
+    t = torch.tensor(values, dtype=dtype)
+    if torch.device(device).type == "cuda":
+        return t.pin_memory().to(device, non_blocking=True)
+    return t.to(device)
+
+
+@lru_cache(maxsize=None)
+def _stft_cached(device: torch.device) -> tuple[Tensor, Tensor, Tensor, tuple[tuple[int, int], ...]]:
+    """``ops._stft_constants`` on ``device``, made once: the window, its sum and the bins'
+    frequencies (the same bytes as a fresh call), and each band as host ``(first, stop)`` bin
+    bounds, so slicing a band never reads the device."""
+    window, window_sum, freq, bands = _stft_constants(device)
+    return window, window_sum, freq, tuple((int(b[0]), int(b[-1]) + 1) for b in bands)
 
 
 @lru_cache(maxsize=None)
@@ -493,7 +512,7 @@ def _spectrum_rows(x: Tensor) -> Tensor:
     if n < 64:
         x = torch.nn.functional.pad(x, (0, 64 - n))
     extended = torch.nn.functional.pad(x, (32, 32 + (-x.shape[1]) % 32))
-    window, window_sum, freq, bands = _stft_constants(x.device)
+    window, window_sum, freq, bands = _stft_cached(x.device)
     frames = (extended.unfold(1, 64, 32) * window).unsqueeze(2)  # [B, F, 1, 64]
     cos_basis, sin_basis = _dft_basis(x.device)
     shape = (x.shape[0], frames.shape[1], 33, 64)
@@ -507,7 +526,7 @@ def _spectral_summary(power: Tensor, freq: Tensor, bands) -> Tensor:
     p = power / total.clamp_min(1e-30)[:, None]
     centroid = row_sum(p * freq)
     bandwidth = row_sum(p * (freq - centroid[:, None]).square()).sqrt()
-    band_mass = [row_sum(p[:, int(b[0]) : int(b[-1]) + 1].contiguous()) for b in bands]
+    band_mass = [row_sum(p[:, first:stop].contiguous()) for first, stop in bands]
     spectral = torch.stack((centroid, bandwidth, *band_mass), dim=1)
     return torch.where((total < 1e-12)[:, None], spectral.new_zeros(()), spectral)
 
@@ -829,7 +848,7 @@ def block_output_features(lane: GpuFeatureLane, hidden: Tensor, starts: Sequence
     per_layer = max(1, batch * steps * width * 8 * 4)
     chunk = max(1, min(layers, WORKING_BYTES // per_layer))
     table = device_positional_means(pm, device)
-    start_t = torch.as_tensor([int(s) for s in starts], dtype=torch.long, device=device)
+    start_t = host_tensor([int(s) for s in starts], torch.long, device)
     step_t = torch.arange(steps, device=device)[None, :]
     if not counts.uniform(steps):  # a padded step reads its row's last real position
         step_t = torch.minimum(step_t, (counts.dev - 1)[:, None])
@@ -925,7 +944,7 @@ def _schema_order(names: tuple[str, ...], schema: tuple[str, ...], device) -> Te
         raise ValueError(
             f"GPU feature schema mismatch: missing={sorted(missing)}, extra={sorted(extra)}")
     where = {name: i for i, name in enumerate(names)}
-    order = torch.tensor([where[name] for name in schema], dtype=torch.long, device=device)
+    order = host_tensor([where[name] for name in schema], torch.long, device)
     if len(_ORDER) > 64:
         _ORDER.clear()
     _ORDER[key] = (names, schema, order)
@@ -1022,6 +1041,7 @@ def finish_rows(lane: GpuFeatureLane, spans: Sequence[RowSpan], names: tuple[str
 
 
 __all__ = (
+    "host_tensor",
     "ATTENTION_SOURCE_SHA256",
     "BATCHED_FAMILIES",
     "BATCHED_SOURCE_SHA256",

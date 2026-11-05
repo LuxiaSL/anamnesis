@@ -70,6 +70,7 @@ from anamnesis.extraction.fast.batched_stats import (
     _cos,
     _operator_names,
     _rowcos,
+    host_tensor,
     per_row_index,
     stacked,
     take_steps,
@@ -308,7 +309,7 @@ def _gram_split(counts: Counts, n: int):
             if not members:
                 out.append((None, None))
                 continue
-            index = torch.as_tensor(members, dtype=torch.long, device=counts.dev.device)
+            index = host_tensor(members, torch.long, counts.dev.device)
             out.append((index, counts.derive([counts.host[b] for b in members],
                                              counts.dev.index_select(0, index))))
         return tuple(out)
@@ -789,7 +790,7 @@ def routing_features(sampled_layers: Sequence[int], points: Sequence[tuple[str, 
     if len(stats) >= 2:
         layers = [s[0] for s in stats]
         flat = float(np.std(np.asarray(layers, dtype=np.float64))) <= EPS
-        lay = torch.tensor(layers, dtype=torch.float64, device=device)[None].expand(batch, -1)
+        lay = host_tensor(layers, torch.float64, device)[None].expand(batch, -1)
         lay_c = (lay - row_mean(lay.contiguous())[:, None]).contiguous()
         denominator = row_sumsq(lay_c)
         columns = [torch.stack([s[i] for s in stats], dim=1) for i in (1, 2, 3)]
