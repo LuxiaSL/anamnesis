@@ -251,15 +251,29 @@ def _pad_stack(tensors: Sequence[Any], width: int | None, device) -> torch.Tenso
     return out
 
 
+def finite_rows(x: torch.Tensor) -> torch.Tensor:
+    """Whether each row of ``x [B, ...]`` holds only finite values: ``[B]`` bool.
+
+    A row's smallest and largest values are finite exactly when all of its values are: the
+    minimum and maximum carry a NaN through, and an infinity is one of them. Unlike
+    ``torch.isfinite(x)``, which builds a mask (and, for floats, the absolute values) of the
+    whole tensor, this allocates only the ``[B]`` extremes."""
+    if x.numel() == 0:
+        return torch.ones(x.shape[0], dtype=torch.bool, device=x.device)
+    if not x.is_floating_point():
+        return torch.ones(x.shape[0], dtype=torch.bool, device=x.device)
+    lo, hi = torch.aminmax(x.reshape(x.shape[0], -1), dim=1)
+    return torch.isfinite(lo) & torch.isfinite(hi)
+
+
 def validate_batch(rows: Sequence[Any], device,
                    width: int | None = None) -> tuple[dict[str, Any], list[int]]:
     """The surfaces of rows that share a :func:`_shape_key`, stacked on ``device`` (each row's
     steps zero-padded to ``width``, when given), and the indices of rows holding a nonfinite
-    value, found with one device-to-host copy for the whole batch."""
+    value (:func:`finite_rows`), found with one device-to-host copy for the whole batch."""
     stacked = {name: _pad_stack([row.surfaces[name] for row in rows], width, device)
                for name in _FINITE_REFUSALS}
-    flags = torch.stack([torch.isfinite(x).reshape(len(rows), -1).all(dim=1)
-                         for x in stacked.values()]).cpu()
+    flags = torch.stack([finite_rows(x) for x in stacked.values()]).cpu()
     return stacked, [b for b in range(len(rows)) if not bool(flags[:, b].all())]
 
 
