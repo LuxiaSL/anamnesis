@@ -191,7 +191,8 @@ FAMILY_RULES: tuple[FamilyRule, ...] = (
     FamilyRule(family=STORED_FAMILY_ATTENTION_SPECTRAL, prefixes=("spectral_",)),
     FamilyRule(
         family=STORED_FAMILY_ATTENTION_OTHER,
-        prefixes=("attn_entropy_", "head_agreement_", "head_spread_", "head_entropy_var_", "delta_"),
+        prefixes=("attn_entropy_", "head_agreement_", "head_spread_", "head_collision_", "head_entropy_var_",
+                  "delta_"),
     ),
     FamilyRule(family="attn_res", prefixes=("attnres_",)),
     FamilyRule(family="expert_routing", prefixes=("xrt_", "expert_routing_")),  # MoE router
@@ -258,7 +259,7 @@ def _source(n: str) -> Source:
     if n.startswith("gate_"): return Source.gate
     if n.startswith("kv_") or n.startswith("epoch_"): return Source.keys      # key-vector geometry / key-centroid epochs
     if n.startswith(("cache_", "attn_flow_", "attn_entropy_", "head_agreement_", "head_spread_",
-                     "head_entropy_var_", "ph_", "spectral_")):
+                     "head_collision_", "head_entropy_var_", "ph_", "spectral_")):
         return Source.attention   # attention-weight reads, spectral_* among them: the similarity
         # graph `_extract_spectral_features` builds comes from attention distributions, not from
         # hidden states. smoothness is hybrid (attention graph × residual-norm signal) and is read
@@ -329,6 +330,9 @@ def _method(n: str, source: Source) -> Method:
     # the head agreement's kind of operator; "spread" in the geometry keywords would name a
     # key-cloud dispersion instead.
     if n.startswith("head_spread_"): return Method.distributional
+    # The heads' mean collision mass (sum of p^2, the Renyi-2 concentration of their
+    # distributions) is the spread's first term: a distributional read too.
+    if n.startswith("head_collision_"): return Method.distributional
     if "spectral" in n or "fiedler" in n or "hfer" in n: return Method.spectral
     if "_norm" in n: return Method.magnitude                       # activation_norm / delta_norm — before distributional
     if any(k in n for k in _GEOM): return Method.geometry

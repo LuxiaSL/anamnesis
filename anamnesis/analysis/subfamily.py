@@ -182,6 +182,7 @@ _BASE_RULES: tuple[SignalRule, ...] = (
     SignalRule(subfamily="attn_entropy", marks=("attn_entropy",)),
     SignalRule(subfamily="head_agreement", marks=("head_agreement",)),
     SignalRule(subfamily="head_spread", marks=("head_spread",)),
+    SignalRule(subfamily="head_collision", marks=("head_collision",)),
     SignalRule(subfamily="head_entropy_var", marks=("head_entropy_var",)),
     SignalRule(subfamily="delta_cosine", marks=("delta_cosine",)),
     SignalRule(subfamily="delta_norm", marks=("delta_norm",)),

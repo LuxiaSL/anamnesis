@@ -167,10 +167,12 @@ def _strided(counts: Counts, key: str, stride_of) -> tuple[Tensor | list[int], C
 
 
 def _entropy_features(cols: _Columns, head_entropy: Tensor, mixture: Tensor,
-                      counts: Counts, mode: str = "jsd") -> None:
+                      counts: Counts, mode: str = "jsd", spread: Tensor | None = None,
+                      sampled: Sequence[int] = ()) -> None:
     """Every layer's entropy summary and its heads' disagreement: the head agreement from
-    ``mixture = mean_entropy`` (``mode`` ``jsd``), or the heads' spread from
-    ``mixture = head_spread`` and the across-head variance of their entropies (``spread``)."""
+    ``mixture = mean_entropy`` (``mode`` ``jsd``); or (``spread``) the heads' collision mass
+    from ``mixture = head_collision`` and the across-head variance of their entropies at every
+    layer, and their spread from ``spread [B, t, S]`` at the ``sampled`` layers."""
     batch, t, layers, heads = head_entropy.shape
     ent = head_entropy
     if counts.uniform(t):
@@ -188,33 +190,41 @@ def _entropy_features(cols: _Columns, head_entropy: Tensor, mixture: Tensor,
         stride = max(1, t // 30) if t > 30 else 1
         h_mix = mixture[:, ::stride]  # [B, t'', L]
         h_ent = ent[:, ::stride].contiguous()  # [B, t'', L, H]
+        h_spread = spread[:, ::stride] if spread is not None else None  # [B, t'', S]
         agreement_counts = None
     else:
         index, agreement_counts = _strided(counts, "agreement-sample",
                                            lambda n: max(1, n // 30) if n > 30 else 1)
         h_mix = take_steps(mixture, index)
         h_ent = take_steps(ent, index).contiguous()
+        h_spread = take_steps(spread, index) if spread is not None else None
     if mode == "spread":
         # The across-head variance about the head mean, in float64 as AttentionReducer.put_spread.
         h64 = h_ent.double()
         variance = row_mean((h64 - row_mean(h64)[..., None]).square()).float()
-        series = {"head_spread": h_mix.float(), "head_entropy_var": variance}
+        series = {"head_collision": h_mix.float(), "head_entropy_var": variance}
     else:
         h_mean = h_mix.double()
         h_heads = row_mean(h_ent).double()
         series = {"head_agreement": (1 - (h_mean - h_heads).clamp_min(0)
                                      / max(math.log(heads), 1e-12)).float()}
-    stats = {}
-    for name, value in series.items():
-        value = value.transpose(1, 2).contiguous()  # [B, L, t'']
+    def moments(value: Tensor) -> tuple[Tensor, Tensor]:
+        value = value.transpose(1, 2).contiguous()  # [B, L or S, t'']
         lengths = agreement_counts.lengths(value) if agreement_counts is not None else None
-        stats[name] = (row_mean(value, lengths=lengths), row_std(value, lengths=lengths))
+        return row_mean(value, lengths=lengths), row_std(value, lengths=lengths)
+
+    stats = {name: moments(value) for name, value in series.items()}
+    at_sampled = moments(h_spread.float()) if mode == "spread" else None
     for layer in range(layers):
         cols.put(f"attn_entropy_mean_L{layer}", ent_mean[:, layer])
         cols.put(f"attn_entropy_std_L{layer}", ent_std[:, layer])
         for name, (mean_v, std_v) in stats.items():
             cols.put(f"{name}_mean_L{layer}", mean_v[:, layer])
             cols.put(f"{name}_std_L{layer}", std_v[:, layer])
+        if at_sampled is not None and layer in sampled:
+            s = list(sampled).index(layer)
+            cols.put(f"head_spread_mean_L{layer}", at_sampled[0][:, s])
+            cols.put(f"head_spread_std_L{layer}", at_sampled[1][:, s])
 
 
 SPECTRAL_FROM_EIGENVALUES = ("spectral_fiedler", "spectral_hfer", "spectral_spectral_entropy")
@@ -463,17 +473,18 @@ def mean_rows_cover(width: int, starts: Sequence[int] | Tensor, counts: Counts) 
 
 def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tensor,
                        head_scalars: Tensor, mean_rows: Tensor,
-                       starts: Sequence[int] | Tensor, counts: Counts | None = None
-                       ) -> AttentionFeatures:
+                       starts: Sequence[int] | Tensor, counts: Counts | None = None,
+                       head_spread: Tensor | None = None) -> AttentionFeatures:
     """The attention family of ``B`` rows.
 
     The tensors are the engine's statistics surfaces, stacked: ``head_entropy [B, steps,
-    layers, heads]``, ``mean_entropy [B, steps, layers]``, ``head_scalars [B, steps, sampled,
-    3, heads]`` (prompt mass, recency mass, sink) and ``mean_rows [B, steps, sampled, W]``,
-    with ``W`` at least each row's span end less one; ``starts[b]`` is row ``b``'s prompt
-    length (host values, or a device tensor checked before) and ``counts`` each row's own step count (default: every row fills ``steps``), the
-    rest of its steps being padding. Each is read in float32, as the per-row reduction reads
-    it.
+    layers, heads]``, the per-layer ``mixture [B, steps, layers]`` (``mean_entropy``, or
+    ``head_collision`` for a ``spread`` lane), ``head_scalars [B, steps, sampled, 3, heads]``
+    (prompt mass, recency mass, sink), ``mean_rows [B, steps, sampled, W]`` and, for a ``spread``
+    lane, ``head_spread [B, steps, sampled]``, with ``W`` at least each row's span end less one;
+    ``starts[b]`` is row ``b``'s prompt length (host values, or a device tensor checked before)
+    and ``counts`` each row's own step count (default: every row fills ``steps``), the rest of its
+    steps being padding. Each is read in float32, as the per-row reduction reads it.
 
     Raises
     ------
@@ -493,8 +504,12 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
         raise ExternalCaptureError("a sampled layer lies outside the capture")
     _check("head_entropy", head_entropy, (batch, t, layers, heads))
     mode = head_disagreement(lane.config)
-    mixture_name = "head_spread" if mode == "spread" else "mean_entropy"
+    mixture_name = "head_collision" if mode == "spread" else "mean_entropy"
     _check(mixture_name, mixture, (batch, t, layers))
+    if mode == "spread":
+        if head_spread is None:
+            raise ExternalCaptureError("head_spread is missing; this lane reads it")
+        _check("head_spread", head_spread, (batch, t, len(sampled)))
     _check("head_scalars", head_scalars, (batch, t, len(sampled), 3, heads))
     _check("mean_rows", mean_rows, (batch, t, len(sampled), None))
     device = lane.device
@@ -505,9 +520,10 @@ def attention_features(lane: GpuFeatureLane, head_entropy: Tensor, mixture: Tens
         raise ExternalCaptureError(f"mean_rows of width {width} do not cover every row's span")
     head_entropy = head_entropy.to(device).float()
     mixture = mixture.to(device).float()
+    spread = head_spread.to(device).float() if mode == "spread" else None
     head_scalars = head_scalars.to(device).float()
     cols = _Columns()
-    _entropy_features(cols, head_entropy, mixture, counts, mode)
+    _entropy_features(cols, head_entropy, mixture, counts, mode, spread, sampled)
 
     start_t = start_tensor(starts, device)
     lengths = start_t[:, None] + torch.arange(1, t + 1, device=device)[None, :]  # [B, t]

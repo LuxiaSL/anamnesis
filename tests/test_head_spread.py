@@ -1,17 +1,23 @@
 """The spread reading of the heads' disagreement (``head_disagreement = "spread"``).
 
-A lane whose preset reads the spread replaces the head agreement with two pairs per layer.
-The first is the heads' L2 spread around their mean row, ``mean_h |p_h - mean_g p_g|^2``, the
-statistic a capture can stream (both its terms are running moments of the per-head rows). The
-second is the across-head variance of their entropies. Checked here:
+A lane whose preset reads the spread replaces the head agreement with one column set for every capture, the unfused
+attention and the fused one alike:
 
-- the schema names the four columns in the agreement's place, and nothing else moves;
-- the reference extractor's values are the definitions;
-- the capture's form (sums of squares from each head's final row) is the same statistic;
-- a signed row carrying ``head_spread`` reduces, per row and batched, to the features of the
+- at every layer, the heads' mean collision mass ``mean_h sum_c p_hc^2`` and the across-head variance of their
+  entropies, each as a mean and deviation over the sampled steps. Both stream inside an attention kernel;
+- at each sampled layer, the heads' L2 spread around their mean row, ``mean_h |p_h - mean_g p_g|^2``: the collision mass
+  less the mean row's, which a capture forms there anyway.
+
+Checked here:
+
+- the schema names these columns in the agreement's place, and nothing else moves;
+- the reference extractor's values are the definitions, the spread at sampled layers only;
+- the capture's forms (sums of squares from each head's final row) are the same statistics;
+- a signed row carrying ``head_collision`` and ``head_spread`` reduces, per row and batched, to the features of the
   same forward's weights, within the statistics contract's tolerance;
-- a row without the surface is refused naming it, the lane has its own id, and the default
-  reading keeps every name and the lane id it had.
+- a row without either surface is refused naming it; a mis-shaped spread is refused;
+- the lane has its own id, and the default reading keeps every name and the lane id it had;
+- an export carries the surfaces its row was signed with.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ import torch
 import test_vllm_readout as readout
 from anamnesis.extraction.fast.engine_reducer import EngineReducer, surfaces_for
 from anamnesis.extraction.fast.external import ExternalCaptureError
-from anamnesis.extraction.fast.external_stats import stats_from_weights
+from anamnesis.extraction.fast.external_stats import CONTRACT_SPREAD, stats_from_weights
 from anamnesis.extraction.fast.schema import resolve_gpu_schema
 from anamnesis.extraction.state_extractor import (
     RawGenerationData,
@@ -55,18 +61,24 @@ def spread_lanes(monkeypatch):
     monkeypatch.setattr(readout, "lane_configuration", configured)
 
 
-def test_the_schema_names_the_spread_in_the_agreements_place():
-    extraction, families, components = readout.lane_configuration((0, 1, 2))
+SAMPLED = (0, 2)
+"""Sampled layers that leave layer 1 unsampled: the spread's columns are the sampled layers' only."""
+
+
+def test_the_schema_names_the_spread_layout_in_the_agreements_place():
+    extraction, families, components = readout.lane_configuration(SAMPLED)
     jsd = list(resolve_gpu_schema(readout.N_LAYERS, 16, extraction, families, components).feature_names)
     extraction._head_disagreement = "spread"
     spread = list(resolve_gpu_schema(readout.N_LAYERS, 16, extraction, families, components).feature_names)
     assert not [n for n in spread if n.startswith("head_agreement_")]
     for layer in range(readout.N_LAYERS):
-        i = jsd.index(f"head_agreement_mean_L{layer}")
-        assert jsd[i:i + 2] == [f"head_agreement_mean_L{layer}", f"head_agreement_std_L{layer}"]
+        assert f"head_collision_mean_L{layer}" in spread and f"head_entropy_var_std_L{layer}" in spread
+        assert (f"head_spread_mean_L{layer}" in spread) == (layer in SAMPLED)
     rest = [n for n in jsd if not n.startswith("head_agreement_")]
-    assert [n for n in spread if not n.startswith(("head_spread_", "head_entropy_var_"))] == rest
-    assert len(spread) == len(jsd) + 2 * readout.N_LAYERS
+    ours = ("head_collision_", "head_spread_", "head_entropy_var_")
+    assert [n for n in spread if not n.startswith(ours)] == rest
+    assert len(spread) == len(jsd) + 2 * readout.N_LAYERS + 2 * len(SAMPLED)
+    assert CONTRACT_SPREAD[:2] == ("head_entropy", "head_collision") and CONTRACT_SPREAD[-1] == "head_spread"
 
 
 def _raw(seed=0, steps=12, layers=3, heads=4, prompt=5):
@@ -82,37 +94,49 @@ def _raw(seed=0, steps=12, layers=3, heads=4, prompt=5):
 
 
 def test_the_reference_computes_the_definitions():
-    extraction, _, _ = readout.lane_configuration((0, 1, 2))
+    extraction, _, _ = readout.lane_configuration(SAMPLED)
     extraction._head_disagreement = "spread"
     data = _raw()
     values, names = extract_attention_and_deltas(data, extraction)
     got = dict(zip(names, values))
     for layer in range(3):
-        spreads, variances = [], []
+        collisions, spreads, variances = [], [], []
         for a in data.attentions:  # 12 steps: every step is sampled
             p = a[layer].astype(np.float64)
             p = p / p.sum(axis=1, keepdims=True)
+            collisions.append((p * p).sum(axis=1).mean())
             spreads.append(((p - p.mean(axis=0)) ** 2).sum(axis=1).mean())
             variances.append(np.var(_batch_entropy(p)))
-        np.testing.assert_allclose(got[f"head_spread_mean_L{layer}"], np.mean(spreads), rtol=1e-6)
-        np.testing.assert_allclose(got[f"head_spread_std_L{layer}"], np.std(np.float32(spreads)), rtol=1e-5)
+        np.testing.assert_allclose(got[f"head_collision_mean_L{layer}"], np.mean(collisions), rtol=1e-6)
+        np.testing.assert_allclose(got[f"head_collision_std_L{layer}"], np.std(np.float32(collisions)), rtol=1e-5)
         np.testing.assert_allclose(got[f"head_entropy_var_mean_L{layer}"], np.mean(variances), rtol=1e-6)
+        if layer in SAMPLED:
+            np.testing.assert_allclose(got[f"head_spread_mean_L{layer}"], np.mean(spreads), rtol=1e-6)
+            np.testing.assert_allclose(got[f"head_spread_std_L{layer}"], np.std(np.float32(spreads)), rtol=1e-5)
+        else:
+            assert f"head_spread_mean_L{layer}" not in got
 
 
-def test_the_captures_form_is_the_same_statistic():
-    """(1/H) sum_h sum_c p_hc^2 - sum_c pbar_c^2, the sums a stats pass keeps from each head's
-    final row, equals the spread about the mean row."""
-    lane, row, token_ids, full, _ = signed_example(steps=16, start=4)
+def test_the_captures_forms_are_the_same_statistics():
+    """(1/H) sum_h sum_c p_hc^2 is the collision mass at every layer; less sum_c pbar_c^2 it is the spread about the
+    mean row, at the sampled layers: the sums a stats pass keeps from each head's final row."""
+    lane, row, token_ids, full, _ = signed_example(steps=16, start=4, sampled=SAMPLED)
     begin, end = row.start, len(token_ids)
     stats = stats_from_weights(full, begin, end, lane.config.sampled_layers)
+    assert stats["head_collision"].shape == (end - begin - 1, readout.N_LAYERS)
+    assert stats["head_spread"].shape == (end - begin - 1, len(SAMPLED))
     for layer, w in enumerate(full):
         w = w if w.ndim == 4 else w.unsqueeze(0)
         a = w[0, :, begin:end - 1, :end].permute(1, 0, 2).double()
         valid = torch.arange(end)[None, :] < torch.arange(begin + 1, end)[:, None]
         p = a * valid[:, None, :]
         p = p / p.sum(dim=-1, keepdim=True)
-        form = (p * p).sum(dim=-1).mean(dim=1) - (p.mean(dim=1) ** 2).sum(dim=-1)
-        torch.testing.assert_close(stats["head_spread"][:, layer].double(), form, rtol=1e-5, atol=1e-7)
+        collision = (p * p).sum(dim=-1).mean(dim=1)
+        torch.testing.assert_close(stats["head_collision"][:, layer].double(), collision, rtol=1e-5, atol=1e-7)
+        if layer in SAMPLED:
+            form = collision - (p.mean(dim=1) ** 2).sum(dim=-1)
+            torch.testing.assert_close(stats["head_spread"][:, SAMPLED.index(layer)].double(), form,
+                                       rtol=1e-5, atol=1e-7)
 
 
 def _spread_row(steps, start, sampled):
@@ -120,6 +144,7 @@ def _spread_row(steps, start, sampled):
     stats = stats_from_weights(full, row.start, len(token_ids), lane.config.sampled_layers)
     surfaces = dict(row.surfaces)
     del surfaces["mean_entropy"]
+    surfaces["head_collision"] = stats["head_collision"]
     surfaces["head_spread"] = stats["head_spread"]
     row.surfaces = surfaces
     return lane, row, token_ids, full, capture
@@ -132,24 +157,38 @@ def test_a_spread_row_reduces_to_the_weights_features(spread_lanes, steps, start
     from anamnesis.extraction.fast.engine_reducer import routing_points
 
     lane, row, token_ids, full, capture = _spread_row(steps, start, sampled)
-    assert "head_spread" in surfaces_for(lane) and "mean_entropy" not in surfaces_for(lane)
+    assert {"head_collision", "head_spread"} <= set(surfaces_for(lane)) and "mean_entropy" not in surfaces_for(lane)
     got = EngineReducer(lane_for=lambda s: lane, batched=batched, expected_weights=WEIGHTS).reduce(
         [row], token_ids=[token_ids], engine=ENGINE)[0]
+    assert not isinstance(got, Exception), got
     reference = weights_reduction(lane, capture, full, start=row.start, end=len(token_ids),
                                   routing=routing_points(row), committed=row.surfaces["committed"])
     names = list(reference.feature_names)
     assert got.meta["feature_names"] == names
-    assert [n for n in names if n.startswith("head_spread_")] and not [n for n in names
-                                                                       if n.startswith("head_agreement_")]
+    assert sorted(int(n.rsplit("_L", 1)[1]) for n in names if n.startswith("head_spread_mean_")) == sorted(sampled)
+    assert len([n for n in names if n.startswith("head_collision_mean_")]) == readout.N_LAYERS
+    assert not [n for n in names if n.startswith("head_agreement_")]
     np.testing.assert_allclose(got.features, reference.features, **TOLERANCE)
 
 
-def test_a_spread_lane_refuses_a_row_without_its_surface(spread_lanes):
+@pytest.mark.parametrize("missing", ["head_collision", "head_spread"])
+@pytest.mark.parametrize("batched", [False, True], ids=["per-row", "batched"])
+def test_a_spread_lane_refuses_a_row_without_its_surfaces(spread_lanes, missing, batched):
     lane, row, token_ids, _, _ = _spread_row(16, 4, (0, 2))
-    del row.surfaces["head_spread"]
-    with pytest.raises(ExternalCaptureError, match="head_spread"):
-        EngineReducer(lane_for=lambda s: lane, batched=False).reduce(
+    del row.surfaces[missing]
+    with pytest.raises(ExternalCaptureError, match=missing):
+        EngineReducer(lane_for=lambda s: lane, batched=batched).reduce(
             [row], token_ids=[token_ids], engine=ENGINE)
+
+
+def test_a_spread_lane_refuses_an_every_layer_spread(spread_lanes):
+    """The #87 layout (the spread at every layer) is not this lane's: it is refused, not read at the wrong layers."""
+    lane, row, token_ids, full, _ = _spread_row(16, 4, (0, 2))
+    row.surfaces["head_spread"] = torch.zeros(16, readout.N_LAYERS)
+    for batched in (False, True):
+        with pytest.raises(ExternalCaptureError, match=r"head_spread must be \[16, 2\]"):
+            EngineReducer(lane_for=lambda s: lane, batched=batched).reduce(
+                [row], token_ids=[token_ids], engine=ENGINE)
 
 
 def test_the_spread_lane_has_its_own_id_and_the_default_keeps_its(monkeypatch):
@@ -170,7 +209,7 @@ def test_the_spread_lane_has_its_own_id_and_the_default_keeps_its(monkeypatch):
     assert again.lane_id == jsd_lane.lane_id and again.names == jsd_names
 
 
-def test_an_export_carries_the_mixture_surface_its_row_was_signed_with(tmp_path, spread_lanes):
+def test_an_export_carries_the_surfaces_its_row_was_signed_with(tmp_path, spread_lanes):
     from anamnesis.extraction.fast.replay_export import ReplayExportError, load_export, save_export
 
     lane, row, token_ids, _, _ = _spread_row(16, 4, (0, 2))
@@ -182,7 +221,11 @@ def test_an_export_carries_the_mixture_surface_its_row_was_signed_with(tmp_path,
                   route_sources=[list(p) for p in row.route_sources], final_sources=int(row.final_sources))
     save_export(tmp_path / "row", row, header)
     _, loaded = load_export(tmp_path / "row")
-    assert "head_spread" in loaded.surfaces and "mean_entropy" not in loaded.surfaces
-    row.surfaces["mean_entropy"] = row.surfaces["head_spread"]
+    assert {"head_collision", "head_spread"} <= set(loaded.surfaces) and "mean_entropy" not in loaded.surfaces
+    spread = row.surfaces.pop("head_spread")
+    with pytest.raises(ReplayExportError, match="head_spread"):
+        save_export(tmp_path / "no-spread", row, header)
+    row.surfaces["head_spread"] = spread
+    row.surfaces["mean_entropy"] = row.surfaces["head_collision"]
     with pytest.raises(ReplayExportError, match="one of"):
         save_export(tmp_path / "both", row, header)

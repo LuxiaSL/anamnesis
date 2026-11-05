@@ -640,13 +640,20 @@ def head_disagreement(config: ExtractionConfig) -> str:
 def _disagreement_names(config: ExtractionConfig, layer: int) -> list[str]:
     """Block 2.2's names at one layer.
 
-    ``jsd``: the head agreement's mean and deviation over the sampled steps. ``spread``: the
-    heads' L2 spread around their mean row, ``mean_h |p_h - mean_g p_g|^2``, and the
-    across-head variance of their entropies, each as a mean and deviation over the same steps.
+    ``jsd``: the head agreement's mean and deviation over the sampled steps. ``spread`` (one
+    column set for every capture, fused attention or unfused): at every layer the heads'
+    collision mass ``mean_h sum_c p_hc^2`` and the across-head variance of their entropies;
+    at a sampled layer also the heads' L2 spread around their mean row,
+    ``mean_h |p_h - mean_g p_g|^2`` (the collision mass less the mean row's). Each is a mean
+    and deviation over the same steps. Every term streams inside an attention kernel except the
+    mean row's, which a capture already forms at the sampled layers.
     """
     if head_disagreement(config) == "spread":
-        return [f"head_spread_mean_L{layer}", f"head_spread_std_L{layer}",
-                f"head_entropy_var_mean_L{layer}", f"head_entropy_var_std_L{layer}"]
+        names = [f"head_collision_mean_L{layer}", f"head_collision_std_L{layer}",
+                 f"head_entropy_var_mean_L{layer}", f"head_entropy_var_std_L{layer}"]
+        if layer in config.sampled_layers:
+            names += [f"head_spread_mean_L{layer}", f"head_spread_std_L{layer}"]
+        return names
     return [f"head_agreement_mean_L{layer}", f"head_agreement_std_L{layer}"]
 
 
@@ -659,8 +666,9 @@ def extract_attention_and_deltas(
     Returns (feature_vector, feature_names), both of length
     ``4 * num_layers + 3 * (num_layers - 1) + 4 * len(config.sampled_layers)`` —
     221 at 28 layers with the 7 sampled layers of the default preset. A configuration
-    whose ``head_disagreement`` is ``spread`` reads the heads' spread and the variance of
-    their entropies in place of the head agreement, four values per layer instead of two
+    whose ``head_disagreement`` is ``spread`` reads, in place of the head agreement, the
+    heads' collision mass and the variance of their entropies at every layer (four values
+    instead of two) and their spread at each sampled layer (two more)
     (:func:`_disagreement_names`).
 
     With no attention steps the names and the length are unchanged and every value is
@@ -717,19 +725,24 @@ def extract_attention_and_deltas(
     # ── 2.2 Attention Head Agreement (or Spread) Per Layer ──
     agreement_sample_steps = list(range(0, T, max(1, T // 30))) if T > 30 else list(range(T))
     max_jsd = float(np.log(num_heads)) if num_heads > 1 else 1.0
+    sampled_set = set(config.sampled_layers)
     for l in (range(num_layers) if head_disagreement(config) == "spread" else ()):
-        spreads: list[float] = []
+        collisions: list[float] = []
         variances: list[float] = []
+        spreads: list[float] = []
         for t in agreement_sample_steps:
             attn = data.attentions[t][l].astype(np.float64)  # [num_heads, seq_len_t]
             attn_norm = attn / np.maximum(attn.sum(axis=1, keepdims=True), 1e-12)
-            mean_dist = attn_norm.mean(axis=0, keepdims=True)
-            spreads.append(float(((attn_norm - mean_dist) ** 2).sum(axis=1).mean()))
+            collisions.append(float((attn_norm ** 2).sum(axis=1).mean()))
             variances.append(float(_batch_entropy(attn_norm).var()))
-        spread_arr = np.array(spreads, dtype=np.float32)
-        var_arr = np.array(variances, dtype=np.float32)
-        features.extend([float(spread_arr.mean()), float(spread_arr.std()),
-                         float(var_arr.mean()), float(var_arr.std())])
+            if l in sampled_set:
+                mean_dist = attn_norm.mean(axis=0, keepdims=True)
+                spreads.append(float(((attn_norm - mean_dist) ** 2).sum(axis=1).mean()))
+        values = [np.array(collisions, dtype=np.float32), np.array(variances, dtype=np.float32)]
+        if l in sampled_set:
+            values.append(np.array(spreads, dtype=np.float32))
+        for arr in values:
+            features.extend([float(arr.mean()), float(arr.std())])
         names.extend(_disagreement_names(config, l))
     for l in (range(num_layers) if head_disagreement(config) == "jsd" else ()):
         agreements_list: list[float] = []

@@ -174,10 +174,12 @@ class ModelPreset(BaseModel):
         description=(
             "How the attention block reads the heads' disagreement: 'jsd', the head agreement "
             "1 - (H(mean_h p_h) - mean_h H(p_h)) / ln H, which needs the entropy of the "
-            "head-mean row; 'spread', the heads' L2 spread around their mean distribution, "
-            "mean_h |p_h - mean_g p_g|^2, with the across-head variance of their entropies. "
-            "Both terms of the spread are running moments of the per-head rows, so a capture "
-            "can stream them; a lane reading a 'spread' preset has its own names and lane id"
+            "head-mean row; 'spread', at every layer the heads' collision mass "
+            "mean_h sum_c p_hc^2 with the across-head variance of their entropies, and at each "
+            "sampled layer their L2 spread around their mean distribution, "
+            "mean_h |p_h - mean_g p_g|^2. Every term but the mean row's streams inside an "
+            "attention kernel, and a capture forms the mean row at the sampled layers anyway; "
+            "a lane reading a 'spread' preset has its own names and lane id"
         ),
     )
     late_layer_cutoff: int = Field(ge=0, description="At or above this a layer counts as late")
