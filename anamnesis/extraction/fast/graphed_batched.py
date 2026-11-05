@@ -37,10 +37,12 @@ graph pools, the least recently used evicted first. It is not thread-safe.
 from __future__ import annotations
 
 import time
+import traceback
 import warnings
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -148,6 +150,12 @@ class BatchedGraphStats:
     solver_cuts: dict[str, int] = field(default_factory=dict)
 
 
+def _where(exc: BaseException) -> str:
+    """The innermost frame of ``exc``'s traceback outside the guard that raised it: the call that broke the capture."""
+    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.name not in ("host_tensor", "host", "lo", "hi")]
+    return f"{Path(frames[-1].filename).name}:{frames[-1].lineno} in {frames[-1].name}" if frames else "?"
+
+
 def _bitwise(a: Any, b: Any) -> list[str]:
     """Where two :class:`FamilyCore` differ (empty when every name and byte agree)."""
     out = []
@@ -250,7 +258,7 @@ class BatchedGraphCache:
             tape.replay()
             replayed = core.rows(rows)
         except Exception as exc:  # any capture failure leaves this shape eager
-            self._refuse(key, f"capture: {type(exc).__name__}: {exc}")
+            self._refuse(key, f"capture: {type(exc).__name__}: {exc} (at {_where(exc)})")
             torch.cuda.synchronize(lane.device)
             return eager()
         reference = eager()

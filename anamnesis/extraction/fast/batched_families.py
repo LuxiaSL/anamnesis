@@ -56,6 +56,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import combinations
 
 import numpy as np
@@ -324,6 +325,13 @@ def _fourth_masked(x: Tensor, counts: Counts) -> Tensor:
     if over_steps is None:
         return over_columns
     return torch.where(counts.dev >= n, over_columns, over_steps)
+
+
+@lru_cache(maxsize=None)
+def _layer_table(layers: tuple[int, ...], device: torch.device) -> Tensor:
+    """The stat layers as float64 on ``device``, uploaded once per (layers, device): a lane constant, so a captured
+    graph reads the same buffer at every replay."""
+    return host_tensor(list(layers), torch.float64, device)
 
 
 def _gram_split(counts: Counts, n: int):
@@ -815,7 +823,7 @@ def routing_features(sampled_layers: Sequence[int], points: Sequence[tuple[str, 
     if len(stats) >= 2:
         layers = [s[0] for s in stats]
         flat = float(np.std(np.asarray(layers, dtype=np.float64))) <= EPS
-        lay = host_tensor(layers, torch.float64, device)[None].expand(batch, -1)
+        lay = _layer_table(tuple(int(x) for x in layers), torch.device(device))[None].expand(batch, -1)
         lay_c = (lay - row_mean(lay.contiguous())[:, None]).contiguous()
         denominator = row_sumsq(lay_c)
         columns = [torch.stack([s[i] for s in stats], dim=1) for i in (1, 2, 3)]
